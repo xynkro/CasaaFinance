@@ -97,3 +97,11 @@ body {
 .glow-green { box-shadow: 0 0 12px rgba(16,185,129,0.3), inset 0 1px 0 rgba(16,185,129,0.1); }
 .glow-yellow { box-shadow: 0 0 12px rgba(234,179,8,0.3), inset 0 1px 0 rgba(234,179,8,0.1); }
 .glow-red { box-shadow: 0 0 12px rgba(239,68,68,0.3), inset 0 1px 0 rgba(239,68,68,0.1); }
+
+/* Hide scrollbar but allow scroll */
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Safe area padding */
+.pt-safe-top { padding-top: env(safe-area-inset-top, 0px); }
+.pb-safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }

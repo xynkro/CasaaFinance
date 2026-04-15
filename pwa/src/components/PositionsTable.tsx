@@ -1,0 +1,84 @@
+import type { PositionRow } from "../data";
+
+function fmt(v: string, prefix = "$"): string {
+  const n = Number(v);
+  if (isNaN(n)) return "—";
+  return `${prefix}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function pctFmt(v: string): { text: string; positive: boolean } {
+  const n = Number(v);
+  if (isNaN(n)) return { text: "—", positive: true };
+  return {
+    text: `${(n * 100).toFixed(1)}%`,
+    positive: n >= 0,
+  };
+}
+
+export function PositionsTable({ positions, currency }: { positions: PositionRow[]; currency: "USD" | "SGD" }) {
+  const prefix = currency === "SGD" ? "S$" : "$";
+
+  if (!positions.length) {
+    return (
+      <div className="glass rounded-2xl p-5">
+        <p className="text-sm text-slate-500">No positions data yet</p>
+      </div>
+    );
+  }
+
+  // Sort by market value descending
+  const sorted = [...positions].sort((a, b) => Number(b.mkt_val) - Number(a.mkt_val));
+
+  return (
+    <div className="glass rounded-2xl overflow-hidden">
+      <div className="px-5 pt-4 pb-2">
+        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">Positions</h3>
+      </div>
+
+      <div className="divide-y divide-white/5">
+        {sorted.map((pos) => {
+          const upl = Number(pos.upl);
+          const weight = pctFmt(pos.weight);
+          const isUp = upl >= 0;
+
+          return (
+            <div key={pos.ticker} className="px-5 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                {/* Ticker badge */}
+                <div className="w-10 h-10 rounded-xl bg-slate-700/50 flex items-center justify-center shrink-0">
+                  <span className="text-xs font-bold text-slate-200">
+                    {pos.ticker.slice(0, 4)}
+                  </span>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-100">{pos.ticker}</div>
+                  <div className="text-xs text-slate-500">
+                    {Number(pos.qty).toFixed(0)} shares @ {fmt(pos.avg_cost, prefix)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-right shrink-0 ml-3">
+                <div className="text-sm font-semibold text-slate-100 tabular-nums">
+                  {fmt(pos.mkt_val, prefix)}
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <span
+                    className={`text-xs font-medium tabular-nums ${
+                      isUp ? "text-emerald-400" : "text-red-400"
+                    }`}
+                  >
+                    {isUp ? "+" : ""}{fmt(pos.upl, "")}
+                  </span>
+                  <span className="text-[10px] text-slate-500 tabular-nums">
+                    {weight.text}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

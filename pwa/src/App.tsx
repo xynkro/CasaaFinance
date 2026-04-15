@@ -1,14 +1,21 @@
 import { useEffect, useState } from "react";
 import { fetchDashboard, type DashboardData } from "./data";
 import { PinGate, usePinAuth } from "./PinGate";
-import { DailyBriefCard } from "./cards/DailyBriefCard";
-import { PnlCard } from "./cards/PnlCard";
-import { HouseholdCard } from "./cards/HouseholdCard";
+import { useSettings } from "./settings";
+import { TabBar } from "./components/TabBar";
+import { SwipeContainer } from "./components/SwipeContainer";
+import { HomePage } from "./pages/HomePage";
+import { PortfolioPage } from "./pages/PortfolioPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { RefreshCw } from "lucide-react";
 
+const TAB_TITLES = ["Home", "Caspar", "Sarah", "Settings"];
+
 function Dashboard() {
+  const { settings, update: updateSettings } = useSettings();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState(settings.defaultTab);
 
   const load = () => {
     setLoading(true);
@@ -20,47 +27,63 @@ function Dashboard() {
 
   useEffect(load, []);
 
+  const handleLogout = () => {
+    localStorage.removeItem("casaa_pin_ok");
+    window.location.reload();
+  };
+
   return (
-    <div className="bg-mesh min-h-screen px-4 pt-safe-top pb-10">
+    <div className="bg-mesh min-h-screen pb-20">
       {/* Header */}
-      <header className="flex items-center justify-between py-5">
-        <div>
-          <h1 className="text-xl font-bold text-white tracking-tight">Casaa Finance</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Portfolio Dashboard</p>
+      <header className="sticky top-0 z-40 px-4">
+        <div className="flex items-center justify-between py-4">
+          <div>
+            <h1 className="text-lg font-bold text-white tracking-tight">{TAB_TITLES[tab]}</h1>
+            <p className="text-[10px] text-slate-500 mt-0.5">Casaa Finance</p>
+          </div>
+          {tab !== 3 && (
+            <button
+              onClick={load}
+              disabled={loading}
+              className="p-2.5 rounded-xl glass text-slate-400 hover:text-white active:scale-95 transition-all disabled:opacity-40"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            </button>
+          )}
         </div>
-        <button
-          onClick={load}
-          disabled={loading}
-          className="p-2.5 rounded-xl glass text-slate-400 hover:text-white active:scale-95 transition-all disabled:opacity-40"
-        >
-          <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-        </button>
       </header>
 
       {data?.error && (
-        <div className="mb-4 rounded-xl glass border-red-500/30 p-3 text-sm text-red-300 fade-up">
+        <div className="mx-4 mb-4 rounded-xl glass border-red-500/30 p-3 text-sm text-red-300 fade-up">
           {data.error}
         </div>
       )}
 
-      <div className="flex flex-col gap-4">
-        <div className="fade-up fade-up-1">
-          <DailyBriefCard row={data?.daily ?? null} loading={loading && !data} />
-        </div>
-        <div className="fade-up fade-up-2">
-          <PnlCard label="Caspar" currency="USD" snapshot={data?.caspar ?? null} loading={loading && !data} />
-        </div>
-        <div className="fade-up fade-up-3">
-          <PnlCard label="Sarah" currency="SGD" snapshot={data?.sarah ?? null} loading={loading && !data} />
-        </div>
-        <div className="fade-up fade-up-4">
-          <HouseholdCard caspar={data?.caspar ?? null} sarah={data?.sarah ?? null} macro={data?.macro ?? null} />
-        </div>
-      </div>
+      {/* Swipeable pages */}
+      <SwipeContainer activeIndex={tab} onChangeIndex={setTab}>
+        <HomePage data={data} loading={loading} />
+        <PortfolioPage
+          label="Caspar"
+          currency="USD"
+          snapshot={data?.caspar ?? null}
+          positions={data?.casparPositions ?? []}
+          loading={loading && !data}
+        />
+        <PortfolioPage
+          label="Sarah"
+          currency="SGD"
+          snapshot={data?.sarah ?? null}
+          positions={data?.sarahPositions ?? []}
+          loading={loading && !data}
+        />
+        <SettingsPage
+          settings={settings}
+          onUpdate={updateSettings}
+          onLogout={handleLogout}
+        />
+      </SwipeContainer>
 
-      <p className="text-center text-[10px] text-slate-600 mt-8">
-        Last refresh {loading ? "..." : new Date().toLocaleTimeString()}
-      </p>
+      <TabBar active={tab} onChange={setTab} />
     </div>
   );
 }
