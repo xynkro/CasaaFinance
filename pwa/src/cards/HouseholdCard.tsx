@@ -1,5 +1,6 @@
 import type { SnapshotRow, MacroRow } from "../data";
 import { Card } from "./Card";
+import { Users } from "lucide-react";
 
 export function HouseholdCard({
   caspar,
@@ -21,10 +22,10 @@ export function HouseholdCard({
   if (!hasBoth) {
     return (
       <Card>
-        <h2 className="text-sm font-medium text-slate-400 mb-1">Household</h2>
-        <p className="text-sm text-slate-500">
-          Waiting for both portfolios + FX rate
-        </p>
+        <div className="flex items-center gap-2 text-slate-500">
+          <Users size={16} />
+          <span className="text-sm">Household — waiting for both portfolios + FX rate</span>
+        </div>
       </Card>
     );
   }
@@ -34,30 +35,48 @@ export function HouseholdCard({
   const fmtSgd = (n: number) =>
     `S$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+  const casparPct = (casparUsd / totalUsd) * 100;
+  const sarahPct = (sarahUsd / totalUsd) * 100;
+
   return (
-    <Card>
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="text-sm font-medium text-slate-400">Household</h2>
-        <span className="text-xs text-slate-500">
+    <Card className="glass-bright">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Users size={14} className="text-indigo-400" />
+          <h2 className="text-sm font-medium text-slate-400">Household</h2>
+        </div>
+        <span className="text-xs text-slate-500 tabular-nums">
           USD/SGD {usdSgd.toFixed(4)}
         </span>
       </div>
 
-      <div className="text-2xl font-bold text-slate-100 mb-2">
+      <div className="text-3xl font-bold text-white tracking-tight tabular-nums mb-4">
         {fmtUsd(totalUsd)}
       </div>
 
-      <div className="space-y-1 text-sm text-slate-300">
-        <div className="flex justify-between">
-          <span>Caspar</span>
-          <span>{fmtUsd(casparUsd)}</span>
+      {/* Proportion bar */}
+      <div className="flex h-2 rounded-full overflow-hidden mb-4">
+        <div className="bg-blue-500/70 transition-all" style={{ width: `${casparPct}%` }} />
+        <div className="bg-violet-500/70 transition-all" style={{ width: `${sarahPct}%` }} />
+      </div>
+
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-blue-500/70" />
+            <span className="text-sm text-slate-300">Caspar</span>
+          </div>
+          <span className="text-sm text-white font-medium tabular-nums">{fmtUsd(casparUsd)}</span>
         </div>
-        <div className="flex justify-between">
-          <span>Sarah</span>
-          <span>
-            {fmtUsd(sarahUsd)}{" "}
-            <span className="text-xs text-slate-500">({fmtSgd(sarahSgd)})</span>
-          </span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-violet-500/70" />
+            <span className="text-sm text-slate-300">Sarah</span>
+          </div>
+          <div className="text-right">
+            <span className="text-sm text-white font-medium tabular-nums">{fmtUsd(sarahUsd)}</span>
+            <span className="text-xs text-slate-500 ml-1.5">({fmtSgd(sarahSgd)})</span>
+          </div>
         </div>
       </div>
     </Card>
