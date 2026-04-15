@@ -9,10 +9,10 @@ function csvUrl(gid: string): string {
 // GIDs — set these after enabling "publish to web" per tab in Sheets.
 // To find a tab's GID: open the sheet, click the tab, look at the URL fragment #gid=XXXX.
 const GIDS: Record<string, string> = {
-  daily_brief_latest: "0",
-  snapshot_caspar: "1",
-  snapshot_sarah: "2",
-  macro: "3",
+  daily_brief_latest: "1490893125",
+  snapshot_caspar: "1233934747",
+  snapshot_sarah: "1953218382",
+  macro: "447436838",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
