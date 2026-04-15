@@ -1,7 +1,7 @@
 import type { Settings } from "../settings";
 import { LogOut, DollarSign, LayoutGrid, ListChecks, Home } from "lucide-react";
 
-const TAB_NAMES = ["Home", "Caspar", "Sarah", "Decisions", "History", "Settings"];
+const TAB_NAMES = ["Home", "Caspar", "Sarah", "Decisions", "History", "Archive", "Settings"];
 
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (

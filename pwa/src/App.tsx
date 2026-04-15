@@ -8,11 +8,12 @@ import { HomePage } from "./pages/HomePage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { DecisionsPage } from "./pages/DecisionsPage";
 import { HistoryPage } from "./pages/HistoryPage";
+import { ArchivePage } from "./pages/ArchivePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RefreshCw } from "lucide-react";
 
-const TAB_TITLES = ["Home", "Caspar", "Sarah", "Decisions", "History", "Settings"];
-const SETTINGS_TAB = 5;
+const TAB_TITLES = ["Home", "Caspar", "Sarah", "Decisions", "History", "Archive", "Settings"];
+const SETTINGS_TAB = 6;
 
 function Dashboard() {
   const { settings, update: updateSettings } = useSettings();
@@ -89,6 +90,7 @@ function Dashboard() {
           sarahHistory={data?.sarahHistory ?? []}
           macroHistory={data?.macroHistory ?? []}
         />
+        <ArchivePage archive={data?.archive ?? []} />
         <SettingsPage
           settings={settings}
           onUpdate={updateSettings}

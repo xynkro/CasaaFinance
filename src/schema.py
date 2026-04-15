@@ -126,6 +126,23 @@ class DailyBriefRow:
 
 
 @dataclass
+@dataclass
+class WsrArchiveRow:
+    TAB_NAME = "wsr_archive"
+    HEADERS = ["date", "title", "drive_file_id", "drive_url"]
+
+    date: str
+    title: str
+    drive_file_id: str
+    drive_url: str = ""
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        url = self.drive_url or f"https://drive.google.com/file/d/{self.drive_file_id}/view"
+        return [d, self.title, self.drive_file_id, url]
+
+
+@dataclass
 class MacroRow:
     TAB_NAME = "macro"
     HEADERS = ["date", "vix", "dxy", "us_10y", "spx", "usd_sgd"]
@@ -230,6 +247,78 @@ def daily_from_sidecar(sidecar: dict) -> DailyBriefRow:
         verdict=str(sidecar.get("verdict", "")),
         sentiment=str(sidecar.get("sentiment", "")),
     )
+
+
+# ---------- Factory helpers to build rows from IBKR grab JSON ----------
+
+def snapshot_caspar_from_grab(grab: dict) -> SnapshotCaspar:
+    """Build SnapshotCaspar from PortfolioGrab JSON (accounts.caspar)."""
+    date = str(grab.get("grab_date", ""))
+    c = grab.get("accounts", {}).get("caspar", {})
+    s = c.get("summary", {})
+    net_liq = float(s.get("net_liquidation", 0.0))
+    cash = float(s.get("total_cash", 0.0))
+    upl = float(s.get("unrealized_pnl", 0.0))
+    upl_pct = (upl / net_liq) if net_liq else 0.0
+    return SnapshotCaspar(date=date, net_liq_usd=net_liq, cash=cash, upl=upl, upl_pct=upl_pct)
+
+
+def snapshot_sarah_from_grab(grab: dict) -> SnapshotSarah:
+    """Build SnapshotSarah from PortfolioGrab JSON (accounts.sarah)."""
+    date = str(grab.get("grab_date", ""))
+    sa = grab.get("accounts", {}).get("sarah", {})
+    s = sa.get("summary", {})
+    net_liq = float(s.get("net_liquidation_sgd", 0.0))
+    cash = float(s.get("total_cash_sgd", 0.0))
+    upl = float(s.get("unrealized_pnl_mixed", 0.0))
+    upl_pct = (upl / net_liq) if net_liq else 0.0
+    return SnapshotSarah(date=date, net_liq_sgd=net_liq, cash_sgd=cash, upl_sgd=upl, upl_pct=upl_pct)
+
+
+def positions_caspar_from_grab(grab: dict) -> List[PositionRow]:
+    """Build Caspar position rows from grab JSON. Stocks only (sec_type=STK)."""
+    date = str(grab.get("grab_date", ""))
+    c = grab.get("accounts", {}).get("caspar", {})
+    net_liq = float(c.get("summary", {}).get("net_liquidation", 0.0))
+    out = []
+    for pos in (c.get("positions") or []):
+        if pos.get("sec_type") != "STK":
+            continue
+        mkt_val = float(pos.get("mkt_val", 0.0))
+        out.append(PositionRow(
+            date=date,
+            ticker=str(pos.get("symbol", "")),
+            qty=float(pos.get("qty", 0.0)),
+            avg_cost=float(pos.get("avg_cost", 0.0)),
+            last=float(pos.get("last", 0.0)),
+            mkt_val=mkt_val,
+            upl=float(pos.get("upl", 0.0)),
+            weight=mkt_val / net_liq if net_liq else 0.0,
+        ))
+    return out
+
+
+def positions_sarah_from_grab(grab: dict) -> List[PositionRow]:
+    """Build Sarah position rows from grab JSON. Stocks only (sec_type=STK), options skipped."""
+    date = str(grab.get("grab_date", ""))
+    sa = grab.get("accounts", {}).get("sarah", {})
+    net_liq = float(sa.get("summary", {}).get("net_liquidation_sgd", 0.0))
+    out = []
+    for pos in (sa.get("positions") or []):
+        if pos.get("sec_type") != "STK":
+            continue
+        mkt_val = float(pos.get("mkt_val", 0.0))
+        out.append(PositionRow(
+            date=date,
+            ticker=str(pos.get("symbol", "")),
+            qty=float(pos.get("qty", 0.0)),
+            avg_cost=float(pos.get("avg_cost", 0.0)),
+            last=float(pos.get("last", 0.0)),
+            mkt_val=mkt_val,
+            upl=float(pos.get("upl", 0.0)),
+            weight=mkt_val / net_liq if net_liq else 0.0,
+        ))
+    return out
 
 
 def decisions_from_ledger(ledger: dict, date: str) -> List[DecisionRow]:

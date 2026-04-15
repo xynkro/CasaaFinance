@@ -14,6 +14,7 @@ const GIDS: Record<string, string> = {
   positions_sarah: "444641294",
   decision_queue: "1744723757",
   macro: "447436838",
+  wsr_archive: "1065773181",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -75,6 +76,13 @@ export interface DecisionRow {
   status: string;
 }
 
+export interface ArchiveRow {
+  date: string;
+  title: string;
+  drive_file_id: string;
+  drive_url: string;
+}
+
 // ---------- aggregate fetch ----------
 
 export interface DashboardData {
@@ -89,6 +97,7 @@ export interface DashboardData {
   casparHistory: SnapshotRow[];
   sarahHistory: SnapshotRow[];
   macroHistory: MacroRow[];
+  archive: ArchiveRow[];
   error: string | null;
 }
 
@@ -119,7 +128,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRows, sarahRows, casparPos, sarahPos, decisions, macroRows] =
+    const [dailyRows, casparRows, sarahRows, casparPos, sarahPos, decisions, macroRows, archiveRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<SnapshotRow>("snapshot_caspar"),
@@ -128,6 +137,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<PositionRow>("positions_sarah").catch(() => [] as PositionRow[]),
         fetchTab<DecisionRow>("decision_queue").catch(() => [] as DecisionRow[]),
         fetchTab<MacroRow>("macro"),
+        fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
       ]);
     return {
       daily: latest(dailyRows),
@@ -140,6 +150,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       casparHistory: dedup(casparRows),
       sarahHistory: dedup(sarahRows),
       macroHistory: dedup(macroRows),
+      archive: sortByDate(archiveRows).reverse(),
       error: null,
     };
   } catch (e) {
@@ -147,7 +158,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       daily: null, caspar: null, sarah: null,
       casparPositions: [], sarahPositions: [], decisions: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
-      error: String(e),
+      archive: [], error: String(e),
     };
   }
 }

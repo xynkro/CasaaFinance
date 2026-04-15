@@ -280,6 +280,16 @@ def cmd_wsr(args: argparse.Namespace, logger: logging.Logger) -> int:
                 file_id = dr.upload_pdf(pdf_path)
                 result.drive_ok = True
                 logger.info(f"Drive OK — file_id {file_id}")
+                # Write archive row so PWA can list WSR PDFs
+                try:
+                    archive_row = S.WsrArchiveRow(
+                        date=date, title=pdf_path.stem, drive_file_id=file_id,
+                    )
+                    sh.ensure_headers(client, S.WsrArchiveRow.TAB_NAME, S.WsrArchiveRow.HEADERS)
+                    sh.append_row(client, S.WsrArchiveRow.TAB_NAME, archive_row.to_row())
+                    result.rows_written[S.WsrArchiveRow.TAB_NAME] = 1
+                except Exception as ae:
+                    logger.warning(f"Archive row failed (non-fatal): {ae}")
             except Exception as e:
                 result.errors.append(f"drive: {e}")
                 logger.error(f"Drive failed: {e}")
@@ -306,6 +316,94 @@ def cmd_wsr(args: argparse.Namespace, logger: logging.Logger) -> int:
 
     except Exception as e:
         logger.error(f"WSR sync fatal: {e}")
+        traceback.print_exc()
+        return 2
+
+
+# ---------- subcommand: grab ----------
+
+def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
+    """Push IBKR portfolio grab (both accounts) to Sheet + Telegram."""
+    result = SyncResult()
+    try:
+        grab_path = Path(args.json)
+        if not grab_path.exists():
+            logger.error(f"Grab JSON missing: {grab_path}")
+            return 2
+        grab = json.loads(grab_path.read_text())
+        date = str(grab.get("grab_date") or datetime.now().strftime("%Y-%m-%d"))
+
+        snap_c = S.snapshot_caspar_from_grab(grab)
+        pos_c = S.positions_caspar_from_grab(grab)
+        snap_s = S.snapshot_sarah_from_grab(grab)
+        pos_s = S.positions_sarah_from_grab(grab)
+
+        # Count skipped options for info
+        opts = grab.get("accounts", {}).get("sarah", {}).get("options") or []
+        opts_skipped = len(opts)
+
+        if args.dryrun:
+            print(f"[dryrun] snapshot_caspar: {snap_c.to_row()}")
+            print(f"[dryrun] positions_caspar: {len(pos_c)} rows")
+            for p in pos_c[:3]:
+                print(f"  {p.to_row()}")
+            if len(pos_c) > 3:
+                print(f"  ... and {len(pos_c) - 3} more")
+            print(f"[dryrun] snapshot_sarah: {snap_s.to_row()}")
+            print(f"[dryrun] positions_sarah: {len(pos_s)} rows (stocks only)")
+            for p in pos_s[:3]:
+                print(f"  {p.to_row()}")
+            if len(pos_s) > 3:
+                print(f"  ... and {len(pos_s) - 3} more")
+            if opts_skipped:
+                print(f"[dryrun] options skipped: {opts_skipped} (short calls — no options tab yet)")
+            print(f"[dryrun] telegram: grab ready + date")
+            return 0
+
+        # --- Sheets ---
+        try:
+            client = sh.authenticate()
+
+            sh.ensure_headers(client, S.SnapshotCaspar.TAB_NAME, S.SnapshotCaspar.HEADERS)
+            sh.append_row(client, S.SnapshotCaspar.TAB_NAME, snap_c.to_row())
+            result.rows_written[S.SnapshotCaspar.TAB_NAME] = 1
+
+            sh.ensure_headers(client, "positions_caspar", S.PositionRow.HEADERS)
+            n = sh.append_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
+            result.rows_written["positions_caspar"] = n
+
+            sh.ensure_headers(client, S.SnapshotSarah.TAB_NAME, S.SnapshotSarah.HEADERS)
+            sh.append_row(client, S.SnapshotSarah.TAB_NAME, snap_s.to_row())
+            result.rows_written[S.SnapshotSarah.TAB_NAME] = 1
+
+            sh.ensure_headers(client, "positions_sarah", S.PositionRow.HEADERS)
+            n = sh.append_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
+            result.rows_written["positions_sarah"] = n
+
+            result.sheet_ok = True
+            logger.info(f"Sheets OK — {result.rows_written}")
+        except Exception as e:
+            result.errors.append(f"sheets: {e}")
+            logger.error(f"Sheets failed: {e}")
+
+        # --- Drive: N/A for grab ---
+        result.drive_ok = True
+
+        # --- Telegram ---
+        try:
+            pwa_url = os.environ.get("PWA_URL") or None
+            tg.ping_grab_ready(date, len(pos_c), len(pos_s), opts_skipped, pwa_url)
+            result.telegram_ok = True
+            logger.info("Telegram OK")
+        except Exception as e:
+            result.errors.append(f"telegram: {e}")
+            logger.error(f"Telegram failed: {e}")
+
+        print(json.dumps(asdict(result), indent=2))
+        return result.exit_code(drive_required=False, telegram_required=True)
+
+    except Exception as e:
+        logger.error(f"Grab sync fatal: {e}")
         traceback.print_exc()
         return 2
 
@@ -364,6 +462,10 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--pdf", required=False, help="path to WSR PDF for Drive upload")
     w.add_argument("--dryrun", action="store_true", help="parse only, no network")
 
+    g = sub.add_parser("grab", help="push IBKR portfolio grab (both accounts)")
+    g.add_argument("--json", required=True, help="path to PortfolioGrab JSON")
+    g.add_argument("--dryrun", "--dry-run", action="store_true", help="parse only, no network")
+
     dr_ = sub.add_parser("dryrun", help="parse fixture, print what would be written")
     dr_.add_argument("--fixture", required=True, help="path to fixture JSON")
     dr_.add_argument("--kind", choices=("daily", "wsr"), required=False)
@@ -382,6 +484,8 @@ def main() -> int:
         return cmd_daily(args, logger)
     if args.cmd == "wsr":
         return cmd_wsr(args, logger)
+    if args.cmd == "grab":
+        return cmd_grab(args, logger)
     if args.cmd == "dryrun":
         return cmd_dryrun(args, logger)
     logger.error(f"Unknown command: {args.cmd}")

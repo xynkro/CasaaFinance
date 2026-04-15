@@ -1,0 +1,374 @@
+{
+  "grab_date": "2026-04-15",
+  "grab_timestamp_sgt": "2026-04-15T16:41:00.104938+08:00",
+  "source": "IBKR TWS (localhost direct)",
+  "schema_version": "1.1",
+  "writer": "ibkr_grab.py",
+  "accounts": {
+    "caspar": {
+      "account_id": "U6773281",
+      "base_currency": "USD",
+      "summary": {
+        "net_liquidation": 8449.92,
+        "buying_power": 43585.81,
+        "total_cash": 64.48,
+        "unrealized_pnl": 0.0,
+        "realized_pnl": 0.0,
+        "excess_liquidity": 6753.26,
+        "total_market_value": 8385.44
+      },
+      "positions": [
+        {
+          "symbol": "BBAI",
+          "sec_type": "STK",
+          "exchange": "NYSE",
+          "qty": 100.0,
+          "avg_cost": 5.860924,
+          "last": 3.5899999,
+          "mkt_val": 359.0,
+          "upl": -227.09,
+          "weight_pct": 4.25
+        },
+        {
+          "symbol": "BTBT",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 150.0,
+          "avg_cost": 3.642296,
+          "last": 1.53999995,
+          "mkt_val": 231.0,
+          "upl": -315.34,
+          "weight_pct": 2.73
+        },
+        {
+          "symbol": "C6L",
+          "sec_type": "STK",
+          "exchange": "SGX",
+          "qty": 100.0,
+          "avg_cost": 6.37725,
+          "last": 6.5760002,
+          "mkt_val": 657.6,
+          "upl": 19.88,
+          "weight_pct": 7.78
+        },
+        {
+          "symbol": "G3B",
+          "sec_type": "STK",
+          "exchange": "SGX",
+          "qty": 100.0,
+          "avg_cost": 4.83725,
+          "last": 5.1366,
+          "mkt_val": 513.66,
+          "upl": 29.94,
+          "weight_pct": 6.08
+        },
+        {
+          "symbol": "OPEN",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 100.0,
+          "avg_cost": 5.77012,
+          "last": 4.52,
+          "mkt_val": 452.0,
+          "upl": -125.01,
+          "weight_pct": 5.35
+        },
+        {
+          "symbol": "RCAT",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 12.0,
+          "avg_cost": 16.67770835,
+          "last": 12.6899996,
+          "mkt_val": 152.28,
+          "upl": -47.85,
+          "weight_pct": 1.8
+        },
+        {
+          "symbol": "SCHD",
+          "sec_type": "STK",
+          "exchange": "ARCA",
+          "qty": 86.0,
+          "avg_cost": 29.1059663,
+          "last": 30.6713867,
+          "mkt_val": 2637.74,
+          "upl": 134.63,
+          "weight_pct": 31.22
+        },
+        {
+          "symbol": "SLV",
+          "sec_type": "STK",
+          "exchange": "ARCA",
+          "qty": 10.0,
+          "avg_cost": 81.89257,
+          "last": 71.65000155,
+          "mkt_val": 716.5,
+          "upl": -102.43,
+          "weight_pct": 8.48
+        },
+        {
+          "symbol": "SSO",
+          "sec_type": "STK",
+          "exchange": "ARCA",
+          "qty": 10.0,
+          "avg_cost": 57.88802,
+          "last": 59.02000425,
+          "mkt_val": 590.2,
+          "upl": 11.32,
+          "weight_pct": 6.98
+        },
+        {
+          "symbol": "TQQQ",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 10.0,
+          "avg_cost": 54.90515,
+          "last": 53.58000185,
+          "mkt_val": 535.8,
+          "upl": -13.25,
+          "weight_pct": 6.34
+        }
+      ]
+    },
+    "sarah": {
+      "account_id": "U16000287",
+      "base_currency": "SGD",
+      "summary": {
+        "net_liquidation_sgd": 52579.45,
+        "buying_power_sgd": 277896.43,
+        "total_cash_sgd": 1423.29,
+        "unrealized_pnl_mixed": 0.0,
+        "realized_pnl": 0.0,
+        "excess_liquidity_sgd": 42835.64,
+        "total_market_value_mixed": 51469.38
+      },
+      "positions": [
+        {
+          "symbol": "AAPL",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 10.0,
+          "avg_cost": 212.04202,
+          "last": 258.980011,
+          "mkt_val": 2589.8,
+          "upl": 469.38,
+          "weight_pct": 4.93
+        },
+        {
+          "symbol": "AMD",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 10.0,
+          "avg_cost": 136.68003,
+          "last": 254.3500061,
+          "mkt_val": 2543.5,
+          "upl": 1176.7,
+          "weight_pct": 4.84
+        },
+        {
+          "symbol": "BYND",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 100.0,
+          "avg_cost": 0.981473,
+          "last": 0.7198,
+          "mkt_val": 71.98,
+          "upl": -26.17,
+          "weight_pct": 0.14
+        },
+        {
+          "symbol": "GLDM",
+          "sec_type": "STK",
+          "exchange": "ARCA",
+          "qty": 20.0,
+          "avg_cost": 79.06002,
+          "last": 95.1800003,
+          "mkt_val": 1903.6,
+          "upl": 322.4,
+          "weight_pct": 3.62
+        },
+        {
+          "symbol": "HIMS",
+          "sec_type": "STK",
+          "exchange": "NYSE",
+          "qty": 20.0,
+          "avg_cost": 54.680035,
+          "last": 21.4200001,
+          "mkt_val": 428.4,
+          "upl": -665.2,
+          "weight_pct": 0.81
+        },
+        {
+          "symbol": "META",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 2.0,
+          "avg_cost": 635.5,
+          "last": 663.39001465,
+          "mkt_val": 1326.78,
+          "upl": 55.78,
+          "weight_pct": 2.52
+        },
+        {
+          "symbol": "MSFT",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 2.0,
+          "avg_cost": 506.2,
+          "last": 396.2999878,
+          "mkt_val": 792.6,
+          "upl": -219.8,
+          "weight_pct": 1.51
+        },
+        {
+          "symbol": "NFLX",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 10.0,
+          "avg_cost": 109.6,
+          "last": 106.33999635,
+          "mkt_val": 1063.4,
+          "upl": -32.6,
+          "weight_pct": 2.02
+        },
+        {
+          "symbol": "NVDA",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 10.0,
+          "avg_cost": 143.10004,
+          "last": 196.0399933,
+          "mkt_val": 1960.4,
+          "upl": 529.4,
+          "weight_pct": 3.73
+        },
+        {
+          "symbol": "PM",
+          "sec_type": "STK",
+          "exchange": "NYSE",
+          "qty": 10.0,
+          "avg_cost": 167.09002,
+          "last": 159.55000305,
+          "mkt_val": 1595.5,
+          "upl": -75.4,
+          "weight_pct": 3.03
+        },
+        {
+          "symbol": "SBET",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 100.0,
+          "avg_cost": 38.504022,
+          "last": 7.15999985,
+          "mkt_val": 716.0,
+          "upl": -3134.4,
+          "weight_pct": 1.36
+        },
+        {
+          "symbol": "SCHD",
+          "sec_type": "STK",
+          "exchange": "ARCA",
+          "qty": 100.0,
+          "avg_cost": 29.850004,
+          "last": 30.6623554,
+          "mkt_val": 3066.24,
+          "upl": 81.24,
+          "weight_pct": 5.83
+        },
+        {
+          "symbol": "SLV",
+          "sec_type": "STK",
+          "exchange": "ARCA",
+          "qty": 50.0,
+          "avg_cost": 71.22,
+          "last": 71.6307297,
+          "mkt_val": 3581.54,
+          "upl": 20.54,
+          "weight_pct": 6.81
+        },
+        {
+          "symbol": "SPY",
+          "sec_type": "STK",
+          "exchange": "ARCA",
+          "qty": 17.0,
+          "avg_cost": 612.46458825,
+          "last": 694.61724855,
+          "mkt_val": 11808.49,
+          "upl": 1396.6,
+          "weight_pct": 22.46
+        },
+        {
+          "symbol": "UNH",
+          "sec_type": "STK",
+          "exchange": "NYSE",
+          "qty": 10.0,
+          "avg_cost": 278.20004,
+          "last": 314.25,
+          "mkt_val": 3142.5,
+          "upl": 360.5,
+          "weight_pct": 5.98
+        },
+        {
+          "symbol": "V",
+          "sec_type": "STK",
+          "exchange": "NYSE",
+          "qty": 10.0,
+          "avg_cost": 358.61485,
+          "last": 312.01000975,
+          "mkt_val": 3120.1,
+          "upl": -466.05,
+          "weight_pct": 5.93
+        },
+        {
+          "symbol": "WIX",
+          "sec_type": "STK",
+          "exchange": "NASDAQ",
+          "qty": 10.0,
+          "avg_cost": 157.32004,
+          "last": 63.88000105,
+          "mkt_val": 638.8,
+          "upl": -934.4,
+          "weight_pct": 1.21
+        }
+      ],
+      "options": [
+        {
+          "symbol": "AAPL",
+          "sec_type": "OPT",
+          "exchange": "AMEX",
+          "qty": -1.0,
+          "avg_cost": 136.9434,
+          "last": 1.05497215,
+          "mkt_val": -105.5,
+          "upl": 31.45,
+          "side": "short_call",
+          "avg_cost_credit": 136.9434
+        },
+        {
+          "symbol": "BYND",
+          "sec_type": "OPT",
+          "exchange": "AMEX",
+          "qty": -1.0,
+          "avg_cost": 0.9487,
+          "last": 0.05469055,
+          "mkt_val": -5.47,
+          "upl": -4.52,
+          "side": "short_call",
+          "avg_cost_credit": 0.9487
+        },
+        {
+          "symbol": "SBET",
+          "sec_type": "OPT",
+          "exchange": "AMEX",
+          "qty": -1.0,
+          "avg_cost": 10.946,
+          "last": 0.2290655,
+          "mkt_val": -22.91,
+          "upl": -11.96,
+          "side": "short_call",
+          "avg_cost_credit": 10.946
+        }
+      ]
+    }
+  }
+}

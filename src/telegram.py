@@ -56,3 +56,23 @@ def ping_wsr_ready(date: str, pwa_url: str | None = None) -> dict:
     if pwa_url:
         lines.append(f"📱 PWA: {pwa_url}")
     return send("\n".join(lines), parse_mode="none")
+
+
+def ping_grab_ready(
+    date: str,
+    caspar_positions: int,
+    sarah_positions: int,
+    opts_skipped: int,
+    pwa_url: str | None = None,
+) -> dict:
+    """Ping after IBKR portfolio grab sync."""
+    lines = [
+        f"📸 Portfolio grab {date} synced",
+        f"  Caspar: {caspar_positions} positions",
+        f"  Sarah: {sarah_positions} positions (stocks)",
+    ]
+    if opts_skipped:
+        lines.append(f"  ⚠️ {opts_skipped} options skipped (no tab yet)")
+    if pwa_url:
+        lines.append(f"📱 PWA: {pwa_url}")
+    return send("\n".join(lines), parse_mode="none")
