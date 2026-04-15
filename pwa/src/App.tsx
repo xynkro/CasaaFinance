@@ -6,10 +6,12 @@ import { TabBar } from "./components/TabBar";
 import { SwipeContainer } from "./components/SwipeContainer";
 import { HomePage } from "./pages/HomePage";
 import { PortfolioPage } from "./pages/PortfolioPage";
+import { DecisionsPage } from "./pages/DecisionsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RefreshCw } from "lucide-react";
 
-const TAB_TITLES = ["Home", "Caspar", "Sarah", "Settings"];
+const TAB_TITLES = ["Home", "Caspar", "Sarah", "Decisions", "Settings"];
+const SETTINGS_TAB = 4;
 
 function Dashboard() {
   const { settings, update: updateSettings } = useSettings();
@@ -32,6 +34,10 @@ function Dashboard() {
     window.location.reload();
   };
 
+  const pendingCount = (data?.decisions ?? []).filter(
+    (d) => d.status?.toLowerCase() === "pending" || d.status?.toLowerCase() === "watching",
+  ).length;
+
   return (
     <div className="bg-mesh min-h-screen pb-20">
       {/* Header */}
@@ -41,7 +47,7 @@ function Dashboard() {
             <h1 className="text-lg font-bold text-white tracking-tight">{TAB_TITLES[tab]}</h1>
             <p className="text-[10px] text-slate-500 mt-0.5">Casaa Finance</p>
           </div>
-          {tab !== 3 && (
+          {tab !== SETTINGS_TAB && (
             <button
               onClick={load}
               disabled={loading}
@@ -76,6 +82,7 @@ function Dashboard() {
           positions={data?.sarahPositions ?? []}
           loading={loading && !data}
         />
+        <DecisionsPage decisions={data?.decisions ?? []} />
         <SettingsPage
           settings={settings}
           onUpdate={updateSettings}
@@ -83,7 +90,7 @@ function Dashboard() {
         />
       </SwipeContainer>
 
-      <TabBar active={tab} onChange={setTab} />
+      <TabBar active={tab} onChange={setTab} decisionCount={pendingCount} />
     </div>
   );
 }

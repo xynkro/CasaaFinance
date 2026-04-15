@@ -1,13 +1,22 @@
-import { Home, User, Users, Settings } from "lucide-react";
+import { Home, User, Users, Target, Settings } from "lucide-react";
 
 const TABS = [
   { icon: Home, label: "Home" },
   { icon: User, label: "Caspar" },
   { icon: Users, label: "Sarah" },
+  { icon: Target, label: "Decisions" },
   { icon: Settings, label: "Settings" },
 ] as const;
 
-export function TabBar({ active, onChange }: { active: number; onChange: (i: number) => void }) {
+export function TabBar({
+  active,
+  onChange,
+  decisionCount,
+}: {
+  active: number;
+  onChange: (i: number) => void;
+  decisionCount?: number;
+}) {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 pb-safe-bottom">
       <div className="mx-auto max-w-lg glass-bright border-t border-white/5 backdrop-blur-xl">
@@ -15,6 +24,7 @@ export function TabBar({ active, onChange }: { active: number; onChange: (i: num
           {TABS.map((tab, i) => {
             const Icon = tab.icon;
             const isActive = active === i;
+            const showBadge = tab.label === "Decisions" && decisionCount && decisionCount > 0;
             return (
               <button
                 key={tab.label}
@@ -29,6 +39,11 @@ export function TabBar({ active, onChange }: { active: number; onChange: (i: num
                   <Icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
                   {isActive && (
                     <div className="absolute -inset-2 rounded-full bg-indigo-500/10 -z-10" />
+                  )}
+                  {showBadge && (
+                    <div className="absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 flex items-center justify-center">
+                      <span className="text-[9px] font-bold text-black">{decisionCount}</span>
+                    </div>
                   )}
                 </div>
                 <span className={`text-[10px] font-medium ${isActive ? "text-indigo-400" : ""}`}>
