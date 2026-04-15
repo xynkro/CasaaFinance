@@ -1,10 +1,11 @@
-import { Home, User, Users, Target, Settings } from "lucide-react";
+import { Home, User, Users, Target, BarChart3, Settings } from "lucide-react";
 
 const TABS = [
   { icon: Home, label: "Home" },
   { icon: User, label: "Caspar" },
   { icon: Users, label: "Sarah" },
   { icon: Target, label: "Decisions" },
+  { icon: BarChart3, label: "History" },
   { icon: Settings, label: "Settings" },
 ] as const;
 
@@ -36,7 +37,7 @@ export function TabBar({
                 }`}
               >
                 <div className="relative">
-                  <Icon size={20} strokeWidth={isActive ? 2.2 : 1.8} />
+                  <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
                   {isActive && (
                     <div className="absolute -inset-2 rounded-full bg-indigo-500/10 -z-10" />
                   )}
@@ -46,7 +47,7 @@ export function TabBar({
                     </div>
                   )}
                 </div>
-                <span className={`text-[10px] font-medium ${isActive ? "text-indigo-400" : ""}`}>
+                <span className={`text-[9px] font-medium ${isActive ? "text-indigo-400" : ""}`}>
                   {tab.label}
                 </span>
               </button>

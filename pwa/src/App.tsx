@@ -7,11 +7,12 @@ import { SwipeContainer } from "./components/SwipeContainer";
 import { HomePage } from "./pages/HomePage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { DecisionsPage } from "./pages/DecisionsPage";
+import { HistoryPage } from "./pages/HistoryPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RefreshCw } from "lucide-react";
 
-const TAB_TITLES = ["Home", "Caspar", "Sarah", "Decisions", "Settings"];
-const SETTINGS_TAB = 4;
+const TAB_TITLES = ["Home", "Caspar", "Sarah", "Decisions", "History", "Settings"];
+const SETTINGS_TAB = 5;
 
 function Dashboard() {
   const { settings, update: updateSettings } = useSettings();
@@ -83,6 +84,11 @@ function Dashboard() {
           loading={loading && !data}
         />
         <DecisionsPage decisions={data?.decisions ?? []} />
+        <HistoryPage
+          casparHistory={data?.casparHistory ?? []}
+          sarahHistory={data?.sarahHistory ?? []}
+          macroHistory={data?.macroHistory ?? []}
+        />
         <SettingsPage
           settings={settings}
           onUpdate={updateSettings}

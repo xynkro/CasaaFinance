@@ -5,6 +5,7 @@ import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
   base: "/CasaaFinance/",
+  build: { chunkSizeWarningLimit: 700 },
   plugins: [
     react(),
     tailwindcss(),

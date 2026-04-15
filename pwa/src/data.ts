@@ -85,6 +85,10 @@ export interface DashboardData {
   sarahPositions: PositionRow[];
   decisions: DecisionRow[];
   macro: MacroRow | null;
+  // History (all rows, sorted by date ascending)
+  casparHistory: SnapshotRow[];
+  sarahHistory: SnapshotRow[];
+  macroHistory: MacroRow[];
   error: string | null;
 }
 
@@ -97,6 +101,20 @@ function latestGroup<T extends { date: string }>(rows: T[]): T[] {
   const l = latest(rows);
   if (!l) return [];
   return rows.filter((r) => r.date === l.date);
+}
+
+function sortByDate<T extends { date: string }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Deduplicate rows per date (keep last entry per date). */
+function dedup<T extends { date: string }>(rows: T[]): T[] {
+  const map = new Map<string, T>();
+  for (const r of rows) {
+    const key = r.date.slice(0, 10); // normalize to YYYY-MM-DD
+    map.set(key, r);
+  }
+  return sortByDate([...map.values()]);
 }
 
 export async function fetchDashboard(): Promise<DashboardData> {
@@ -119,13 +137,17 @@ export async function fetchDashboard(): Promise<DashboardData> {
       sarahPositions: latestGroup(sarahPos),
       decisions: latestGroup(decisions),
       macro: latest(macroRows),
+      casparHistory: dedup(casparRows),
+      sarahHistory: dedup(sarahRows),
+      macroHistory: dedup(macroRows),
       error: null,
     };
   } catch (e) {
     return {
       daily: null, caspar: null, sarah: null,
       casparPositions: [], sarahPositions: [], decisions: [],
-      macro: null, error: String(e),
+      macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
+      error: String(e),
     };
   }
 }
