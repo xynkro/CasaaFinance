@@ -3,7 +3,6 @@ import { fetchDashboard, type DashboardData } from "./data";
 import { PinGate, usePinAuth } from "./PinGate";
 import { useSettings } from "./settings";
 import { TabBar } from "./components/TabBar";
-import { SwipeContainer } from "./components/SwipeContainer";
 import { HomePage } from "./pages/HomePage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { DecisionsPage } from "./pages/DecisionsPage";
@@ -40,9 +39,21 @@ function Dashboard() {
     (d) => d.status?.toLowerCase() === "pending" || d.status?.toLowerCase() === "watching",
   ).length;
 
+  const renderPage = () => {
+    switch (tab) {
+      case 0: return <HomePage data={data} loading={loading} />;
+      case 1: return <PortfolioPage label="Caspar" currency="USD" snapshot={data?.caspar ?? null} positions={data?.casparPositions ?? []} loading={loading && !data} />;
+      case 2: return <PortfolioPage label="Sarah" currency="SGD" snapshot={data?.sarah ?? null} positions={data?.sarahPositions ?? []} loading={loading && !data} />;
+      case 3: return <DecisionsPage decisions={data?.decisions ?? []} />;
+      case 4: return <HistoryPage casparHistory={data?.casparHistory ?? []} sarahHistory={data?.sarahHistory ?? []} macroHistory={data?.macroHistory ?? []} />;
+      case 5: return <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />;
+      case 6: return <SettingsPage settings={settings} onUpdate={updateSettings} onLogout={handleLogout} />;
+      default: return null;
+    }
+  };
+
   return (
     <div className="app-shell">
-      {/* Background layer */}
       <div className="bg-layer" />
 
       {/* Fixed header */}
@@ -64,43 +75,14 @@ function Dashboard() {
         </div>
       </header>
 
-      {/* Scrollable content area */}
+      {/* Scrollable content — only this area scrolls */}
       <main className="app-content">
         {data?.error && (
           <div className="mx-4 mb-4 rounded-xl glass border-red-500/30 p-3 text-sm text-red-300 fade-up">
             {data.error}
           </div>
         )}
-
-        <SwipeContainer activeIndex={tab} onChangeIndex={setTab}>
-          <HomePage data={data} loading={loading} />
-          <PortfolioPage
-            label="Caspar"
-            currency="USD"
-            snapshot={data?.caspar ?? null}
-            positions={data?.casparPositions ?? []}
-            loading={loading && !data}
-          />
-          <PortfolioPage
-            label="Sarah"
-            currency="SGD"
-            snapshot={data?.sarah ?? null}
-            positions={data?.sarahPositions ?? []}
-            loading={loading && !data}
-          />
-          <DecisionsPage decisions={data?.decisions ?? []} />
-          <HistoryPage
-            casparHistory={data?.casparHistory ?? []}
-            sarahHistory={data?.sarahHistory ?? []}
-            macroHistory={data?.macroHistory ?? []}
-          />
-          <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />
-          <SettingsPage
-            settings={settings}
-            onUpdate={updateSettings}
-            onLogout={handleLogout}
-          />
-        </SwipeContainer>
+        {renderPage()}
       </main>
 
       {/* Fixed bottom tab bar */}
@@ -111,10 +93,6 @@ function Dashboard() {
 
 export default function App() {
   const { authed, grant } = usePinAuth();
-
-  if (!authed) {
-    return <PinGate onSuccess={grant} />;
-  }
-
+  if (!authed) return <PinGate onSuccess={grant} />;
   return <Dashboard />;
 }

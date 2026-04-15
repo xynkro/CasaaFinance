@@ -61,13 +61,15 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
 
-/* Scrollable content */
+/* Scrollable content — fills between header and tab bar, scrolls internally */
 .app-content {
   position: relative;
   z-index: 10;
   flex: 1;
+  min-height: 0;              /* critical: allows flex child to shrink and scroll */
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior-y: contain;  /* prevent pull-past bounce */
   -webkit-overflow-scrolling: touch;
   padding-top: 8px;
   padding-bottom: 8px;
