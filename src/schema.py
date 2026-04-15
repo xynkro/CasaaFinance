@@ -113,8 +113,8 @@ class DailyBriefRow:
     TAB_NAME = "daily_brief_latest"
     HEADERS = [
         "date", "bullet_1", "bullet_2", "bullet_3", "verdict", "sentiment",
-        "headline", "overnight", "premarket", "catalysts", "posture", "watch",
-        "raw_md",
+        "headline", "overnight", "premarket", "catalysts", "commodities",
+        "posture", "watch", "raw_md",
     ]
 
     date: str
@@ -127,6 +127,7 @@ class DailyBriefRow:
     overnight: str = ""     # e.g. "S&P 6,886 (+1.02%) | Nasdaq +1.23% | VIX 18.59 -2.77%"
     premarket: str = ""     # e.g. "ES +0.22% | Brent $99 | Gold $4,748"
     catalysts: str = ""     # pipe-separated, e.g. "20:30 PPI|Fed speakers|Q1 earnings"
+    commodities: str = ""   # pipe-separated, e.g. "WTI $93 | Gold $4800 | USD/SGD 1.2733"
     posture: str = ""       # free text, e.g. "POSTURE CHANGE: YES. ..."
     watch: str = ""         # pipe-separated watchlist items
     raw_md: str = ""        # full original brief text for in-app detail view
@@ -135,8 +136,8 @@ class DailyBriefRow:
         d = _ts_suffix(self.date) if audit else self.date
         return [
             d, self.bullet_1, self.bullet_2, self.bullet_3, self.verdict, self.sentiment,
-            self.headline, self.overnight, self.premarket, self.catalysts, self.posture, self.watch,
-            self.raw_md,
+            self.headline, self.overnight, self.premarket, self.catalysts, self.commodities,
+            self.posture, self.watch, self.raw_md,
         ]
 
 
@@ -269,6 +270,7 @@ def daily_from_sidecar(sidecar: dict) -> DailyBriefRow:
         overnight=_join(sidecar.get("overnight")),
         premarket=_join(sidecar.get("premarket")),
         catalysts=_join(sidecar.get("catalysts")),
+        commodities=_join(sidecar.get("commodities")),
         posture=str(sidecar.get("posture", "")),
         watch=_join(sidecar.get("watch")),
         raw_md=str(sidecar.get("raw_md", "")),

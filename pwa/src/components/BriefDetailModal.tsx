@@ -99,6 +99,7 @@ export function BriefDetailModal({
   const overnight = splitPipe(row.overnight);
   const premarket = splitPipe(row.premarket);
   const catalysts = splitPipe(row.catalysts);
+  const commodities = splitPipe(row.commodities);
   const watch = splitPipe(row.watch);
 
   return (
@@ -190,6 +191,7 @@ export function BriefDetailModal({
           <Section icon="🌙" title="Overnight" items={overnight} />
           <Section icon="🌅" title="Pre-Market" items={premarket} />
           <Section icon="📅" title="Today's Catalysts" items={catalysts} />
+          <Section icon="🛢️" title="Commodities" items={commodities} />
           <Section icon="📍" title="Posture" text={row.posture} />
           <Section icon="👀" title="Watch List" items={watch} />
 

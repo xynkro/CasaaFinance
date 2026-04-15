@@ -39,6 +39,7 @@ export interface DailyBriefRow {
   overnight?: string;   // pipe-separated bullets
   premarket?: string;
   catalysts?: string;
+  commodities?: string;
   posture?: string;
   watch?: string;
   raw_md?: string;      // full original markdown brief
