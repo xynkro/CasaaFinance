@@ -32,25 +32,28 @@ function Row({ m, rank }: { m: Mover; rank: number }) {
   const isUp = m.pct >= 0;
   const prefix = m.ccy === "SGD" ? "S$" : "$";
   return (
-    <div className="flex items-center justify-between py-2">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <span className="text-[10px] text-slate-600 tabular-nums w-3">{rank}</span>
-        <span className="text-sm">{m.emoji}</span>
-        <span className="text-sm font-semibold text-slate-100 tabular-nums">{m.ticker}</span>
-      </div>
-      <div className="flex items-center gap-2">
-        <span className={`text-xs tabular-nums ${isUp ? "text-emerald-400/80" : "text-red-400/80"}`}>
-          {prefix}{Math.abs(m.upl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
-        </span>
-        <span
-          className={`inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums px-1.5 py-0.5 rounded ${
-            isUp ? "bg-emerald-500/10 text-emerald-400" : "bg-red-500/10 text-red-400"
-          }`}
-        >
-          {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-          {isUp ? "+" : ""}{m.pct.toFixed(1)}%
-        </span>
-      </div>
+    <div className="flex items-center gap-3 py-2.5">
+      {/* Rank */}
+      <span className="text-[10px] text-slate-600 tabular-nums w-3 shrink-0">{rank}</span>
+      {/* Sector emoji */}
+      <span className="text-base shrink-0 w-6 text-center">{m.emoji}</span>
+      {/* Ticker */}
+      <span className="text-sm font-semibold text-slate-100 tabular-nums flex-1 min-w-0 truncate">
+        {m.ticker}
+      </span>
+      {/* UPL amount — subtle */}
+      <span className={`text-[11px] tabular-nums shrink-0 ${isUp ? "text-emerald-400/60" : "text-red-400/60"}`}>
+        {isUp ? "+" : "−"}{prefix}{Math.abs(m.upl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
+      </span>
+      {/* Percent chip */}
+      <span
+        className={`inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums px-2 py-0.5 rounded shrink-0 ${
+          isUp ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+        }`}
+      >
+        {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+        {isUp ? "+" : ""}{m.pct.toFixed(1)}%
+      </span>
     </div>
   );
 }
@@ -69,12 +72,13 @@ export function MoversCard({
   if (movers.length === 0) return null;
 
   const sorted = [...movers].sort((a, b) => b.pct - a.pct);
-  const winners = sorted.slice(0, 3);
-  const losers = sorted.slice(-3).reverse();
+  // Up to 3 winners (positive) and 3 losers (negative)
+  const winners = sorted.filter((m) => m.pct >= 0).slice(0, 3);
+  const losers = sorted.filter((m) => m.pct < 0).slice(-3).reverse();
 
   return (
     <Card>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <span className="text-base">🏆</span>
           <h2 className="text-sm font-semibold text-slate-200">Top Movers</h2>
@@ -82,24 +86,29 @@ export function MoversCard({
         <span className="text-[10px] text-slate-600">{movers.length} holdings</span>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-5">
+      {winners.length > 0 && (
         <div>
-          <div className="text-[10px] uppercase tracking-wider font-semibold text-emerald-400/70 mb-1">
-            📈 Winners
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-emerald-400/70 pt-2">
+            <span>📈</span>
+            <span>Winners</span>
           </div>
           <div className="divide-y divide-white/5">
             {winners.map((m, i) => <Row key={m.ticker + m.ccy} m={m} rank={i + 1} />)}
           </div>
         </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-wider font-semibold text-red-400/70 mb-1">
-            📉 Losers
+      )}
+
+      {losers.length > 0 && (
+        <div className="mt-2">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-red-400/70 pt-2 border-t border-white/5">
+            <span>📉</span>
+            <span>Losers</span>
           </div>
           <div className="divide-y divide-white/5">
             {losers.map((m, i) => <Row key={m.ticker + m.ccy + "l"} m={m} rank={i + 1} />)}
           </div>
         </div>
-      </div>
+      )}
     </Card>
   );
 }

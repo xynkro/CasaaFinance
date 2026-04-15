@@ -41,6 +41,7 @@ export interface DailyBriefRow {
   catalysts?: string;
   posture?: string;
   watch?: string;
+  raw_md?: string;      // full original markdown brief
 }
 
 export interface SnapshotRow {

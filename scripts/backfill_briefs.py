@@ -40,6 +40,7 @@ def strip_leading_bullet(s: str) -> str:
 
 def parse_brief(text: str) -> dict:
     """Parse an MD/txt brief into a structured dict."""
+    raw_md = text  # preserve full original for in-app detail view
     lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
     if not lines:
         return {}
@@ -126,6 +127,7 @@ def parse_brief(text: str) -> dict:
         "catalysts": out.get("catalysts", []),
         "posture": posture_text,
         "watch": out.get("watch", []),
+        "raw_md": raw_md,
     }
 
 

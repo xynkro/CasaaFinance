@@ -31,32 +31,74 @@ export const SENTIMENT: Record<string, {
  * Extend this as new tickers get added.
  */
 const SECTOR_MAP: Record<string, { sector: string; emoji: string }> = {
-  // Tech / growth
-  TQQQ: { sector: "Leveraged Tech", emoji: "⚡" },
-  SSO:  { sector: "Leveraged Index", emoji: "⚡" },
-  MSFT: { sector: "Technology", emoji: "💻" },
-  // Defense / drones
-  RCAT: { sector: "Defense", emoji: "🛡️" },
-  BBAI: { sector: "AI / Defense", emoji: "🤖" },
+  // Big tech
+  AAPL:  { sector: "Technology", emoji: "🍎" },
+  MSFT:  { sector: "Technology", emoji: "💻" },
+  GOOGL: { sector: "Technology", emoji: "🔍" },
+  GOOG:  { sector: "Technology", emoji: "🔍" },
+  META:  { sector: "Technology", emoji: "📱" },
+  AMZN:  { sector: "E-commerce", emoji: "📦" },
+  // Semis
+  NVDA:  { sector: "Semiconductors", emoji: "🎮" },
+  AMD:   { sector: "Semiconductors", emoji: "🎮" },
+  INTC:  { sector: "Semiconductors", emoji: "🎮" },
+  TSM:   { sector: "Semiconductors", emoji: "🎮" },
+  SMH:   { sector: "Semiconductors", emoji: "🎮" },
+  // EV / auto
+  TSLA:  { sector: "EV / Auto", emoji: "🚗" },
+  // Leveraged ETFs
+  TQQQ:  { sector: "Leveraged Tech", emoji: "⚡" },
+  SSO:   { sector: "Leveraged Index", emoji: "⚡" },
+  SQQQ:  { sector: "Leveraged Tech", emoji: "⚡" },
+  UPRO:  { sector: "Leveraged Index", emoji: "⚡" },
+  // Defense / drones / AI
+  RCAT:  { sector: "Defense", emoji: "🛸" },
+  BBAI:  { sector: "AI / Defense", emoji: "🤖" },
+  PLTR:  { sector: "AI / Defense", emoji: "🤖" },
+  LMT:   { sector: "Defense", emoji: "🛡️" },
   // Crypto-adjacent
-  BTBT: { sector: "Crypto", emoji: "₿" },
+  BTBT:  { sector: "Crypto", emoji: "🪙" },
+  COIN:  { sector: "Crypto", emoji: "🪙" },
+  MSTR:  { sector: "Crypto", emoji: "🪙" },
+  IBIT:  { sector: "Crypto", emoji: "🪙" },
   // Real estate / rates
-  OPEN: { sector: "Real Estate", emoji: "🏠" },
+  OPEN:  { sector: "Real Estate", emoji: "🏠" },
   // Dividend / defensive
-  SCHD: { sector: "Dividend", emoji: "🛡️" },
+  SCHD:  { sector: "Dividend", emoji: "💰" },
+  VIG:   { sector: "Dividend", emoji: "💰" },
+  VYM:   { sector: "Dividend", emoji: "💰" },
   // Precious metals
-  SLV:  { sector: "Silver", emoji: "🪙" },
-  GLD:  { sector: "Gold", emoji: "🪙" },
-  // Airlines / Singapore
-  C6L:  { sector: "Airlines", emoji: "✈️" },
+  SLV:   { sector: "Silver", emoji: "🥈" },
+  GLD:   { sector: "Gold", emoji: "🥇" },
+  IAU:   { sector: "Gold", emoji: "🥇" },
+  // Airlines / travel
+  C6L:   { sector: "Airlines", emoji: "✈️" },
   // Broad-market ETFs
-  G3B:  { sector: "SG Broad Market", emoji: "🇸🇬" },
-  SPY:  { sector: "US Broad Market", emoji: "📈" },
-  VOO:  { sector: "US Broad Market", emoji: "📈" },
-  // Healthcare
-  MDT:  { sector: "Healthcare", emoji: "💊" },
-  MDLZ: { sector: "Consumer Staples", emoji: "🍫" },
-  HON:  { sector: "Industrials", emoji: "🏭" },
+  G3B:   { sector: "SG Broad Market", emoji: "🇸🇬" },
+  ES3:   { sector: "SG Broad Market", emoji: "🇸🇬" },
+  SPY:   { sector: "US Broad Market", emoji: "📈" },
+  VOO:   { sector: "US Broad Market", emoji: "📈" },
+  QQQ:   { sector: "US Tech Index", emoji: "📈" },
+  VTI:   { sector: "US Total Market", emoji: "📈" },
+  // Healthcare / pharma
+  MDT:   { sector: "Healthcare", emoji: "💊" },
+  JNJ:   { sector: "Healthcare", emoji: "💊" },
+  PFE:   { sector: "Healthcare", emoji: "💊" },
+  UNH:   { sector: "Healthcare", emoji: "💊" },
+  // Consumer staples
+  MDLZ:  { sector: "Consumer Staples", emoji: "🍫" },
+  KO:    { sector: "Consumer Staples", emoji: "🥤" },
+  PEP:   { sector: "Consumer Staples", emoji: "🥤" },
+  // Industrials
+  HON:   { sector: "Industrials", emoji: "🏭" },
+  // Financials
+  JPM:   { sector: "Financials", emoji: "🏦" },
+  BAC:   { sector: "Financials", emoji: "🏦" },
+  GS:    { sector: "Financials", emoji: "🏦" },
+  // Energy
+  XOM:   { sector: "Energy", emoji: "🛢️" },
+  CVX:   { sector: "Energy", emoji: "🛢️" },
+  USO:   { sector: "Energy", emoji: "🛢️" },
 };
 
 export function sectorFor(ticker: string): { sector: string; emoji: string } {

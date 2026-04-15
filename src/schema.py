@@ -114,6 +114,7 @@ class DailyBriefRow:
     HEADERS = [
         "date", "bullet_1", "bullet_2", "bullet_3", "verdict", "sentiment",
         "headline", "overnight", "premarket", "catalysts", "posture", "watch",
+        "raw_md",
     ]
 
     date: str
@@ -128,12 +129,14 @@ class DailyBriefRow:
     catalysts: str = ""     # pipe-separated, e.g. "20:30 PPI|Fed speakers|Q1 earnings"
     posture: str = ""       # free text, e.g. "POSTURE CHANGE: YES. ..."
     watch: str = ""         # pipe-separated watchlist items
+    raw_md: str = ""        # full original brief text for in-app detail view
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
         return [
             d, self.bullet_1, self.bullet_2, self.bullet_3, self.verdict, self.sentiment,
             self.headline, self.overnight, self.premarket, self.catalysts, self.posture, self.watch,
+            self.raw_md,
         ]
 
 
@@ -268,6 +271,7 @@ def daily_from_sidecar(sidecar: dict) -> DailyBriefRow:
         catalysts=_join(sidecar.get("catalysts")),
         posture=str(sidecar.get("posture", "")),
         watch=_join(sidecar.get("watch")),
+        raw_md=str(sidecar.get("raw_md", "")),
     )
 
 
