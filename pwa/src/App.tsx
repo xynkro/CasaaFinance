@@ -43,8 +43,8 @@ function Dashboard() {
   return (
     <div className="bg-mesh min-h-screen pb-20">
       {/* Header */}
-      <header className="sticky top-0 z-40 px-4">
-        <div className="flex items-center justify-between py-4">
+      <header className="sticky top-0 z-40 px-4 pt-safe-top glass-bright">
+        <div className="flex items-center justify-between py-3">
           <div>
             <h1 className="text-lg font-bold text-white tracking-tight">{TAB_TITLES[tab]}</h1>
             <p className="text-[10px] text-slate-500 mt-0.5">Casaa Finance</p>
@@ -90,7 +90,7 @@ function Dashboard() {
           sarahHistory={data?.sarahHistory ?? []}
           macroHistory={data?.macroHistory ?? []}
         />
-        <ArchivePage archive={data?.archive ?? []} />
+        <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />
         <SettingsPage
           settings={settings}
           onUpdate={updateSettings}

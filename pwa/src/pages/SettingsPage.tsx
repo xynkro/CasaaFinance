@@ -1,5 +1,5 @@
 import type { Settings } from "../settings";
-import { LogOut, DollarSign, LayoutGrid, ListChecks, Home } from "lucide-react";
+import { LogOut, DollarSign, LayoutGrid, ListChecks, Home, Sun, Type, Layers, Droplets } from "lucide-react";
 
 const TAB_NAMES = ["Home", "Caspar", "Sarah", "Decisions", "History", "Archive", "Settings"];
 
@@ -17,6 +17,37 @@ function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
         }`}
       />
     </button>
+  );
+}
+
+function Slider({
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  label,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (v: number) => void;
+  label?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 w-40">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step ?? 1}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full h-1.5 rounded-full appearance-none bg-slate-600 accent-indigo-500 cursor-pointer"
+      />
+      {label && <span className="text-xs text-slate-400 tabular-nums w-8 text-right shrink-0">{label}</span>}
+    </div>
   );
 }
 
@@ -58,6 +89,28 @@ export function SettingsPage({
 }) {
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
+      {/* Appearance */}
+      <div className="glass rounded-2xl p-5">
+        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Appearance</h3>
+        <div className="divide-y divide-white/5">
+          <SettingRow icon={Sun} label="Background darkness" description="Darken the background image">
+            <Slider value={settings.bgDarkness} min={20} max={95} onChange={(v) => onUpdate({ bgDarkness: v })} label={`${settings.bgDarkness}%`} />
+          </SettingRow>
+
+          <SettingRow icon={Droplets} label="Extra blur" description="Additional background blur">
+            <Slider value={settings.bgBlur} min={0} max={30} onChange={(v) => onUpdate({ bgBlur: v })} label={`${settings.bgBlur}px`} />
+          </SettingRow>
+
+          <SettingRow icon={Layers} label="Card opacity" description="Glass card transparency">
+            <Slider value={settings.cardOpacity} min={10} max={100} onChange={(v) => onUpdate({ cardOpacity: v })} label={`${settings.cardOpacity}%`} />
+          </SettingRow>
+
+          <SettingRow icon={Type} label="Font size" description="Base text size">
+            <Slider value={settings.fontSize} min={12} max={22} onChange={(v) => onUpdate({ fontSize: v })} label={`${settings.fontSize}px`} />
+          </SettingRow>
+        </div>
+      </div>
+
       {/* Display */}
       <div className="glass rounded-2xl p-5">
         <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Display</h3>
@@ -111,7 +164,7 @@ export function SettingsPage({
       </div>
 
       <p className="text-center text-[10px] text-slate-600 mt-2">
-        Casaa Finance v1.0
+        Casaa Finance v1.1
       </p>
     </div>
   );

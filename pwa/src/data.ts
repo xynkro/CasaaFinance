@@ -86,6 +86,7 @@ export interface ArchiveRow {
 // ---------- aggregate fetch ----------
 
 export interface DashboardData {
+  dailyHistory: DailyBriefRow[];
   daily: DailyBriefRow | null;
   caspar: SnapshotRow | null;
   sarah: SnapshotRow | null;
@@ -140,6 +141,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
       ]);
     return {
+      dailyHistory: sortByDate(dailyRows).reverse(),
       daily: latest(dailyRows),
       caspar: latest(casparRows),
       sarah: latest(sarahRows),
@@ -155,7 +157,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
     };
   } catch (e) {
     return {
-      daily: null, caspar: null, sarah: null,
+      dailyHistory: [], daily: null, caspar: null, sarah: null,
       casparPositions: [], sarahPositions: [], decisions: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [], error: String(e),

@@ -18,7 +18,7 @@ export function PortfolioPage({
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
       <div className="fade-up fade-up-1">
-        <PnlCard label={label} currency={currency} snapshot={snapshot} loading={loading} />
+        <PnlCard label={label} currency={currency} snapshot={snapshot} positions={positions} loading={loading} />
       </div>
       <div className="fade-up fade-up-2">
         <PositionsTable positions={positions} currency={currency} />

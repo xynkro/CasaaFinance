@@ -1,11 +1,20 @@
-import type { SnapshotRow } from "../data";
+import type { SnapshotRow, PositionRow } from "../data";
 import { Card } from "./Card";
 import { TrendingUp, TrendingDown, Wallet } from "lucide-react";
 
-function fmt(v: string | undefined, prefix = "$"): string {
+function fmt(v: string | number | undefined, prefix = "$"): string {
   const n = Number(v);
   if (isNaN(n)) return "—";
   return `${prefix}${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtCompact(v: string | number | undefined, prefix = "$"): string {
+  const n = Number(v);
+  if (isNaN(n) || n === 0) return "—";
+  if (Math.abs(n) >= 1000) {
+    return `${prefix}${(n / 1000).toFixed(1)}k`;
+  }
+  return fmt(v, prefix);
 }
 
 function pct(v: string | undefined): { text: string; positive: boolean } {
@@ -33,15 +42,26 @@ function Skeleton() {
   );
 }
 
+function StatRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between">
+      <span className="text-slate-500">{label}</span>
+      <span className="text-slate-300 tabular-nums">{value}</span>
+    </div>
+  );
+}
+
 export function PnlCard({
   label,
   currency,
   snapshot,
+  positions,
   loading,
 }: {
   label: string;
   currency: "USD" | "SGD";
   snapshot: SnapshotRow | null;
+  positions?: PositionRow[];
   loading?: boolean;
 }) {
   if (loading) return <Skeleton />;
@@ -60,6 +80,8 @@ export function PnlCard({
   const prefix = currency === "SGD" ? "S$" : "$";
   const uplPct = pct(snapshot.upl_pct);
   const Icon = uplPct.positive ? TrendingUp : TrendingDown;
+  const posCount = positions?.length ?? 0;
+  const totalMktVal = positions?.reduce((sum, p) => sum + Number(p.mkt_val || 0), 0) ?? 0;
 
   return (
     <Card>
@@ -87,17 +109,12 @@ export function PnlCard({
         </span>
       </div>
 
-      <div className="flex gap-5 text-xs text-slate-400">
-        <div>
-          <span className="text-slate-500">Cash </span>
-          <span className="text-slate-300 tabular-nums">{fmt(snapshot.cash, prefix)}</span>
-        </div>
-        <div>
-          <span className="text-slate-500">UPL </span>
-          <span className={`tabular-nums ${uplPct.positive ? "text-emerald-400/80" : "text-red-400/80"}`}>
-            {fmt(snapshot.upl, prefix)}
-          </span>
-        </div>
+      {/* Summary stats grid */}
+      <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 text-xs">
+        <StatRow label="Cash" value={fmt(snapshot.cash, prefix)} />
+        <StatRow label="UPL" value={fmt(snapshot.upl, prefix)} />
+        <StatRow label="Market value" value={fmtCompact(totalMktVal, prefix)} />
+        <StatRow label="Positions" value={posCount > 0 ? `${posCount} holdings` : "—"} />
       </div>
     </Card>
   );
