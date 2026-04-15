@@ -1,0 +1,17 @@
+{
+  "date": "2026-04-15",
+  "bullets": [
+    "VIX 14.2, SPX +0.4% overnight on soft CPI print — risk-on tone into US open.",
+    "NVDA pre-announces Q2 beat; semis gap +2% premarket; watchlist SOXL trailing stop tightens.",
+    "USD/SGD 1.3428 (-0.1%); no S-REIT impact expected; local session quiet."
+  ],
+  "verdict": "Hold. No new entries; let overnight momentum prove itself through the US open before adding.",
+  "sentiment": "neutral",
+  "macro": {
+    "vix": 14.2,
+    "dxy": 103.15,
+    "us_10y": 4.32,
+    "spx": 5278.4,
+    "usd_sgd": 1.3428
+  }
+}

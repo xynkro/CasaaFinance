@@ -1,0 +1,61 @@
+{
+  "date": "2026-04-13",
+  "portfolio": {
+    "net_liq": 8237.45,
+    "cash": 1204.12,
+    "excess_liq": 1150.00,
+    "positions": [
+      {"ticker": "SCHD", "qty": 45, "last": 30.57, "mkt_val": 1375.65, "weight": 0.167, "upl": 7.65, "upl_pct": 0.006, "cost_basis": 30.40},
+      {"ticker": "VOO", "qty": 3, "last": 482.10, "mkt_val": 1446.30, "weight": 0.176, "upl": 24.90, "upl_pct": 0.018, "cost_basis": 473.80},
+      {"ticker": "QQQ", "qty": 2, "last": 465.20, "mkt_val": 930.40, "weight": 0.113, "upl": -8.40, "upl_pct": -0.009, "cost_basis": 469.40},
+      {"ticker": "NVDA", "qty": 4, "last": 920.50, "mkt_val": 3682.00, "weight": 0.447, "upl": 450.00, "upl_pct": 0.139, "cost_basis": 807.50}
+    ]
+  },
+  "sarah_portfolio": {
+    "net_liq": 51234.00,
+    "cash": 8420.50,
+    "positions": [
+      {"ticker": "D05.SI", "qty": 300, "last": 35.42, "mkt_val": 10626.00, "weight": 0.207, "upl": 420.00, "upl_pct": 0.041, "cost_basis": 34.02},
+      {"ticker": "CSPX.L", "qty": 20, "last": 525.30, "mkt_val": 10506.00, "weight": 0.205, "upl": 180.00, "upl_pct": 0.017, "cost_basis": 516.30}
+    ]
+  },
+  "macro": {
+    "vix": 14.8,
+    "dxy": 103.45,
+    "us_10y": 4.35,
+    "spx": 5260.10,
+    "usd_sgd": 1.3438
+  },
+  "decisions": [
+    {
+      "account": "caspar",
+      "ticker": "SCHD",
+      "bucket": "BUY NOW",
+      "thesis_1liner": "Quality dividend sleeve, refill to 20% target weight at $30.40.",
+      "conv": 0.8,
+      "entry": 30.40,
+      "target": 34.00,
+      "status": "filled"
+    },
+    {
+      "account": "caspar",
+      "ticker": "MSFT",
+      "bucket": "WATCH",
+      "thesis_1liner": "Azure AI reacceleration pending Q3 print; wait for pullback to $365.",
+      "conv": 0.65,
+      "entry": 365.00,
+      "target": 410.00,
+      "status": "pending"
+    },
+    {
+      "account": "sarah",
+      "ticker": "AAPL",
+      "bucket": "CSP",
+      "thesis_1liner": "Short $250P, 30DTE, ~14% annualised yield; happy to be assigned.",
+      "conv": 0.7,
+      "entry": 250.00,
+      "target": 0,
+      "status": "pending"
+    }
+  ]
+}

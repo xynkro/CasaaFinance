@@ -1,0 +1,28 @@
+# Secrets
+.env
+.config/client_secret*.json
+.state/authorized_user.json
+.state/token*.json
+.state/sync.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# PWA build artefacts
+pwa/node_modules/
+pwa/dist/
+pwa/.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
