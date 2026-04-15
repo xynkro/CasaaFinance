@@ -34,6 +34,13 @@ export interface DailyBriefRow {
   bullet_3: string;
   verdict: string;
   sentiment: string;
+  // Rich sections (optional — older rows may be blank)
+  headline?: string;
+  overnight?: string;   // pipe-separated bullets
+  premarket?: string;
+  catalysts?: string;
+  posture?: string;
+  watch?: string;
 }
 
 export interface SnapshotRow {

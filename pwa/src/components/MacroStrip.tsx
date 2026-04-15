@@ -1,4 +1,5 @@
 import type { MacroRow } from "../data";
+import { MACRO_EMOJI } from "../lib/emojis";
 
 export function MacroStrip({ macro }: { macro: MacroRow | null }) {
   if (!macro) return null;
@@ -12,12 +13,13 @@ export function MacroStrip({ macro }: { macro: MacroRow | null }) {
   ];
 
   return (
-    <div className="flex gap-3 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
+    <div className="flex gap-2 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
       {items.map((item) => (
         <div
           key={item.label}
-          className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/5 border border-white/5"
+          className="shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-white/5 border border-white/5"
         >
+          <span className="text-[11px]">{MACRO_EMOJI[item.label] ?? "📊"}</span>
           <span className="text-[10px] text-slate-500 font-medium">{item.label}</span>
           <span className="text-xs text-slate-300 font-semibold tabular-nums">{item.value}</span>
         </div>

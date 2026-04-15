@@ -1,6 +1,7 @@
 import type { ArchiveRow, DailyBriefRow } from "../data";
 import { Card } from "../cards/Card";
 import { FileText, ExternalLink, Archive, Newspaper } from "lucide-react";
+import { SENTIMENT } from "../lib/emojis";
 
 function shortDate(d: string): string {
   const s = d.slice(0, 10);
@@ -8,12 +9,6 @@ function shortDate(d: string): string {
   const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${Number(day)} ${months[Number(m)]} ${y}`;
 }
-
-const SENTIMENT_CHIP: Record<string, { emoji: string; color: string }> = {
-  bullish: { emoji: "\u{1F7E2}", color: "text-emerald-400" },
-  neutral: { emoji: "\u{1F7E1}", color: "text-yellow-400" },
-  bearish: { emoji: "\u{1F534}", color: "text-red-400" },
-};
 
 function ArchiveItem({ row }: { row: ArchiveRow }) {
   const url = row.drive_url || `https://drive.google.com/file/d/${row.drive_file_id}/view`;
@@ -37,17 +32,20 @@ function ArchiveItem({ row }: { row: ArchiveRow }) {
 }
 
 function DailyBriefItem({ row }: { row: DailyBriefRow }) {
-  const chip = SENTIMENT_CHIP[row.sentiment] ?? SENTIMENT_CHIP.neutral;
+  const chip = SENTIMENT[row.sentiment] ?? SENTIMENT.neutral;
   return (
     <div className="px-5 py-3.5">
       <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-2">
-          <span className="text-xs">{chip.emoji}</span>
-          <span className={`text-xs font-semibold capitalize ${chip.color}`}>{row.sentiment}</span>
+        <span className="text-xs font-semibold text-slate-200 tabular-nums">{shortDate(row.date)}</span>
+        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${chip.bg} ${chip.text}`}>
+          <span className="text-[9px]">{chip.emoji}</span>
+          <span>{chip.label}</span>
         </div>
-        <span className="text-xs text-slate-500">{shortDate(row.date)}</span>
       </div>
-      <p className="text-sm text-slate-300 leading-snug">{row.verdict}</p>
+      {row.headline && (
+        <p className="text-[13px] text-slate-200 leading-snug mb-1 font-medium">{row.headline}</p>
+      )}
+      <p className="text-xs text-slate-400 leading-snug">{row.verdict}</p>
     </div>
   );
 }

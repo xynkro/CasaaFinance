@@ -111,21 +111,32 @@ class DecisionRow:
 @dataclass
 class DailyBriefRow:
     TAB_NAME = "daily_brief_latest"
-    HEADERS = ["date", "bullet_1", "bullet_2", "bullet_3", "verdict", "sentiment"]
+    HEADERS = [
+        "date", "bullet_1", "bullet_2", "bullet_3", "verdict", "sentiment",
+        "headline", "overnight", "premarket", "catalysts", "posture", "watch",
+    ]
 
     date: str
-    bullet_1: str
-    bullet_2: str
-    bullet_3: str
-    verdict: str          # free text one-liner
-    sentiment: str        # "bullish" | "neutral" | "bearish" (or emoji)
+    bullet_1: str = ""
+    bullet_2: str = ""
+    bullet_3: str = ""
+    verdict: str = ""
+    sentiment: str = ""
+    headline: str = ""      # opening line of the brief (big summary)
+    overnight: str = ""     # e.g. "S&P 6,886 (+1.02%) | Nasdaq +1.23% | VIX 18.59 -2.77%"
+    premarket: str = ""     # e.g. "ES +0.22% | Brent $99 | Gold $4,748"
+    catalysts: str = ""     # pipe-separated, e.g. "20:30 PPI|Fed speakers|Q1 earnings"
+    posture: str = ""       # free text, e.g. "POSTURE CHANGE: YES. ..."
+    watch: str = ""         # pipe-separated watchlist items
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
-        return [d, self.bullet_1, self.bullet_2, self.bullet_3, self.verdict, self.sentiment]
+        return [
+            d, self.bullet_1, self.bullet_2, self.bullet_3, self.verdict, self.sentiment,
+            self.headline, self.overnight, self.premarket, self.catalysts, self.posture, self.watch,
+        ]
 
 
-@dataclass
 @dataclass
 class WsrArchiveRow:
     TAB_NAME = "wsr_archive"
@@ -239,6 +250,11 @@ def macro_from_ledger(ledger: dict, date: str) -> MacroRow:
 def daily_from_sidecar(sidecar: dict) -> DailyBriefRow:
     bullets = sidecar.get("bullets") or ["", "", ""]
     bullets = (bullets + ["", "", ""])[:3]
+    # Optional rich sections — join lists with "|" for storage in a single sheet cell
+    def _join(v):
+        if isinstance(v, list):
+            return " | ".join(str(x) for x in v)
+        return str(v or "")
     return DailyBriefRow(
         date=str(sidecar.get("date", "")),
         bullet_1=bullets[0],
@@ -246,6 +262,12 @@ def daily_from_sidecar(sidecar: dict) -> DailyBriefRow:
         bullet_3=bullets[2],
         verdict=str(sidecar.get("verdict", "")),
         sentiment=str(sidecar.get("sentiment", "")),
+        headline=str(sidecar.get("headline", "")),
+        overnight=_join(sidecar.get("overnight")),
+        premarket=_join(sidecar.get("premarket")),
+        catalysts=_join(sidecar.get("catalysts")),
+        posture=str(sidecar.get("posture", "")),
+        watch=_join(sidecar.get("watch")),
     )
 
 
