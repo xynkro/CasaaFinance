@@ -96,7 +96,8 @@ export function PinGate({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="bg-mesh min-h-screen flex flex-col items-center justify-center px-6">
+    <div className="h-screen flex flex-col items-center justify-center px-6 relative">
+      <div className="bg-layer" />
       <div
         className={`glass-bright rounded-3xl p-8 w-full max-w-sm flex flex-col items-center gap-6 transition-all duration-300 ${
           error ? "animate-[shake_0.4s_ease-in-out]" : ""

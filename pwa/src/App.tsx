@@ -41,10 +41,13 @@ function Dashboard() {
   ).length;
 
   return (
-    <div className="bg-mesh min-h-screen pb-20">
-      {/* Header */}
-      <header className="sticky top-0 z-40 px-4 pt-safe-top glass-bright">
-        <div className="flex items-center justify-between py-3">
+    <div className="app-shell">
+      {/* Background layer */}
+      <div className="bg-layer" />
+
+      {/* Fixed header */}
+      <header className="app-header">
+        <div className="flex items-center justify-between py-3 px-4">
           <div>
             <h1 className="text-lg font-bold text-white tracking-tight">{TAB_TITLES[tab]}</h1>
             <p className="text-[10px] text-slate-500 mt-0.5">Casaa Finance</p>
@@ -61,43 +64,46 @@ function Dashboard() {
         </div>
       </header>
 
-      {data?.error && (
-        <div className="mx-4 mb-4 rounded-xl glass border-red-500/30 p-3 text-sm text-red-300 fade-up">
-          {data.error}
-        </div>
-      )}
+      {/* Scrollable content area */}
+      <main className="app-content">
+        {data?.error && (
+          <div className="mx-4 mb-4 rounded-xl glass border-red-500/30 p-3 text-sm text-red-300 fade-up">
+            {data.error}
+          </div>
+        )}
 
-      {/* Swipeable pages */}
-      <SwipeContainer activeIndex={tab} onChangeIndex={setTab}>
-        <HomePage data={data} loading={loading} />
-        <PortfolioPage
-          label="Caspar"
-          currency="USD"
-          snapshot={data?.caspar ?? null}
-          positions={data?.casparPositions ?? []}
-          loading={loading && !data}
-        />
-        <PortfolioPage
-          label="Sarah"
-          currency="SGD"
-          snapshot={data?.sarah ?? null}
-          positions={data?.sarahPositions ?? []}
-          loading={loading && !data}
-        />
-        <DecisionsPage decisions={data?.decisions ?? []} />
-        <HistoryPage
-          casparHistory={data?.casparHistory ?? []}
-          sarahHistory={data?.sarahHistory ?? []}
-          macroHistory={data?.macroHistory ?? []}
-        />
-        <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />
-        <SettingsPage
-          settings={settings}
-          onUpdate={updateSettings}
-          onLogout={handleLogout}
-        />
-      </SwipeContainer>
+        <SwipeContainer activeIndex={tab} onChangeIndex={setTab}>
+          <HomePage data={data} loading={loading} />
+          <PortfolioPage
+            label="Caspar"
+            currency="USD"
+            snapshot={data?.caspar ?? null}
+            positions={data?.casparPositions ?? []}
+            loading={loading && !data}
+          />
+          <PortfolioPage
+            label="Sarah"
+            currency="SGD"
+            snapshot={data?.sarah ?? null}
+            positions={data?.sarahPositions ?? []}
+            loading={loading && !data}
+          />
+          <DecisionsPage decisions={data?.decisions ?? []} />
+          <HistoryPage
+            casparHistory={data?.casparHistory ?? []}
+            sarahHistory={data?.sarahHistory ?? []}
+            macroHistory={data?.macroHistory ?? []}
+          />
+          <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />
+          <SettingsPage
+            settings={settings}
+            onUpdate={updateSettings}
+            onLogout={handleLogout}
+          />
+        </SwipeContainer>
+      </main>
 
+      {/* Fixed bottom tab bar */}
       <TabBar active={tab} onChange={setTab} decisionCount={pendingCount} />
     </div>
   );

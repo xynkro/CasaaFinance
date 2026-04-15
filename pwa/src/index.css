@@ -6,6 +6,8 @@
   --bg-blur: 0px;
   --base-font: 16px;
   --card-opacity: 0.5;
+  --header-h: calc(env(safe-area-inset-top, 0px) + 56px);
+  --tabbar-h: calc(env(safe-area-inset-bottom, 0px) + 56px);
 }
 
 body {
@@ -15,31 +17,60 @@ body {
   font-family: "Inter", system-ui, -apple-system, sans-serif;
   font-size: var(--base-font);
   -webkit-font-smoothing: antialiased;
-  min-height: 100svh;
+  overflow: hidden;           /* prevent body scroll — content scrolls inside app-content */
+  position: fixed;
+  inset: 0;
 }
 
-/* Photo background with dynamic darkness overlay */
-.bg-mesh {
-  position: relative;
-  background:
-    url('/bg.jpg') center / cover no-repeat fixed;
+/* ===== App shell: fixed header + fixed tabs + scrollable middle ===== */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100svh;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Full-screen background image + darkness overlay */
+.bg-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: url('/bg.jpg') center / cover no-repeat;
   background-color: #050a18;
 }
-
-.bg-mesh::before {
+.bg-layer::after {
   content: '';
-  position: fixed;
+  position: absolute;
   inset: 0;
   background: rgba(5, 10, 24, var(--bg-darkness));
   backdrop-filter: blur(var(--bg-blur));
   -webkit-backdrop-filter: blur(var(--bg-blur));
-  z-index: 0;
-  pointer-events: none;
 }
 
-.bg-mesh > * {
+/* Fixed header */
+.app-header {
   position: relative;
-  z-index: 1;
+  z-index: 30;
+  flex-shrink: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* Scrollable content */
+.app-content {
+  position: relative;
+  z-index: 10;
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-top: 8px;
+  padding-bottom: 8px;
 }
 
 /* Glass card with dynamic opacity */
@@ -127,6 +158,6 @@ body {
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* Safe area padding */
+/* Safe area utilities */
 .pt-safe-top { padding-top: env(safe-area-inset-top, 0px); }
 .pb-safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
