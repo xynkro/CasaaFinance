@@ -150,7 +150,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
       ]);
     return {
-      dailyHistory: sortByDate(dailyRows).reverse(),
+      dailyHistory: dedup(dailyRows).reverse(),
       daily: latest(dailyRows),
       caspar: latest(casparRows),
       sarah: latest(sarahRows),

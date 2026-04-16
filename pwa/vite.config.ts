@@ -27,8 +27,12 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: /docs\.google\.com\/spreadsheets/,
-            handler: "StaleWhileRevalidate",
-            options: { cacheName: "sheet-csv", expiration: { maxAgeSeconds: 86400 } },
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "sheet-csv",
+              expiration: { maxAgeSeconds: 3600 },
+              networkTimeoutSeconds: 8,
+            },
           },
         ],
       },

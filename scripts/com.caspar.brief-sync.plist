@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Auto-sync daily news briefs to the Sheet when a new file appears -->
+  <key>Label</key>
+  <string>com.caspar.brief-sync</string>
+
+  <!-- Watch the Daily News Brief folder for ANY change (new file, edit, etc.) -->
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/xynkro/Documents/Trading/Daily News Brief</string>
+  </array>
+
+  <!-- Run the incremental backfill — it's cheap when nothing changed -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/.venv/bin/python</string>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/scripts/backfill_briefs.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA</string>
+
+  <!-- Throttle: don't re-fire for 30s after a trigger (avoid rapid-fire on save) -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <!-- Log output so we can debug -->
+  <key>StandardOutPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/brief-sync-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/brief-sync-stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>
