@@ -25,6 +25,23 @@ async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
   return data;
 }
 
+/**
+ * Normalize snapshot rows from either account's CSV headers into the
+ * generic SnapshotRow shape.  Caspar's sheet uses `net_liq_usd` / `cash`,
+ * Sarah's uses `net_liq_sgd` / `cash_sgd` / `upl_sgd`, but the frontend
+ * expects `net_liq` / `cash` / `upl` everywhere.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeSnapshot(rows: any[]): SnapshotRow[] {
+  return rows.map((r) => ({
+    date: r.date ?? "",
+    net_liq: r.net_liq ?? r.net_liq_usd ?? r.net_liq_sgd ?? "0",
+    cash: r.cash ?? r.cash_sgd ?? "0",
+    upl: r.upl ?? r.upl_sgd ?? "0",
+    upl_pct: r.upl_pct ?? "0",
+  }));
+}
+
 // ---------- typed rows ----------
 
 export interface DailyBriefRow {
@@ -138,17 +155,19 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRows, sarahRows, casparPos, sarahPos, decisions, macroRows, archiveRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, decisions, macroRows, archiveRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
-        fetchTab<SnapshotRow>("snapshot_caspar"),
-        fetchTab<SnapshotRow>("snapshot_sarah").catch(() => [] as SnapshotRow[]),
+        fetchTab<Record<string, string>>("snapshot_caspar"),
+        fetchTab<Record<string, string>>("snapshot_sarah").catch(() => [] as Record<string, string>[]),
         fetchTab<PositionRow>("positions_caspar").catch(() => [] as PositionRow[]),
         fetchTab<PositionRow>("positions_sarah").catch(() => [] as PositionRow[]),
         fetchTab<DecisionRow>("decision_queue").catch(() => [] as DecisionRow[]),
         fetchTab<MacroRow>("macro"),
         fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
       ]);
+    const casparRows = normalizeSnapshot(casparRaw);
+    const sarahRows = normalizeSnapshot(sarahRaw);
     return {
       dailyHistory: dedup(dailyRows).reverse(),
       daily: latest(dailyRows),

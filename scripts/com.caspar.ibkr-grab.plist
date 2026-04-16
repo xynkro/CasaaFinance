@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Daily IBKR portfolio grab — runs at 05:30 SGT (US market close ~05:00 SGT during EDT).
+    Requires TWS to be running on localhost:7497. Fails silently if TWS is offline.
+  -->
+  <key>Label</key>
+  <string>com.caspar.ibkr-grab</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/.venv/bin/python</string>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/src/ibkr_grab.py</string>
+    <string>--sync</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA</string>
+
+  <!-- Run daily at 05:30 (SGT) — catches US market close -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>5</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/ibkr-grab-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/ibkr-grab-stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>
