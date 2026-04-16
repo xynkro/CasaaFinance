@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Daily portfolio tracker — runs at 06:00 SGT (after IBKR grab at 05:30).
+    Fetches Yahoo Finance prices using last-known positions.
+    No IBKR connection needed — just internet.
+  -->
+  <key>Label</key>
+  <string>com.caspar.daily-tracker</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/.venv/bin/python</string>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/scripts/daily_tracker.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA</string>
+
+  <!-- Run daily at 06:00 SGT — 30 min after IBKR grab, catches fresh grab if TWS was running -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/daily-tracker-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/daily-tracker-stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>
