@@ -238,14 +238,14 @@ export function WheelCard({
         </div>
       </div>
 
-      <div className="space-y-2">
+      <div className="space-y-3">
         {Object.entries(byAccount).map(([acct, opts]) => (
           <div key={acct}>
-            {Object.keys(byAccount).length > 1 && (
-              <div className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider mb-1.5">
-                {acct}
-              </div>
-            )}
+            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${
+              acct === "caspar" ? "text-blue-400" : "text-pink-400"
+            }`}>
+              {acct === "caspar" ? "Caspar" : "Sarah"}
+            </div>
             <div className="space-y-2">
               {opts.map((opt, i) => (
                 <OptionItem

@@ -150,8 +150,8 @@ function PortfolioChart({
               <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
             </linearGradient>
             <linearGradient id="gradSarah" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.3} />
-              <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+              <stop offset="0%" stopColor="#ec4899" stopOpacity={0.3} />
+              <stop offset="100%" stopColor="#ec4899" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid {...GRID} />
@@ -159,7 +159,7 @@ function PortfolioChart({
           <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} tickFormatter={fmtUsd} width={55} />
           <Tooltip content={<ChartTooltipContent />} />
           <Area type="monotone" dataKey="Caspar" stroke="#3b82f6" fill="url(#gradCaspar)" strokeWidth={2} dot={false} />
-          <Area type="monotone" dataKey="Sarah" stroke="#8b5cf6" fill="url(#gradSarah)" strokeWidth={2} dot={false} />
+          <Area type="monotone" dataKey="Sarah" stroke="#ec4899" fill="url(#gradSarah)" strokeWidth={2} dot={false} />
         </AreaChart>
       </ResponsiveContainer>
     </Card>
@@ -283,8 +283,8 @@ function PnlChart({ caspar, sarah, range }: { caspar: SnapshotRow[]; sarah: Snap
               <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
             </linearGradient>
             <linearGradient id="gradPnlS" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.25} />
-              <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
+              <stop offset="0%" stopColor="#ec4899" stopOpacity={0.25} />
+              <stop offset="100%" stopColor="#ec4899" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid {...GRID} />
@@ -292,7 +292,7 @@ function PnlChart({ caspar, sarah, range }: { caspar: SnapshotRow[]; sarah: Snap
           <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${v}%`} width={40} />
           <Tooltip content={<ChartTooltipContent />} />
           <Area type="monotone" dataKey="Caspar" stroke="#3b82f6" fill="url(#gradPnlC)" strokeWidth={2} dot={false} connectNulls />
-          <Area type="monotone" dataKey="Sarah" stroke="#8b5cf6" fill="url(#gradPnlS)" strokeWidth={2} dot={false} connectNulls />
+          <Area type="monotone" dataKey="Sarah" stroke="#ec4899" fill="url(#gradPnlS)" strokeWidth={2} dot={false} connectNulls />
         </AreaChart>
       </ResponsiveContainer>
     </Card>
