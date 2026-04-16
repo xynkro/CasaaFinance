@@ -1,6 +1,8 @@
+import { useState } from "react";
 import type { DecisionRow } from "../data";
 import { Card } from "../cards/Card";
-import { Target, Clock, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { StockDetail } from "../components/StockDetail";
+import { Target, Clock, CheckCircle, XCircle, AlertTriangle, ChevronRight } from "lucide-react";
 
 const STATUS_CONFIG: Record<string, {
   icon: typeof Target;
@@ -63,13 +65,16 @@ function ConvictionDots({ level }: { level: number }) {
   );
 }
 
-function DecisionCard({ decision }: { decision: DecisionRow }) {
+function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () => void }) {
   const status = STATUS_CONFIG[decision.status?.toLowerCase()] ?? DEFAULT_STATUS;
   const Icon = status.icon;
   const conv = Math.round(Number(decision.conv) || 0);
 
   return (
-    <div className={`glass rounded-2xl p-4 border ${status.border}`}>
+    <button
+      onClick={onTap}
+      className={`w-full text-left glass rounded-2xl p-4 border ${status.border} active:bg-white/3 transition-colors`}
+    >
       {/* Header: ticker + status */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2.5">
@@ -83,9 +88,12 @@ function DecisionCard({ decision }: { decision: DecisionRow }) {
             <div className="text-[10px] text-slate-500 uppercase">{decision.account || "—"}</div>
           </div>
         </div>
-        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${status.bg}`}>
-          <Icon size={12} className={status.text} />
-          <span className={`text-xs font-semibold ${status.text}`}>{status.label}</span>
+        <div className="flex items-center gap-2">
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${status.bg}`}>
+            <Icon size={12} className={status.text} />
+            <span className={`text-xs font-semibold ${status.text}`}>{status.label}</span>
+          </div>
+          <ChevronRight size={14} className="text-slate-600" />
         </div>
       </div>
 
@@ -120,7 +128,7 @@ function DecisionCard({ decision }: { decision: DecisionRow }) {
           )}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -143,6 +151,8 @@ function EmptyState() {
 }
 
 export function DecisionsPage({ decisions }: { decisions: DecisionRow[] }) {
+  const [selected, setSelected] = useState<DecisionRow | null>(null);
+
   if (!decisions.length) {
     return (
       <div className="px-4 pb-4">
@@ -165,29 +175,40 @@ export function DecisionsPage({ decisions }: { decisions: DecisionRow[] }) {
   }
 
   return (
-    <div className="px-4 pb-4 flex flex-col gap-4">
-      {/* Summary pills */}
-      <div className="flex gap-2 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
-        {Object.entries(counts).map(([status, count]) => {
-          const cfg = STATUS_CONFIG[status] ?? DEFAULT_STATUS;
-          return (
-            <div
-              key={status}
-              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full ${cfg.bg} border ${cfg.border}`}
-            >
-              <span className={`text-xs font-semibold ${cfg.text}`}>{count}</span>
-              <span className={`text-[10px] ${cfg.text} opacity-70`}>{cfg.label}</span>
-            </div>
-          );
-        })}
+    <>
+      <div className="px-4 pb-4 flex flex-col gap-4">
+        {/* Summary pills */}
+        <div className="flex gap-2 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
+          {Object.entries(counts).map(([status, count]) => {
+            const cfg = STATUS_CONFIG[status] ?? DEFAULT_STATUS;
+            return (
+              <div
+                key={status}
+                className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full ${cfg.bg} border ${cfg.border}`}
+              >
+                <span className={`text-xs font-semibold ${cfg.text}`}>{count}</span>
+                <span className={`text-[10px] ${cfg.text} opacity-70`}>{cfg.label}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Decision cards */}
+        {sorted.map((d, i) => (
+          <div key={`${d.ticker}-${d.date}-${i}`} className={`fade-up fade-up-${Math.min(i + 1, 4)}`}>
+            <DecisionCard decision={d} onTap={() => setSelected(d)} />
+          </div>
+        ))}
       </div>
 
-      {/* Decision cards */}
-      {sorted.map((d, i) => (
-        <div key={`${d.ticker}-${d.date}-${i}`} className={`fade-up fade-up-${Math.min(i + 1, 4)}`}>
-          <DecisionCard decision={d} />
-        </div>
-      ))}
-    </div>
+      {selected && (
+        <StockDetail
+          decision={selected}
+          ticker={selected.ticker}
+          currency={selected.account?.toLowerCase() === "sarah" ? "SGD" : "USD"}
+          onClose={() => setSelected(null)}
+        />
+      )}
+    </>
   );
 }

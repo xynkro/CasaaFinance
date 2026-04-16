@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { PositionRow } from "../data";
+import type { PositionRow, DecisionRow } from "../data";
 import { X, TrendingUp, TrendingDown, ChevronLeft } from "lucide-react";
 import { sectorFor } from "../lib/emojis";
 
@@ -11,13 +11,18 @@ function fmt(v: string | number, prefix = "$"): string {
 
 export function StockDetail({
   position,
+  decision,
+  ticker: tickerProp,
   currency,
   onClose,
 }: {
-  position: PositionRow;
+  position?: PositionRow;
+  decision?: DecisionRow;
+  ticker?: string;
   currency: "USD" | "SGD";
   onClose: () => void;
 }) {
+  const ticker = tickerProp ?? position?.ticker ?? decision?.ticker ?? "";
   const chartRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -27,11 +32,11 @@ export function StockDetail({
   const [dragX, setDragX] = useState(0);
 
   const prefix = currency === "SGD" ? "S$" : "$";
-  const upl = Number(position.upl);
+  const upl = position ? Number(position.upl) : 0;
   const isUp = upl >= 0;
-  const avgCost = Number(position.avg_cost);
-  const uplPct = avgCost > 0 ? ((Number(position.last) - avgCost) / avgCost) * 100 : 0;
-  const { sector, emoji } = sectorFor(position.ticker);
+  const avgCost = position ? Number(position.avg_cost) : 0;
+  const uplPct = avgCost > 0 ? ((Number(position?.last) - avgCost) / avgCost) * 100 : 0;
+  const { sector, emoji } = sectorFor(ticker);
 
   // ---- Swipe-right-to-close ----
   const SWIPE_THRESHOLD = 80;
@@ -79,7 +84,7 @@ export function StockDetail({
       script.async = true;
       script.innerHTML = JSON.stringify({
         autosize: true,
-        symbol: position.ticker,
+        symbol: ticker,
         interval: "D",
         timezone: "Asia/Singapore",
         theme: "dark",
@@ -114,12 +119,12 @@ export function StockDetail({
         disableInterval: false,
         width: "100%",
         height: 450,
-        symbol: position.ticker,
+        symbol: ticker,
         showIntervalTabs: true,
       });
       taRef.current.appendChild(ta);
     }
-  }, [position.ticker]);
+  }, [ticker]);
 
   return (
     <div
@@ -147,7 +152,7 @@ export function StockDetail({
         <div className="flex items-center gap-2.5">
           <span className="text-lg">{emoji}</span>
           <div className="text-right">
-            <h2 className="text-base font-bold text-white leading-tight">{position.ticker}</h2>
+            <h2 className="text-base font-bold text-white leading-tight">{ticker}</h2>
             <span className="text-[10px] text-slate-500">{sector}</span>
           </div>
         </div>
@@ -160,34 +165,67 @@ export function StockDetail({
         </button>
       </div>
 
-      {/* Price + P&L */}
-      <div className="px-4 py-3 flex items-baseline gap-3 border-b border-white/6">
-        <span className="text-2xl font-bold text-white tabular-nums">{fmt(position.last, prefix)}</span>
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums ${
-          isUp ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
-        }`}>
-          {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-          {uplPct >= 0 ? "+" : ""}{uplPct.toFixed(2)}%
-        </span>
-        <span className="text-xs text-slate-500 ml-auto">
-          {Number(position.qty).toFixed(0)} @ {fmt(position.avg_cost, prefix)}
-        </span>
-      </div>
+      {/* Price + P&L (position mode) */}
+      {position && (
+        <div className="px-4 py-3 flex items-baseline gap-3 border-b border-white/6">
+          <span className="text-2xl font-bold text-white tabular-nums">{fmt(position.last, prefix)}</span>
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums ${
+            isUp ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
+          }`}>
+            {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+            {uplPct >= 0 ? "+" : ""}{uplPct.toFixed(2)}%
+          </span>
+          <span className="text-xs text-slate-500 ml-auto">
+            {Number(position.qty).toFixed(0)} @ {fmt(position.avg_cost, prefix)}
+          </span>
+        </div>
+      )}
 
-      {/* Stats grid */}
-      <div className="grid grid-cols-4 gap-px bg-white/5 shrink-0">
-        {[
-          { label: "Mkt Val", value: fmt(position.mkt_val, prefix) },
-          { label: "UPL", value: fmt(position.upl, prefix) },
-          { label: "Avg Cost", value: fmt(position.avg_cost, prefix) },
-          { label: "Weight", value: `${(Number(position.weight) * 100).toFixed(1)}%` },
-        ].map((s) => (
-          <div key={s.label} className="bg-[#050a18] px-3 py-2.5 text-center">
-            <div className="text-[10px] text-slate-500">{s.label}</div>
-            <div className="text-xs font-semibold text-slate-200 tabular-nums mt-0.5">{s.value}</div>
+      {/* Decision info (decision mode) */}
+      {decision && (
+        <div className="px-4 py-3 border-b border-white/6 space-y-2">
+          <p className="text-sm text-slate-300 leading-relaxed">{decision.thesis_1liner}</p>
+          <div className="flex items-center gap-4 text-xs">
+            {decision.bucket && (
+              <span className="text-[10px] font-medium text-indigo-400 uppercase bg-indigo-500/10 px-2 py-0.5 rounded">
+                {decision.bucket}
+              </span>
+            )}
+            {decision.entry && (
+              <span className="text-slate-500">
+                Entry <span className="text-white font-semibold tabular-nums">{fmt(decision.entry, prefix)}</span>
+              </span>
+            )}
+            {decision.target && (
+              <span className="text-slate-500">
+                Target <span className="text-emerald-400 font-semibold tabular-nums">{fmt(decision.target, prefix)}</span>
+              </span>
+            )}
+            {decision.conv && Number(decision.conv) > 0 && (
+              <span className="text-slate-500">
+                Conv <span className="text-amber-400 font-semibold">{Math.round(Number(decision.conv))}/5</span>
+              </span>
+            )}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
+
+      {/* Stats grid (position mode) */}
+      {position && (
+        <div className="grid grid-cols-4 gap-px bg-white/5 shrink-0">
+          {[
+            { label: "Mkt Val", value: fmt(position.mkt_val, prefix) },
+            { label: "UPL", value: fmt(position.upl, prefix) },
+            { label: "Avg Cost", value: fmt(position.avg_cost, prefix) },
+            { label: "Weight", value: `${(Number(position.weight) * 100).toFixed(1)}%` },
+          ].map((s) => (
+            <div key={s.label} className="bg-[#050a18] px-3 py-2.5 text-center">
+              <div className="text-[10px] text-slate-500">{s.label}</div>
+              <div className="text-xs font-semibold text-slate-200 tabular-nums mt-0.5">{s.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Scrollable body: chart + technical analysis */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
