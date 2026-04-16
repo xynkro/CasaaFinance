@@ -91,6 +91,7 @@ def main():
     dedup_tab(ss, "positions_sarah")
     dedup_tab(ss, "wsr_archive")
     dedup_tab(ss, "decision_queue")
+    dedup_tab(ss, "options")
     print("\nDone.")
 
 

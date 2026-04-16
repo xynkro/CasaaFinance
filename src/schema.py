@@ -175,6 +175,86 @@ class MacroRow:
                 _num(self.spx, 2), _num(self.usd_sgd, 4)]
 
 
+@dataclass
+class OptionRow:
+    """Options positions with moneyness, assignment risk, momentum, and wheel context."""
+    TAB_NAME = "options"
+    HEADERS = [
+        "date", "account", "ticker", "right", "strike", "expiry",
+        "qty", "credit", "last", "mkt_val", "upl",
+        "underlying_last", "moneyness", "dte",
+        "assignment_risk", "wheel_leg", "adj_cost_basis",
+        "momentum_5d", "trend_risk",
+    ]
+
+    date: str
+    account: str            # "caspar" | "sarah"
+    ticker: str             # underlying symbol
+    right: str              # "C" (call) | "P" (put)
+    strike: float
+    expiry: str             # "YYYYMMDD"
+    qty: float              # negative = short
+    credit: float           # premium received per share (avg_cost_credit / multiplier)
+    last: float             # current option price per share
+    mkt_val: float
+    upl: float
+    underlying_last: float  # current stock price
+    moneyness: str          # "ITM" | "ATM" | "OTM"
+    dte: int                # days to expiry
+    assignment_risk: str    # "LOW" | "MED" | "HIGH"
+    wheel_leg: str          # "CC" | "CSP" | "LONG_CALL" | "LONG_PUT"
+    adj_cost_basis: float   # stock avg_cost - accumulated premiums
+    momentum_5d: float = 0.0   # 5-day price rate of change %
+    trend_risk: str = "?"      # "SAFE" | "DRIFTING" | "CONVERGING" | "BREACHING"
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.account, self.ticker, self.right,
+            _num(self.strike, 2), self.expiry,
+            _num(self.qty, 0), _num(self.credit, 4), _num(self.last, 4),
+            _num(self.mkt_val, 2), _num(self.upl, 2),
+            _num(self.underlying_last, 4), self.moneyness, str(self.dte),
+            self.assignment_risk, self.wheel_leg, _num(self.adj_cost_basis, 4),
+            _num(self.momentum_5d, 2), self.trend_risk,
+        ]
+
+
+@dataclass
+class TradeRow:
+    """Individual trade/execution from IBKR."""
+    TAB_NAME = "trades"
+    HEADERS = [
+        "date", "time", "account", "symbol", "sec_type",
+        "right", "strike", "expiry",
+        "side", "qty", "price", "commission", "realized_pnl",
+    ]
+
+    date: str
+    time: str               # ISO timestamp
+    account: str
+    symbol: str
+    sec_type: str            # "STK" | "OPT"
+    right: str               # "C" | "P" | "" for stocks
+    strike: float            # 0 for stocks
+    expiry: str              # "" for stocks
+    side: str                # "BOT" | "SLD"
+    qty: float
+    price: float
+    commission: float
+    realized_pnl: float
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.time, self.account, self.symbol, self.sec_type,
+            self.right, _num(self.strike, 2) if self.strike else "",
+            self.expiry, self.side,
+            _num(self.qty, 0), _num(self.price, 4),
+            _num(self.commission, 2), _num(self.realized_pnl, 2),
+        ]
+
+
 # ---------- Factory helpers to build rows from pipeline JSON ----------
 
 def snapshot_caspar_from_ledger(ledger: dict, date: str) -> SnapshotCaspar:

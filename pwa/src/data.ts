@@ -13,6 +13,7 @@ const GIDS: Record<string, string> = {
   positions_caspar: "981534946",
   positions_sarah: "444641294",
   decision_queue: "1744723757",
+  options: "326503132",
   macro: "447436838",
   wsr_archive: "1065773181",
 };
@@ -90,6 +91,28 @@ export interface MacroRow {
   usd_sgd: string;
 }
 
+export interface OptionRow {
+  date: string;
+  account: string;
+  ticker: string;
+  right: string;        // "C" | "P"
+  strike: string;
+  expiry: string;       // "YYYYMMDD"
+  qty: string;
+  credit: string;       // premium per share
+  last: string;
+  mkt_val: string;
+  upl: string;
+  underlying_last: string;
+  moneyness: string;    // "ITM" | "ATM" | "OTM"
+  dte: string;
+  assignment_risk: string; // "LOW" | "MED" | "HIGH"
+  wheel_leg: string;    // "CC" | "CSP" | "LONG_CALL" | "LONG_PUT"
+  adj_cost_basis: string;
+  momentum_5d: string;  // 5-day rate of change %
+  trend_risk: string;   // "SAFE" | "DRIFTING" | "CONVERGING" | "BREACHING"
+}
+
 export interface DecisionRow {
   date: string;
   account: string;
@@ -118,6 +141,7 @@ export interface DashboardData {
   sarah: SnapshotRow | null;
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
+  options: OptionRow[];
   decisions: DecisionRow[];
   macro: MacroRow | null;
   // History (all rows, sorted by date ascending)
@@ -155,13 +179,14 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, decisions, macroRows, archiveRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, decisions, macroRows, archiveRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
         fetchTab<Record<string, string>>("snapshot_sarah").catch(() => [] as Record<string, string>[]),
         fetchTab<PositionRow>("positions_caspar").catch(() => [] as PositionRow[]),
         fetchTab<PositionRow>("positions_sarah").catch(() => [] as PositionRow[]),
+        fetchTab<OptionRow>("options").catch(() => [] as OptionRow[]),
         fetchTab<DecisionRow>("decision_queue").catch(() => [] as DecisionRow[]),
         fetchTab<MacroRow>("macro"),
         fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
@@ -175,6 +200,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       sarah: latest(sarahRows),
       casparPositions: latestGroup(casparPos),
       sarahPositions: latestGroup(sarahPos),
+      options: latestGroup(optionRows),
       decisions: latestGroup(decisions),
       macro: latest(macroRows),
       casparHistory: dedup(casparRows),
@@ -186,7 +212,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
   } catch (e) {
     return {
       dailyHistory: [], daily: null, caspar: null, sarah: null,
-      casparPositions: [], sarahPositions: [], decisions: [],
+      casparPositions: [], sarahPositions: [], options: [], decisions: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [], error: String(e),
     };

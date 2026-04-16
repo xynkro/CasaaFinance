@@ -9,8 +9,8 @@ How it works:
   2. Fetches live prices via yfinance for every ticker.
   3. Calculates mkt_val, UPL, net_liq per account.
   4. Fetches macro data (VIX, SPX, DXY, US 10Y, USD/SGD).
-  5. Pushes snapshot_caspar, snapshot_sarah, positions_caspar, positions_sarah,
-     and macro rows to the Sheet.
+  5. Builds options rows with moneyness, DTE, assignment risk, wheel stage.
+  6. Pushes snapshot, positions, options, and macro rows to the Sheet.
 
 Usage:
   python scripts/daily_tracker.py              # fetch + push
@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -222,6 +223,231 @@ def build_snapshots(grab: dict, prices: dict[str, float], macro: dict[str, float
     return results
 
 
+def calc_moneyness(right: str, strike: float, underlying: float) -> str:
+    """Calculate ITM/ATM/OTM based on option type and underlying price."""
+    if underlying <= 0 or strike <= 0:
+        return "?"
+    pct_diff = abs(underlying - strike) / strike
+    if pct_diff < 0.02:  # within 2% of strike
+        return "ATM"
+    if right == "C":
+        return "ITM" if underlying > strike else "OTM"
+    else:  # put
+        return "ITM" if underlying < strike else "OTM"
+
+
+def calc_dte(expiry: str) -> int:
+    """Days to expiry from YYYYMMDD string."""
+    try:
+        exp_date = datetime.strptime(expiry, "%Y%m%d").date()
+        return max(0, (exp_date - date.today()).days)
+    except (ValueError, TypeError):
+        return -1
+
+
+def calc_assignment_risk(moneyness: str, dte: int, trend_risk: str = "") -> str:
+    """Assignment risk based on moneyness + time to expiry + trend."""
+    if moneyness == "ITM":
+        if dte <= 7 or trend_risk == "BREACHING":
+            return "HIGH"
+        elif dte <= 21 or trend_risk == "CONVERGING":
+            return "MED"
+        else:
+            return "LOW"
+    elif moneyness == "ATM":
+        if dte <= 7 or trend_risk in ("BREACHING", "CONVERGING"):
+            return "MED"
+        else:
+            return "LOW"
+    elif trend_risk == "CONVERGING" and dte <= 14:
+        return "MED"
+    return "LOW"  # OTM
+
+
+def fetch_momentum(tickers: list[str]) -> dict[str, float]:
+    """Fetch 5-day rate of change for option underlyings."""
+    import yfinance as yf
+
+    if not tickers:
+        return {}
+
+    yahoo_syms = [yahoo_ticker(t) for t in tickers]
+    result: dict[str, float] = {}
+
+    data = yf.download(yahoo_syms, period="1mo", progress=False, threads=True)
+    if data.empty:
+        return result
+
+    close = data.get("Close")
+    if close is None:
+        return result
+
+    for orig, ysym in zip(tickers, yahoo_syms):
+        try:
+            if len(yahoo_syms) == 1:
+                series = close.dropna()
+            else:
+                col = close[ysym] if ysym in close.columns else None
+                series = col.dropna() if col is not None else None
+
+            if series is not None and len(series) >= 6:
+                # 5-day rate of change: (today - 5 days ago) / 5 days ago
+                roc = (float(series.iloc[-1]) - float(series.iloc[-6])) / float(series.iloc[-6])
+                result[orig] = round(roc * 100, 2)  # as percentage
+            else:
+                result[orig] = 0.0
+        except (KeyError, IndexError):
+            result[orig] = 0.0
+
+    return result
+
+
+def calc_trend_risk(right: str, strike: float, underlying: float, momentum_5d: float, is_short: bool) -> str:
+    """Assess whether price momentum is pushing toward assignment."""
+    if underlying <= 0 or strike <= 0:
+        return "?"
+    dist_pct = (underlying - strike) / strike * 100  # positive = above strike
+
+    if is_short:
+        # Short call: danger if price trending UP toward/past strike
+        if right == "C":
+            if dist_pct > 2 and momentum_5d > 1:        # already ITM & going deeper
+                return "BREACHING"
+            elif dist_pct > -5 and momentum_5d > 1.5:    # close & accelerating up
+                return "CONVERGING"
+            elif momentum_5d > 2 and dist_pct > -10:     # strong uptrend
+                return "DRIFTING"
+            return "SAFE"
+        # Short put: danger if price trending DOWN toward/past strike
+        else:
+            if dist_pct < -2 and momentum_5d < -1:       # already ITM & going deeper
+                return "BREACHING"
+            elif dist_pct < 5 and momentum_5d < -1.5:    # close & accelerating down
+                return "CONVERGING"
+            elif momentum_5d < -2 and dist_pct < 10:     # strong downtrend
+                return "DRIFTING"
+            return "SAFE"
+    else:
+        # Long positions: reverse logic (you WANT ITM)
+        if right == "C":
+            if dist_pct > 2 and momentum_5d > 0:
+                return "SAFE"          # profitable & trending right
+            elif momentum_5d < -1.5:
+                return "DRIFTING"      # moving away from profit
+            return "SAFE"
+        else:
+            if dist_pct < -2 and momentum_5d < 0:
+                return "SAFE"
+            elif momentum_5d > 1.5:
+                return "DRIFTING"
+            return "SAFE"
+
+
+def build_options(grab: dict, prices: dict[str, float], momentum: dict[str, float], today: str):
+    """Build option rows with moneyness, wheel stage, and adjusted cost basis."""
+    from src import schema as S
+
+    option_rows = []
+
+    for acct_key in ("caspar", "sarah"):
+        acct = grab.get("accounts", {}).get(acct_key, {})
+        options_raw = acct.get("options", [])
+        positions_raw = acct.get("positions", [])
+
+        if not options_raw:
+            continue
+
+        # Build stock holdings map: ticker -> {qty, avg_cost}
+        stock_map = {}
+        for p in positions_raw:
+            sym = p.get("symbol", "")
+            stock_map[sym] = {
+                "qty": float(p.get("qty", 0)),
+                "avg_cost": float(p.get("avg_cost", 0)),
+            }
+
+        # Accumulate total credits per ticker from current options
+        # (for adj_cost_basis = stock_avg_cost - premiums_per_share)
+        ticker_credits: dict[str, float] = {}
+        for opt in options_raw:
+            sym = opt.get("symbol", "")
+            credit = float(opt.get("avg_cost_credit", 0))
+            mult = int(opt.get("multiplier", 100))
+            # credit is per-share cost from IBKR (avg_cost_credit / multiplier gives per-share premium)
+            credit_per_share = credit / mult if mult else credit / 100
+            if opt.get("qty", 0) < 0:  # short = sold = credit received
+                ticker_credits[sym] = ticker_credits.get(sym, 0) + credit_per_share
+
+        for opt in options_raw:
+            sym = opt.get("symbol", "")
+            right = opt.get("right", "C")
+            strike = float(opt.get("strike", 0))
+            expiry = opt.get("expiry", "")
+            qty = float(opt.get("qty", 0))
+            credit = float(opt.get("avg_cost_credit", 0))
+            mult = int(opt.get("multiplier", 100))
+            last_opt = float(opt.get("last", 0))
+            mkt_val = float(opt.get("mkt_val", 0))
+            upl = float(opt.get("upl", 0))
+
+            # Underlying price from Yahoo (live)
+            underlying_last = prices.get(sym, 0.0)
+
+            moneyness = calc_moneyness(right, strike, underlying_last)
+            dte = calc_dte(expiry)
+            is_short = qty < 0
+            mom_5d = momentum.get(sym, 0.0)
+            trend = calc_trend_risk(right, strike, underlying_last, mom_5d, is_short)
+            assignment_risk = calc_assignment_risk(moneyness, dte, trend)
+
+            # Determine wheel leg
+            has_stock = sym in stock_map and stock_map[sym]["qty"] > 0
+            if qty < 0 and right == "C" and has_stock:
+                wheel_leg = "CC"  # covered call
+            elif qty < 0 and right == "P":
+                wheel_leg = "CSP"  # cash-secured put
+            elif qty < 0 and right == "C" and not has_stock:
+                wheel_leg = "NAKED_CALL"
+            elif qty > 0 and right == "C":
+                wheel_leg = "LONG_CALL"
+            elif qty > 0 and right == "P":
+                wheel_leg = "LONG_PUT"
+            else:
+                wheel_leg = "OTHER"
+
+            # Adjusted cost basis: stock avg_cost - premiums collected
+            stock_info = stock_map.get(sym)
+            if stock_info and stock_info["qty"] > 0:
+                total_credit_per_share = ticker_credits.get(sym, 0)
+                adj_cost_basis = stock_info["avg_cost"] - total_credit_per_share
+            else:
+                adj_cost_basis = 0.0
+
+            option_rows.append(S.OptionRow(
+                date=today,
+                account=acct_key,
+                ticker=sym,
+                right=right,
+                strike=strike,
+                expiry=expiry,
+                qty=qty,
+                credit=credit / mult if mult else credit / 100,
+                last=last_opt,
+                mkt_val=mkt_val,
+                upl=upl,
+                underlying_last=underlying_last,
+                moneyness=moneyness,
+                dte=dte,
+                assignment_risk=assignment_risk,
+                wheel_leg=wheel_leg,
+                adj_cost_basis=adj_cost_basis,
+                momentum_5d=mom_5d,
+                trend_risk=trend,
+            ))
+
+    return option_rows
+
+
 def push_to_sheet(results: dict):
     """Push all rows to sheet."""
     from src import schema as S, sheets as sh
@@ -245,12 +471,19 @@ def push_to_sheet(results: dict):
     sh.ensure_headers(client, "positions_sarah", S.PositionRow.HEADERS)
     sh.append_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
 
+    # Options
+    opts = results.get("options", [])
+    if opts:
+        sh.ensure_headers(client, S.OptionRow.TAB_NAME, S.OptionRow.HEADERS)
+        sh.append_rows(client, S.OptionRow.TAB_NAME, [o.to_row() for o in opts])
+
     macro = results["macro"]
     sh.ensure_headers(client, S.MacroRow.TAB_NAME, S.MacroRow.HEADERS)
     sh.append_row(client, S.MacroRow.TAB_NAME, macro.to_row())
 
     print(f"  Pushed: snapshot_caspar, {len(pos_c)} caspar positions, "
-          f"snapshot_sarah, {len(pos_s)} sarah positions, macro")
+          f"snapshot_sarah, {len(pos_s)} sarah positions, "
+          f"{len(opts)} options, macro")
 
 
 def main():
@@ -272,11 +505,14 @@ def main():
     print(f"Using positions from: {grab_path.name}")
     grab = json.loads(grab_path.read_text())
 
-    # Collect all tickers
+    # Collect all tickers (stocks + option underlyings)
     all_tickers = set()
     for acct in ("caspar", "sarah"):
-        for p in grab.get("accounts", {}).get(acct, {}).get("positions", []):
+        acct_data = grab.get("accounts", {}).get(acct, {})
+        for p in acct_data.get("positions", []):
             all_tickers.add(p["symbol"])
+        for o in acct_data.get("options", []):
+            all_tickers.add(o["symbol"])  # underlying ticker
 
     print(f"Fetching prices for {len(all_tickers)} tickers...")
     prices = fetch_prices(list(all_tickers))
@@ -294,6 +530,30 @@ def main():
     snap_s = results["snap_sarah"]
     print(f"  Caspar: net_liq=${snap_c.net_liq_usd:,.2f}  upl=${snap_c.upl:,.2f}  ({snap_c.upl_pct*100:.2f}%)")
     print(f"  Sarah:  net_liq=S${snap_s.net_liq_sgd:,.2f}  upl=S${snap_s.upl_sgd:,.2f}  ({snap_s.upl_pct*100:.2f}%)")
+
+    # Fetch momentum for option underlyings
+    option_underlyings = set()
+    for acct in ("caspar", "sarah"):
+        for o in grab.get("accounts", {}).get(acct, {}).get("options", []):
+            option_underlyings.add(o["symbol"])
+
+    momentum = {}
+    if option_underlyings:
+        print(f"Fetching momentum for {len(option_underlyings)} option underlyings...")
+        momentum = fetch_momentum(list(option_underlyings))
+        for sym, roc in momentum.items():
+            print(f"  {sym}: {roc:+.2f}% (5d)")
+
+    # Build options
+    print("Building options...")
+    today = results["date"]
+    option_rows = build_options(grab, prices, momentum, today)
+    results["options"] = option_rows
+    for opt in option_rows:
+        exp_fmt = f"{opt.expiry[:4]}-{opt.expiry[4:6]}-{opt.expiry[6:]}" if len(opt.expiry) == 8 else opt.expiry
+        print(f"  {opt.account}: {opt.ticker} {opt.strike}{opt.right} exp {exp_fmt} "
+              f"| {opt.moneyness} | DTE {opt.dte} | risk {opt.assignment_risk} | {opt.wheel_leg}"
+              f"{f' | adj_basis ${opt.adj_cost_basis:.2f}' if opt.adj_cost_basis else ''}")
 
     if args.dryrun:
         print("\n--dryrun: not pushing to sheet.")

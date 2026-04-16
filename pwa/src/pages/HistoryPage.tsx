@@ -252,13 +252,20 @@ function MacroChart({ macro, range }: { macro: MacroRow[]; range: Range }) {
 
 // ---------- P&L Change Chart ----------
 
-function PnlChart({ caspar, range }: { caspar: SnapshotRow[]; range: Range }) {
-  const filtered = filterByRange(caspar, range);
+function PnlChart({ caspar, sarah, range }: { caspar: SnapshotRow[]; sarah: SnapshotRow[]; range: Range }) {
+  const fc = filterByRange(caspar, range);
+  const fs = filterByRange(sarah, range);
 
-  const chartData = filtered.map((c) => ({
-    date: shortDate(c.date.slice(0, 10)),
-    pct: Number((Number(c.upl_pct) * 100).toFixed(2)),
-  }));
+  const sarahMap = new Map(fs.map((s) => [s.date.slice(0, 10), Number((Number(s.upl_pct) * 100).toFixed(2))]));
+
+  const chartData = fc.map((c) => {
+    const dateKey = c.date.slice(0, 10);
+    return {
+      date: shortDate(dateKey),
+      Caspar: Number((Number(c.upl_pct) * 100).toFixed(2)),
+      Sarah: sarahMap.get(dateKey) ?? null,
+    };
+  });
 
   if (!chartData.length) return null;
 
@@ -266,21 +273,26 @@ function PnlChart({ caspar, range }: { caspar: SnapshotRow[]; range: Range }) {
     <Card>
       <div className="flex items-center gap-2 mb-4">
         <BarChart3 size={14} className="text-indigo-400" />
-        <h3 className="text-sm font-medium text-slate-400">Caspar UPL %</h3>
+        <h3 className="text-sm font-medium text-slate-400">UPL %</h3>
       </div>
-      <ResponsiveContainer width="100%" height={160}>
+      <ResponsiveContainer width="100%" height={180}>
         <AreaChart data={chartData}>
           <defs>
-            <linearGradient id="gradPnl" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity={0.25} />
-              <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+            <linearGradient id="gradPnlC" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#3b82f6" stopOpacity={0.25} />
+              <stop offset="100%" stopColor="#3b82f6" stopOpacity={0} />
+            </linearGradient>
+            <linearGradient id="gradPnlS" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.25} />
+              <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid {...GRID} />
           <XAxis dataKey="date" tick={AXIS_STYLE} axisLine={false} tickLine={false} />
           <YAxis tick={AXIS_STYLE} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${v}%`} width={40} />
           <Tooltip content={<ChartTooltipContent />} />
-          <Area type="monotone" dataKey="pct" name="UPL %" stroke="#10b981" fill="url(#gradPnl)" strokeWidth={2} dot={false} />
+          <Area type="monotone" dataKey="Caspar" stroke="#3b82f6" fill="url(#gradPnlC)" strokeWidth={2} dot={false} connectNulls />
+          <Area type="monotone" dataKey="Sarah" stroke="#8b5cf6" fill="url(#gradPnlS)" strokeWidth={2} dot={false} connectNulls />
         </AreaChart>
       </ResponsiveContainer>
     </Card>
@@ -312,7 +324,7 @@ export function HistoryPage({
         <PortfolioChart caspar={casparHistory} sarah={sarahHistory} macro={macroHistory} range={range} />
       </div>
       <div className="fade-up fade-up-2">
-        <PnlChart caspar={casparHistory} range={range} />
+        <PnlChart caspar={casparHistory} sarah={sarahHistory} range={range} />
       </div>
       <div className="fade-up fade-up-3">
         <MacroChart macro={macroHistory} range={range} />

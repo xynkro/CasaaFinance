@@ -29,7 +29,7 @@ try:
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-from ib_insync import IB, AccountValue, PortfolioItem
+from ib_insync import IB, AccountValue, ExecutionFilter, PortfolioItem
 
 
 # ---------- config ----------
@@ -72,7 +72,13 @@ def grab_account(ib: IB, account_id: str) -> dict:
         }
 
         if c.secType == "OPT":
-            row["side"] = "short_call" if p.position < 0 else "long_call"
+            side_dir = "short" if p.position < 0 else "long"
+            side_type = "call" if c.right == "C" else "put"
+            row["side"] = f"{side_dir}_{side_type}"
+            row["right"] = c.right                            # "C" or "P"
+            row["strike"] = float(c.strike)                   # e.g. 230.0
+            row["expiry"] = c.lastTradeDateOrContractMonth    # "20260516"
+            row["multiplier"] = int(c.multiplier) if c.multiplier else 100
             row["avg_cost_credit"] = abs(float(p.averageCost))
             options.append(row)
         else:
@@ -90,6 +96,39 @@ def grab_account(ib: IB, account_id: str) -> dict:
         "options": options,
         "net_liq": net_liq,
     }
+
+
+def grab_trades(ib: IB, account_id: str) -> list[dict]:
+    """Grab recent fills/executions from TWS (typically last 7 days)."""
+    try:
+        fills = ib.reqExecutions(ExecutionFilter(acctCode=account_id))
+    except Exception as e:
+        print(f"  Warning: reqExecutions failed for {account_id}: {e}")
+        return []
+
+    trades = []
+    for f in fills:
+        c = f.contract
+        e = f.execution
+        cr = f.commissionReport
+        trade = {
+            "time": f.time.isoformat() if f.time else "",
+            "symbol": c.symbol,
+            "sec_type": c.secType,
+            "side": e.side,  # "BOT" or "SLD"
+            "qty": float(e.shares),
+            "price": float(e.price),
+            "commission": float(cr.commission) if cr else 0.0,
+            "realized_pnl": float(cr.realizedPNL)
+                if cr and cr.realizedPNL and cr.realizedPNL < 1e300 else 0.0,
+        }
+        if c.secType == "OPT":
+            trade["right"] = c.right
+            trade["strike"] = float(c.strike)
+            trade["expiry"] = c.lastTradeDateOrContractMonth
+            trade["multiplier"] = int(c.multiplier) if c.multiplier else 100
+        trades.append(trade)
+    return trades
 
 
 def build_grab_json(caspar_data: dict, sarah_data: dict) -> dict:
@@ -123,6 +162,8 @@ def build_grab_json(caspar_data: dict, sarah_data: dict) -> dict:
                     "total_market_value": float(cs.get("GrossPositionValue", cs.get("StockMarketValue", 0))),
                 },
                 "positions": caspar_data["stocks"],
+                "options": caspar_data["options"],
+                "trades": caspar_data.get("trades", []),
             },
             "sarah": {
                 "account_id": SARAH_ACCOUNT,
@@ -138,6 +179,7 @@ def build_grab_json(caspar_data: dict, sarah_data: dict) -> dict:
                 },
                 "positions": sarah_data["stocks"],
                 "options": sarah_data["options"],
+                "trades": sarah_data.get("trades", []),
             },
         },
     }
@@ -180,11 +222,16 @@ def main():
 
         print(f"Grabbing {CASPAR_ACCOUNT}...")
         caspar_data = grab_account(ib, CASPAR_ACCOUNT)
-        print(f"  {len(caspar_data['stocks'])} stocks, net liq ${caspar_data['net_liq']:,.2f}")
+        print(f"  {len(caspar_data['stocks'])} stocks, {len(caspar_data['options'])} options, net liq ${caspar_data['net_liq']:,.2f}")
 
         print(f"Grabbing {SARAH_ACCOUNT}...")
         sarah_data = grab_account(ib, SARAH_ACCOUNT)
         print(f"  {len(sarah_data['stocks'])} stocks, {len(sarah_data['options'])} options, net liq S${sarah_data['net_liq']:,.2f}")
+
+        print("Grabbing recent trades...")
+        caspar_data["trades"] = grab_trades(ib, CASPAR_ACCOUNT)
+        sarah_data["trades"] = grab_trades(ib, SARAH_ACCOUNT)
+        print(f"  {len(caspar_data['trades'])} caspar trades, {len(sarah_data['trades'])} sarah trades")
 
         grab = build_grab_json(caspar_data, sarah_data)
 
