@@ -1,6 +1,7 @@
 import type { OptionRow, PositionRow } from "../data";
 import { Card } from "./Card";
-import { CircleDot, AlertTriangle, TrendingUp, TrendingDown, Shield } from "lucide-react";
+import { CircleDot, AlertTriangle, TrendingUp, TrendingDown, Shield, Info } from "lucide-react";
+import { useState } from "react";
 
 // ---------- helpers ----------
 
@@ -84,7 +85,37 @@ function TrendIndicator({ trend, momentum }: { trend: string; momentum: string }
   );
 }
 
+function ConfidenceGauge({ value }: { value: number }) {
+  // Circular ring showing 0-100%. Red >= 60, Amber 30-60, Green < 30.
+  const radius = 14;
+  const circumference = 2 * Math.PI * radius;
+  const progress = Math.min(100, Math.max(0, value));
+  const offset = circumference * (1 - progress / 100);
+
+  const color = value >= 60 ? "#ef4444" : value >= 30 ? "#f59e0b" : "#10b981";
+
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: 36, height: 36 }}>
+      <svg width="36" height="36" className="rotate-[-90deg]">
+        <circle cx="18" cy="18" r={radius} stroke="rgba(255,255,255,0.08)" strokeWidth="3" fill="none" />
+        <circle
+          cx="18" cy="18" r={radius}
+          stroke={color} strokeWidth="3" fill="none"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 0.5s ease" }}
+        />
+      </svg>
+      <span className="absolute text-[10px] font-bold tabular-nums" style={{ color }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function OptionItem({ opt, stockPositions }: { opt: OptionRow; stockPositions: PositionRow[] }) {
+  const [expanded, setExpanded] = useState(false);
   const right = opt.right === "C" ? "CALL" : opt.right === "P" ? "PUT" : opt.right;
   const dte = Number(opt.dte);
   const dteLabel = dte < 0 ? "—" : dte === 0 ? "EXP" : `${dte}d`;
@@ -92,6 +123,11 @@ function OptionItem({ opt, stockPositions }: { opt: OptionRow; stockPositions: P
   const underlying = Number(opt.underlying_last);
   const strike = Number(opt.strike);
   const wheelLeg = WHEEL_LEG_LABEL[opt.wheel_leg] ?? opt.wheel_leg;
+  const confidence = Number(opt.confidence_pct) || 0;
+  const vol = Number(opt.volatility_annual) * 100;
+  const rsi = Number(opt.rsi_14);
+  const sma20 = Number(opt.sma_20);
+  const sma50 = Number(opt.sma_50);
 
   // Find matching stock position for context
   const stock = stockPositions.find((p) => p.ticker === opt.ticker);
@@ -99,31 +135,38 @@ function OptionItem({ opt, stockPositions }: { opt: OptionRow; stockPositions: P
   const stockAvg = stock ? Number(stock.avg_cost) : 0;
 
   return (
-    <div className="glass rounded-xl p-3.5 space-y-2.5">
-      {/* Header: ticker + type + moneyness */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+    <button
+      type="button"
+      onClick={() => setExpanded((e) => !e)}
+      className="w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:bg-white/3 transition-colors"
+    >
+      {/* Header: ticker + strike + moneyness + confidence */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
           <span className="text-sm font-bold text-white">{opt.ticker}</span>
-          <span className="text-[10px] font-semibold text-slate-500">
+          <span className="text-[10px] font-semibold text-slate-500 shrink-0">
             {fmtStrike(opt.strike)} {right}
           </span>
           <MoneynessChip value={opt.moneyness} />
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-mono tabular-nums ${dte <= 7 && dte >= 0 ? "text-amber-400 font-bold" : "text-slate-500"}`}>
-            {dteLabel}
-          </span>
-          <span className="text-[10px] text-slate-600">exp {fmtExp(opt.expiry)}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-col items-end leading-tight">
+            <span className={`text-[10px] font-mono tabular-nums ${dte <= 7 && dte >= 0 ? "text-amber-400 font-bold" : "text-slate-500"}`}>
+              {dteLabel}
+            </span>
+            <span className="text-[9px] text-slate-600">exp {fmtExp(opt.expiry)}</span>
+          </div>
+          <ConfidenceGauge value={confidence} />
         </div>
       </div>
 
-      {/* Wheel leg + risk + trend */}
+      {/* Wheel leg + shares + risk/trend */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-medium text-indigo-400">{wheelLeg}</span>
           {stockQty > 0 && (
             <span className="text-[10px] text-slate-600">
-              {stockQty} shares @ {fmtPrice(stockAvg)}
+              {stockQty} @ {fmtPrice(stockAvg)}
             </span>
           )}
         </div>
@@ -134,8 +177,8 @@ function OptionItem({ opt, stockPositions }: { opt: OptionRow; stockPositions: P
       </div>
 
       {/* Stats row */}
-      <div className="flex items-center gap-4 text-[10px] text-slate-500">
-        <span>Underlying: <span className="text-slate-300 tabular-nums">{fmtPrice(underlying)}</span></span>
+      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
+        <span>Stock: <span className="text-slate-300 tabular-nums">{fmtPrice(underlying)}</span></span>
         {strike > 0 && (
           <span>
             Dist: <span className={`tabular-nums ${
@@ -164,7 +207,39 @@ function OptionItem({ opt, stockPositions }: { opt: OptionRow; stockPositions: P
           )}
         </div>
       )}
-    </div>
+
+      {/* Expanded: confidence reasoning + indicator table */}
+      {expanded && (
+        <div className="pt-2.5 border-t border-white/5 space-y-2">
+          <div className="flex items-start gap-1.5">
+            <Info size={10} className="text-slate-500 mt-0.5 shrink-0" />
+            <p className="text-[10px] text-slate-400 leading-relaxed">
+              {opt.confidence_reasoning || "No reasoning available"}
+            </p>
+          </div>
+          <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+            <div>
+              <div className="text-slate-600">Vol (σ)</div>
+              <div className="tabular-nums text-slate-300">{vol > 0 ? `${vol.toFixed(0)}%` : "—"}</div>
+            </div>
+            <div>
+              <div className="text-slate-600">RSI(14)</div>
+              <div className={`tabular-nums ${rsi > 70 ? "text-red-400" : rsi < 30 ? "text-amber-400" : "text-slate-300"}`}>
+                {rsi > 0 ? rsi.toFixed(0) : "—"}
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-600">SMA20</div>
+              <div className="tabular-nums text-slate-300">{sma20 > 0 ? fmtPrice(sma20) : "—"}</div>
+            </div>
+            <div>
+              <div className="text-slate-600">SMA50</div>
+              <div className="tabular-nums text-slate-300">{sma50 > 0 ? fmtPrice(sma50) : "—"}</div>
+            </div>
+          </div>
+        </div>
+      )}
+    </button>
   );
 }
 

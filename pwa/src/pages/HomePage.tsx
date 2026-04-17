@@ -4,7 +4,6 @@ import { DailyBriefCard } from "../cards/DailyBriefCard";
 import { RiskPulseCard } from "../cards/RiskPulseCard";
 import { MoversCard } from "../cards/MoversCard";
 import { SectorMixCard } from "../cards/SectorMixCard";
-import { WheelCard } from "../cards/WheelCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { BriefDetailModal } from "../components/BriefDetailModal";
 
@@ -37,15 +36,6 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
         </div>
 
         <div className="fade-up fade-up-4">
-          <WheelCard
-            options={data?.options ?? []}
-            casparPositions={data?.casparPositions ?? []}
-            sarahPositions={data?.sarahPositions ?? []}
-            loading={loading && !data}
-          />
-        </div>
-
-        <div className="fade-up fade-up-5">
           <SectorMixCard
             casparPositions={data?.casparPositions ?? []}
             sarahPositions={data?.sarahPositions ?? []}

@@ -130,6 +130,49 @@ def archive_file(source: Path, logger: logging.Logger, force: bool = False) -> b
         logger.error(f"Sheet write failed for {source.name}: {e}")
         return False
 
+    # If this is an options scan, extract recommendations into the sheet too
+    recs_count = 0
+    if source.suffix.lower() == ".md":
+        try:
+            from src.options_scan_parser import parse_scan_file, scan_file_is_options
+            if scan_file_is_options(source):
+                recs = parse_scan_file(source, date)
+                if recs:
+                    rec_rows = [S.OptionRecommendationRow(**r) for r in recs]
+                    sh.ensure_headers(
+                        client,
+                        S.OptionRecommendationRow.TAB_NAME,
+                        S.OptionRecommendationRow.HEADERS,
+                    )
+                    # Dedup against existing rows by (source, ticker, strategy, strike)
+                    ws2 = ss.worksheet(S.OptionRecommendationRow.TAB_NAME)
+                    existing = ws2.get_all_values()[1:]  # skip header
+                    # col 2=source, 4=ticker, 5=strategy, 7=strike
+                    seen = {
+                        (r[1] if len(r) > 1 else "",
+                         r[3] if len(r) > 3 else "",
+                         r[4] if len(r) > 4 else "",
+                         r[6] if len(r) > 6 else "")
+                        for r in existing
+                    }
+                    new_rows = []
+                    for r in rec_rows:
+                        key = (r.source, r.ticker, r.strategy, f"{r.strike:.2f}")
+                        if key not in seen:
+                            new_rows.append(r.to_row())
+                    if new_rows:
+                        sh.append_rows(
+                            client,
+                            S.OptionRecommendationRow.TAB_NAME,
+                            new_rows,
+                        )
+                        recs_count = len(new_rows)
+                        logger.info(f"Wrote {recs_count} option recommendation(s) from {source.name}")
+                    else:
+                        logger.info(f"All {len(rec_rows)} recommendations from {source.name} already in sheet")
+        except Exception as e:
+            logger.warning(f"Options scan parsing failed (non-fatal) for {source.name}: {e}")
+
     # Write sidecar so next run skips this file
     sidecar = sidecar_path(source)
     sidecar.write_text(json.dumps({
@@ -137,6 +180,7 @@ def archive_file(source: Path, logger: logging.Logger, force: bool = False) -> b
         "archived_at": datetime.now().isoformat(),
         "title": title,
         "date": date,
+        "recommendations_written": recs_count,
     }, indent=2))
     return True
 

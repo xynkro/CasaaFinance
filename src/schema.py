@@ -177,7 +177,7 @@ class MacroRow:
 
 @dataclass
 class OptionRow:
-    """Options positions with moneyness, assignment risk, momentum, and wheel context."""
+    """Options positions with moneyness, assignment confidence, and wheel context."""
     TAB_NAME = "options"
     HEADERS = [
         "date", "account", "ticker", "right", "strike", "expiry",
@@ -185,6 +185,8 @@ class OptionRow:
         "underlying_last", "moneyness", "dte",
         "assignment_risk", "wheel_leg", "adj_cost_basis",
         "momentum_5d", "trend_risk",
+        "confidence_pct", "confidence_reasoning",
+        "volatility_annual", "rsi_14", "sma_20", "sma_50",
     ]
 
     date: str
@@ -204,8 +206,14 @@ class OptionRow:
     assignment_risk: str    # "LOW" | "MED" | "HIGH"
     wheel_leg: str          # "CC" | "CSP" | "LONG_CALL" | "LONG_PUT"
     adj_cost_basis: float   # stock avg_cost - accumulated premiums
-    momentum_5d: float = 0.0   # 5-day price rate of change %
-    trend_risk: str = "?"      # "SAFE" | "DRIFTING" | "CONVERGING" | "BREACHING"
+    momentum_5d: float = 0.0      # 5-day price rate of change %
+    trend_risk: str = "?"         # "SAFE" | "DRIFTING" | "CONVERGING" | "BREACHING"
+    confidence_pct: int = 0       # 0-100 probability of assignment
+    confidence_reasoning: str = ""  # multi-factor explanation
+    volatility_annual: float = 0.0  # annualized σ from 30-60d
+    rsi_14: float = 50.0          # 14-day RSI
+    sma_20: float = 0.0           # 20-day SMA
+    sma_50: float = 0.0           # 50-day SMA
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
@@ -217,6 +225,50 @@ class OptionRow:
             _num(self.underlying_last, 4), self.moneyness, str(self.dte),
             self.assignment_risk, self.wheel_leg, _num(self.adj_cost_basis, 4),
             _num(self.momentum_5d, 2), self.trend_risk,
+            str(self.confidence_pct), self.confidence_reasoning,
+            _num(self.volatility_annual, 4), _num(self.rsi_14, 1),
+            _num(self.sma_20, 2), _num(self.sma_50, 2),
+        ]
+
+
+@dataclass
+class OptionRecommendationRow:
+    """Actionable option strategy recommendations (from ad-hoc scans or analysis)."""
+    TAB_NAME = "option_recommendations"
+    HEADERS = [
+        "date", "source", "account", "ticker", "strategy", "right",
+        "strike", "expiry", "premium_per_share", "delta",
+        "annual_yield_pct", "breakeven", "cash_required",
+        "iv_rank", "thesis_confidence", "thesis", "status",
+    ]
+
+    date: str                # YYYY-MM-DD — when the recommendation was generated
+    source: str              # filename or source identifier
+    account: str             # "caspar" | "sarah"
+    ticker: str
+    strategy: str            # "CSP" | "CC" | "PMCC" | "IRON_CONDOR" | etc
+    right: str               # "C" | "P"
+    strike: float
+    expiry: str              # "YYYYMMDD" or approximate like "May24"
+    premium_per_share: float
+    delta: float
+    annual_yield_pct: float
+    breakeven: float
+    cash_required: float
+    iv_rank: float
+    thesis_confidence: float  # 0.0 - 1.0 from the analyst
+    thesis: str              # free text judgement
+    status: str = "proposed"  # "proposed" | "executed" | "skipped" | "expired"
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.source, self.account, self.ticker, self.strategy, self.right,
+            _num(self.strike, 2), self.expiry,
+            _num(self.premium_per_share, 4), _num(self.delta, 4),
+            _num(self.annual_yield_pct, 2), _num(self.breakeven, 2),
+            _num(self.cash_required, 2), _num(self.iv_rank, 0),
+            _num(self.thesis_confidence, 2), self.thesis, self.status,
         ]
 
 

@@ -5,14 +5,15 @@ import { useSettings } from "./settings";
 import { TabBar } from "./components/TabBar";
 import { HomePage } from "./pages/HomePage";
 import { PortfolioPage } from "./pages/PortfolioPage";
+import { OptionsPage } from "./pages/OptionsPage";
 import { DecisionsPage } from "./pages/DecisionsPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { ArchivePage } from "./pages/ArchivePage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { RefreshCw } from "lucide-react";
 
-const TAB_TITLES = ["Home", "Caspar", "Sarah", "Decisions", "History", "Archive", "Settings"];
-const SETTINGS_TAB = 6;
+const TAB_TITLES = ["Home", "Caspar", "Sarah", "Options", "Decisions", "History", "Archive", "Settings"];
+const SETTINGS_TAB = 7;
 
 function Dashboard() {
   const { settings, update: updateSettings } = useSettings();
@@ -44,10 +45,11 @@ function Dashboard() {
       case 0: return <HomePage data={data} loading={loading} />;
       case 1: return <PortfolioPage label="Caspar" currency="USD" snapshot={data?.caspar ?? null} positions={data?.casparPositions ?? []} loading={loading && !data} />;
       case 2: return <PortfolioPage label="Sarah" currency="SGD" snapshot={data?.sarah ?? null} positions={data?.sarahPositions ?? []} loading={loading && !data} />;
-      case 3: return <DecisionsPage decisions={data?.decisions ?? []} />;
-      case 4: return <HistoryPage casparHistory={data?.casparHistory ?? []} sarahHistory={data?.sarahHistory ?? []} macroHistory={data?.macroHistory ?? []} />;
-      case 5: return <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />;
-      case 6: return <SettingsPage settings={settings} onUpdate={updateSettings} onLogout={handleLogout} />;
+      case 3: return <OptionsPage options={data?.options ?? []} recommendations={data?.optionRecommendations ?? []} casparPositions={data?.casparPositions ?? []} sarahPositions={data?.sarahPositions ?? []} loading={loading && !data} />;
+      case 4: return <DecisionsPage decisions={data?.decisions ?? []} />;
+      case 5: return <HistoryPage casparHistory={data?.casparHistory ?? []} sarahHistory={data?.sarahHistory ?? []} macroHistory={data?.macroHistory ?? []} />;
+      case 6: return <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />;
+      case 7: return <SettingsPage settings={settings} onUpdate={updateSettings} onLogout={handleLogout} />;
       default: return null;
     }
   };

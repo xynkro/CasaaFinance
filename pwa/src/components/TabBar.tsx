@@ -1,9 +1,10 @@
-import { Home, User, Users, Target, BarChart3, Archive, Settings } from "lucide-react";
+import { Home, User, Users, Target, CircleDot, BarChart3, Archive, Settings } from "lucide-react";
 
 const TABS = [
   { icon: Home, label: "Home" },
   { icon: User, label: "Caspar" },
   { icon: Users, label: "Sarah" },
+  { icon: CircleDot, label: "Options" },
   { icon: Target, label: "Decisions" },
   { icon: BarChart3, label: "History" },
   { icon: Archive, label: "Archive" },

@@ -264,25 +264,27 @@ def calc_assignment_risk(moneyness: str, dte: int, trend_risk: str = "") -> str:
     return "LOW"  # OTM
 
 
-def fetch_momentum(tickers: list[str]) -> dict[str, float]:
-    """Fetch 5-day rate of change for option underlyings."""
+def fetch_indicators(tickers: list[str]) -> dict[str, dict]:
+    """Fetch 1-year prices for option underlyings and compute indicators:
+    momentum (5d, 20d), annualized volatility, SMA20/50, RSI14."""
     import yfinance as yf
 
     if not tickers:
         return {}
 
     yahoo_syms = [yahoo_ticker(t) for t in tickers]
-    result: dict[str, float] = {}
+    result: dict[str, dict] = {}
 
-    data = yf.download(yahoo_syms, period="1mo", progress=False, threads=True)
+    data = yf.download(yahoo_syms, period="1y", progress=False, threads=True)
     if data.empty:
-        return result
+        return {t: {} for t in tickers}
 
     close = data.get("Close")
     if close is None:
-        return result
+        return {t: {} for t in tickers}
 
     for orig, ysym in zip(tickers, yahoo_syms):
+        ind: dict = {}
         try:
             if len(yahoo_syms) == 1:
                 series = close.dropna()
@@ -290,16 +292,168 @@ def fetch_momentum(tickers: list[str]) -> dict[str, float]:
                 col = close[ysym] if ysym in close.columns else None
                 series = col.dropna() if col is not None else None
 
-            if series is not None and len(series) >= 6:
-                # 5-day rate of change: (today - 5 days ago) / 5 days ago
-                roc = (float(series.iloc[-1]) - float(series.iloc[-6])) / float(series.iloc[-6])
-                result[orig] = round(roc * 100, 2)  # as percentage
-            else:
-                result[orig] = 0.0
-        except (KeyError, IndexError):
-            result[orig] = 0.0
+            if series is None or len(series) < 20:
+                result[orig] = {}
+                continue
+
+            # Momentum
+            if len(series) >= 6:
+                ind["momentum_5d"] = round(
+                    (float(series.iloc[-1]) - float(series.iloc[-6])) / float(series.iloc[-6]) * 100, 2
+                )
+            if len(series) >= 21:
+                ind["momentum_20d"] = round(
+                    (float(series.iloc[-1]) - float(series.iloc[-21])) / float(series.iloc[-21]) * 100, 2
+                )
+
+            # Volatility (annualized from daily returns)
+            returns = series.pct_change().dropna()
+            if len(returns) >= 10:
+                daily_vol = float(returns.std())
+                ind["volatility_annual"] = round(daily_vol * math.sqrt(252), 4)
+
+            # SMAs
+            if len(series) >= 20:
+                ind["sma_20"] = round(float(series.iloc[-20:].mean()), 4)
+            if len(series) >= 50:
+                ind["sma_50"] = round(float(series.iloc[-50:].mean()), 4)
+
+            # RSI-14 (classic formula)
+            if len(series) >= 15:
+                delta = series.diff().dropna()
+                gains = delta.where(delta > 0, 0).iloc[-14:].mean()
+                losses = -delta.where(delta < 0, 0).iloc[-14:].mean()
+                if losses > 0:
+                    rsi = 100 - (100 / (1 + gains / losses))
+                else:
+                    rsi = 100.0 if gains > 0 else 50.0
+                ind["rsi_14"] = round(float(rsi), 1)
+
+        except (KeyError, IndexError, ValueError):
+            pass
+
+        result[orig] = ind
 
     return result
+
+
+def _norm_cdf(x: float) -> float:
+    """Standard normal CDF."""
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def bs_prob_itm(S: float, K: float, T: float, sigma: float, r: float, right: str) -> float:
+    """Black-Scholes probability of finishing ITM at expiry (risk-neutral)."""
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0.5
+    try:
+        d2 = (math.log(S / K) + (r - 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+    except (ValueError, ZeroDivisionError):
+        return 0.5
+    if right == "C":
+        return _norm_cdf(d2)
+    else:
+        return _norm_cdf(-d2)
+
+
+def calc_confidence(
+    right: str,
+    strike: float,
+    underlying: float,
+    dte: int,
+    sigma_annual: float,
+    momentum_5d: float,
+    rsi_14: float,
+    sma_20: float,
+    sma_50: float,
+    vix: float,
+) -> tuple[int, str]:
+    """
+    Compute confidence % of assignment (0-100) with reasoned explanation.
+    Combines: Black-Scholes N(d2) base probability + momentum + RSI + SMA trend + VIX.
+    """
+    if underlying <= 0 or strike <= 0 or dte < 0:
+        return (50, "insufficient data")
+
+    # Base: Black-Scholes probability of finishing ITM
+    T = max(dte, 1) / 365.0
+    sigma = sigma_annual if sigma_annual > 0 else 0.4  # fallback to 40% if unknown
+    r = 0.045
+    base_prob = bs_prob_itm(underlying, strike, T, sigma, r, right)
+    base_pct = base_prob * 100
+
+    # Momentum adjustment (-10 to +15)
+    mom_adj = 0.0
+    if right == "C":
+        if momentum_5d > 3:
+            mom_adj = min(15, momentum_5d * 0.8)
+        elif momentum_5d < -3:
+            mom_adj = max(-10, momentum_5d * 0.5)
+    else:  # P
+        if momentum_5d < -3:
+            mom_adj = min(15, abs(momentum_5d) * 0.8)
+        elif momentum_5d > 3:
+            mom_adj = max(-10, -momentum_5d * 0.5)
+
+    # Trend alignment (SMA20 vs SMA50) — small adjustment
+    trend_adj = 0.0
+    trend_label = ""
+    if sma_20 > 0 and sma_50 > 0:
+        uptrend = sma_20 > sma_50
+        if right == "C":
+            trend_adj = 5 if uptrend else -5
+            trend_label = "uptrend" if uptrend else "downtrend"
+        else:
+            trend_adj = -5 if uptrend else 5
+            trend_label = "uptrend" if uptrend else "downtrend"
+
+    # RSI overbought/oversold — contrarian signal
+    rsi_adj = 0.0
+    rsi_label = ""
+    if rsi_14 > 70:
+        rsi_label = f"RSI {rsi_14:.0f} overbought"
+        rsi_adj = -4 if right == "C" else 3
+    elif rsi_14 < 30:
+        rsi_label = f"RSI {rsi_14:.0f} oversold"
+        rsi_adj = 3 if right == "C" else -4
+
+    # VIX — higher = wider distribution (slightly more assignment uncertainty both ways)
+    vix_adj = 0.0
+    if vix > 25:
+        vix_adj = 3
+    elif vix < 14:
+        vix_adj = -2
+
+    raw = base_pct + mom_adj + trend_adj + rsi_adj + vix_adj
+    confidence = int(max(0, min(100, round(raw))))
+
+    # Reasoning string
+    dist_pct = (underlying - strike) / strike * 100
+    parts = []
+    parts.append(f"BS {base_pct:.0f}%")
+    if right == "C":
+        if dist_pct > 0:
+            parts.append(f"stock ${underlying:.2f} is {dist_pct:.1f}% above strike (ITM)")
+        else:
+            parts.append(f"${underlying:.2f} is {abs(dist_pct):.1f}% below ${strike:.0f} strike")
+    else:
+        if dist_pct < 0:
+            parts.append(f"${underlying:.2f} is {abs(dist_pct):.1f}% below strike (ITM)")
+        else:
+            parts.append(f"${underlying:.2f} is {dist_pct:.1f}% above ${strike:.0f} strike")
+    parts.append(f"{dte}d DTE")
+    parts.append(f"σ {sigma * 100:.0f}%")
+    if abs(momentum_5d) > 2:
+        direction = "toward" if mom_adj > 0 else "away"
+        parts.append(f"5d momentum {momentum_5d:+.1f}% {direction}")
+    if rsi_label:
+        parts.append(rsi_label)
+    if trend_label:
+        parts.append(trend_label)
+    if vix > 25:
+        parts.append(f"VIX {vix:.0f} elevated")
+
+    return confidence, " · ".join(parts)
 
 
 def calc_trend_risk(right: str, strike: float, underlying: float, momentum_5d: float, is_short: bool) -> str:
@@ -343,7 +497,7 @@ def calc_trend_risk(right: str, strike: float, underlying: float, momentum_5d: f
             return "SAFE"
 
 
-def build_options(grab: dict, prices: dict[str, float], momentum: dict[str, float], today: str):
+def build_options(grab: dict, prices: dict[str, float], indicators: dict[str, dict], macro: dict[str, float], today: str):
     """Build option rows with moneyness, wheel stage, and adjusted cost basis."""
     from src import schema as S
 
@@ -396,9 +550,19 @@ def build_options(grab: dict, prices: dict[str, float], momentum: dict[str, floa
             moneyness = calc_moneyness(right, strike, underlying_last)
             dte = calc_dte(expiry)
             is_short = qty < 0
-            mom_5d = momentum.get(sym, 0.0)
+            ind = indicators.get(sym, {})
+            mom_5d = ind.get("momentum_5d", 0.0)
+            vol_annual = ind.get("volatility_annual", 0.0)
+            rsi_14 = ind.get("rsi_14", 50.0)
+            sma_20 = ind.get("sma_20", 0.0)
+            sma_50 = ind.get("sma_50", 0.0)
+            vix = macro.get("vix", 18.0) or 18.0
             trend = calc_trend_risk(right, strike, underlying_last, mom_5d, is_short)
             assignment_risk = calc_assignment_risk(moneyness, dte, trend)
+            confidence_pct, confidence_reasoning = calc_confidence(
+                right, strike, underlying_last, dte,
+                vol_annual, mom_5d, rsi_14, sma_20, sma_50, vix,
+            )
 
             # Determine wheel leg
             has_stock = sym in stock_map and stock_map[sym]["qty"] > 0
@@ -443,6 +607,12 @@ def build_options(grab: dict, prices: dict[str, float], momentum: dict[str, floa
                 adj_cost_basis=adj_cost_basis,
                 momentum_5d=mom_5d,
                 trend_risk=trend,
+                confidence_pct=confidence_pct,
+                confidence_reasoning=confidence_reasoning,
+                volatility_annual=vol_annual,
+                rsi_14=rsi_14,
+                sma_20=sma_20,
+                sma_50=sma_50,
             ))
 
     return option_rows
@@ -531,29 +701,36 @@ def main():
     print(f"  Caspar: net_liq=${snap_c.net_liq_usd:,.2f}  upl=${snap_c.upl:,.2f}  ({snap_c.upl_pct*100:.2f}%)")
     print(f"  Sarah:  net_liq=S${snap_s.net_liq_sgd:,.2f}  upl=S${snap_s.upl_sgd:,.2f}  ({snap_s.upl_pct*100:.2f}%)")
 
-    # Fetch momentum for option underlyings
+    # Fetch indicators (vol, momentum, SMA, RSI) for option underlyings
     option_underlyings = set()
     for acct in ("caspar", "sarah"):
         for o in grab.get("accounts", {}).get(acct, {}).get("options", []):
             option_underlyings.add(o["symbol"])
 
-    momentum = {}
+    indicators: dict[str, dict] = {}
     if option_underlyings:
-        print(f"Fetching momentum for {len(option_underlyings)} option underlyings...")
-        momentum = fetch_momentum(list(option_underlyings))
-        for sym, roc in momentum.items():
-            print(f"  {sym}: {roc:+.2f}% (5d)")
+        print(f"Fetching indicators for {len(option_underlyings)} option underlyings...")
+        indicators = fetch_indicators(list(option_underlyings))
+        for sym in sorted(option_underlyings):
+            ind = indicators.get(sym, {})
+            if ind:
+                print(f"  {sym}: mom5d={ind.get('momentum_5d', 0):+.1f}% "
+                      f"σ={ind.get('volatility_annual', 0)*100:.0f}% "
+                      f"RSI={ind.get('rsi_14', 0):.0f} "
+                      f"SMA20={ind.get('sma_20', 0):.2f}")
 
     # Build options
     print("Building options...")
     today = results["date"]
-    option_rows = build_options(grab, prices, momentum, today)
+    option_rows = build_options(grab, prices, indicators, macro, today)
     results["options"] = option_rows
     for opt in option_rows:
         exp_fmt = f"{opt.expiry[:4]}-{opt.expiry[4:6]}-{opt.expiry[6:]}" if len(opt.expiry) == 8 else opt.expiry
         print(f"  {opt.account}: {opt.ticker} {opt.strike}{opt.right} exp {exp_fmt} "
-              f"| {opt.moneyness} | DTE {opt.dte} | risk {opt.assignment_risk} | {opt.wheel_leg}"
+              f"| {opt.moneyness} | DTE {opt.dte} | risk {opt.assignment_risk} | "
+              f"confidence {opt.confidence_pct}% | {opt.wheel_leg}"
               f"{f' | adj_basis ${opt.adj_cost_basis:.2f}' if opt.adj_cost_basis else ''}")
+        print(f"      → {opt.confidence_reasoning}")
 
     if args.dryrun:
         print("\n--dryrun: not pushing to sheet.")

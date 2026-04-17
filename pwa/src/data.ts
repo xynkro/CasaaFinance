@@ -14,6 +14,7 @@ const GIDS: Record<string, string> = {
   positions_sarah: "444641294",
   decision_queue: "1744723757",
   options: "326503132",
+  option_recommendations: "129728101",
   macro: "447436838",
   wsr_archive: "1065773181",
 };
@@ -111,6 +112,32 @@ export interface OptionRow {
   adj_cost_basis: string;
   momentum_5d: string;  // 5-day rate of change %
   trend_risk: string;   // "SAFE" | "DRIFTING" | "CONVERGING" | "BREACHING"
+  confidence_pct: string;        // 0-100 probability of assignment
+  confidence_reasoning: string;  // multi-factor explanation
+  volatility_annual: string;
+  rsi_14: string;
+  sma_20: string;
+  sma_50: string;
+}
+
+export interface OptionRecommendationRow {
+  date: string;
+  source: string;
+  account: string;
+  ticker: string;
+  strategy: string;              // "CSP" | "CC" | "LONG_CALL" | "LONG_PUT" | "PMCC"
+  right: string;
+  strike: string;
+  expiry: string;
+  premium_per_share: string;
+  delta: string;
+  annual_yield_pct: string;
+  breakeven: string;
+  cash_required: string;
+  iv_rank: string;
+  thesis_confidence: string;     // 0.0 - 1.0
+  thesis: string;
+  status: string;                // "proposed" | "executed" | "skipped" | "expired"
 }
 
 export interface DecisionRow {
@@ -142,6 +169,7 @@ export interface DashboardData {
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
   options: OptionRow[];
+  optionRecommendations: OptionRecommendationRow[];
   decisions: DecisionRow[];
   macro: MacroRow | null;
   // History (all rows, sorted by date ascending)
@@ -179,7 +207,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, decisions, macroRows, archiveRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, optionRecs, decisions, macroRows, archiveRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
@@ -187,6 +215,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<PositionRow>("positions_caspar").catch(() => [] as PositionRow[]),
         fetchTab<PositionRow>("positions_sarah").catch(() => [] as PositionRow[]),
         fetchTab<OptionRow>("options").catch(() => [] as OptionRow[]),
+        fetchTab<OptionRecommendationRow>("option_recommendations").catch(() => [] as OptionRecommendationRow[]),
         fetchTab<DecisionRow>("decision_queue").catch(() => [] as DecisionRow[]),
         fetchTab<MacroRow>("macro"),
         fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
@@ -201,6 +230,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       casparPositions: latestGroup(casparPos),
       sarahPositions: latestGroup(sarahPos),
       options: latestGroup(optionRows),
+      optionRecommendations: optionRecs,
       decisions: latestGroup(decisions),
       macro: latest(macroRows),
       casparHistory: dedup(casparRows),
@@ -212,7 +242,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
   } catch (e) {
     return {
       dailyHistory: [], daily: null, caspar: null, sarah: null,
-      casparPositions: [], sarahPositions: [], options: [], decisions: [],
+      casparPositions: [], sarahPositions: [], options: [], optionRecommendations: [], decisions: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [], error: String(e),
     };
