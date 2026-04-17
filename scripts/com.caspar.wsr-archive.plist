@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Auto-archive any new/updated .md or .pdf in the Weekly Strategy Review
+       folder to Drive + wsr_archive sheet tab (shows up in PWA Archive page) -->
+  <key>Label</key>
+  <string>com.caspar.wsr-archive</string>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>/Users/xynkro/Documents/Trading/Weekly Strategy Review</string>
+  </array>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/.venv/bin/python</string>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/scripts/archive_wsr_folder.py</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA</string>
+
+  <!-- Throttle: don't re-fire for 30s after a trigger -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/wsr-archive-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/wsr-archive-stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>
