@@ -265,14 +265,18 @@ def calc_assignment_risk(moneyness: str, dte: int, trend_risk: str = "") -> str:
 
 
 def fetch_indicators(tickers: list[str]) -> dict[str, dict]:
-    """Fetch full 1y OHLCV + compute complete indicator bundle via src.indicators."""
-    from src.indicators import fetch_ohlcv, compute_indicators
+    """Fetch full 1y OHLCV + compute complete indicator bundle + earnings dates."""
+    from src.indicators import fetch_ohlcv, compute_indicators, fetch_earnings_dates
 
     if not tickers:
         return {}
 
     yahoo_syms = [yahoo_ticker(t) for t in tickers]
     ohlcv = fetch_ohlcv(yahoo_syms, period="1y")
+
+    # Earnings dates — one-shot fetch for all tickers (by orig symbol, not Yahoo-formatted
+    # since non-US tickers don't have earnings we care about)
+    earnings = fetch_earnings_dates([t for t in tickers if t not in SGX_TICKERS])
 
     result: dict[str, dict] = {}
     for orig, ysym in zip(tickers, yahoo_syms):
@@ -281,7 +285,20 @@ def fetch_indicators(tickers: list[str]) -> dict[str, dict]:
             result[orig] = {}
             continue
         try:
-            result[orig] = compute_indicators(df)
+            ind = compute_indicators(df)
+            # Merge in earnings info
+            edat = earnings.get(orig)
+            if edat:
+                ind["earnings_date"] = edat["earnings_date"]
+                ind["earnings_days_away"] = edat["earnings_days_away"]
+                # If earnings within 14 days, upgrade catalyst_flag
+                if 0 <= edat["earnings_days_away"] <= 14:
+                    ind["catalyst_flag"] = True
+                    ind["vol_regime"] = "earnings_approaching"
+            else:
+                ind["earnings_date"] = ""
+                ind["earnings_days_away"] = -1
+            result[orig] = ind
         except Exception as e:
             print(f"  indicator compute failed for {orig}: {e}")
             result[orig] = {}
@@ -547,6 +564,10 @@ def build_options(
             sma_50 = ind.get("sma_50", 0.0)
             vix = macro.get("vix", 18.0) or 18.0
             catalyst_flag = bool(ind.get("catalyst_flag", False))
+            # Earnings within option DTE = definitive catalyst
+            earnings_days = int(ind.get("earnings_days_away", -1))
+            if 0 <= earnings_days <= dte:
+                catalyst_flag = True
             trend = calc_trend_risk(right, strike, underlying_last, mom_5d, is_short)
             assignment_risk = calc_assignment_risk(moneyness, dte, trend)
 
@@ -798,6 +819,8 @@ def main():
             volatility_annual=ind.get("volatility_annual", 0.0),
             catalyst_flag=ind.get("catalyst_flag", False),
             vol_regime=ind.get("vol_regime", "normal"),
+            earnings_date=ind.get("earnings_date", ""),
+            earnings_days_away=int(ind.get("earnings_days_away", -1)),
             score_buy=scores["BUY"], score_csp=scores["CSP"],
             score_cc=scores["CC"],
             score_long_call=scores["LONG_CALL"],

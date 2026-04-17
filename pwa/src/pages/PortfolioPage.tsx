@@ -8,6 +8,7 @@ export function PortfolioPage({
   snapshot,
   positions,
   technicalScores,
+  technicalScoresHistory,
   loading,
 }: {
   label: string;
@@ -15,6 +16,7 @@ export function PortfolioPage({
   snapshot: SnapshotRow | null;
   positions: PositionRow[];
   technicalScores?: TechnicalScoreRow[];
+  technicalScoresHistory?: TechnicalScoreRow[];
   loading: boolean;
 }) {
   return (
@@ -23,7 +25,12 @@ export function PortfolioPage({
         <PnlCard label={label} currency={currency} snapshot={snapshot} positions={positions} loading={loading} />
       </div>
       <div className="fade-up fade-up-2">
-        <PositionsTable positions={positions} currency={currency} technicalScores={technicalScores} />
+        <PositionsTable
+          positions={positions}
+          currency={currency}
+          technicalScores={technicalScores}
+          technicalScoresHistory={technicalScoresHistory}
+        />
       </div>
     </div>
   );

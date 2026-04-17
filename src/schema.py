@@ -247,6 +247,7 @@ class TechnicalScoreRow:
         "vol_ratio", "vol_spike_type", "candle_pattern",
         "divergence", "momentum_5d", "momentum_20d",
         "volatility_annual", "catalyst_flag", "vol_regime",
+        "earnings_date", "earnings_days_away",
         "score_buy", "score_csp", "score_cc",
         "score_long_call", "score_long_put",
         "entry_exit_signal", "top_drivers",
@@ -284,6 +285,8 @@ class TechnicalScoreRow:
     volatility_annual: float
     catalyst_flag: bool
     vol_regime: str
+    earnings_date: str
+    earnings_days_away: int
     score_buy: float
     score_csp: float
     score_cc: float
@@ -308,6 +311,7 @@ class TechnicalScoreRow:
             self.divergence, _num(self.momentum_5d, 2), _num(self.momentum_20d, 2),
             _num(self.volatility_annual, 4),
             "TRUE" if self.catalyst_flag else "", self.vol_regime,
+            self.earnings_date, str(self.earnings_days_away) if self.earnings_days_away >= 0 else "",
             _num(self.score_buy, 1), _num(self.score_csp, 1), _num(self.score_cc, 1),
             _num(self.score_long_call, 1), _num(self.score_long_put, 1),
             self.entry_exit_signal, self.top_drivers,

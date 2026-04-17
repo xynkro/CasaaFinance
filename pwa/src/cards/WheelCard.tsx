@@ -249,7 +249,18 @@ function OptionItem({ opt, stockPositions, techScore }: { opt: OptionRow; stockP
                   {techScore.top_drivers}
                 </div>
               )}
-              {techScore.catalyst_flag === "TRUE" && (
+              {techScore.earnings_date && Number(techScore.earnings_days_away) >= 0 && (
+                <div className={`flex items-center gap-1 text-[10px] mt-1.5 ${
+                  Number(techScore.earnings_days_away) <= 7 ? "text-red-400" :
+                  Number(techScore.earnings_days_away) <= 14 ? "text-amber-400" : "text-slate-400"
+                }`}>
+                  <Zap size={10} />
+                  <span className="font-semibold">
+                    Earnings {techScore.earnings_date} ({techScore.earnings_days_away}d away)
+                  </span>
+                </div>
+              )}
+              {techScore.catalyst_flag === "TRUE" && !techScore.earnings_date && (
                 <div className="flex items-center gap-1 text-[10px] text-orange-400 mt-1.5">
                   <Zap size={10} />
                   <span className="font-semibold">Catalyst detected — elevated vol regime</span>

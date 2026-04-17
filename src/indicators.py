@@ -320,3 +320,43 @@ def fetch_ohlcv(tickers: list[str], period: str = "1y") -> dict[str, pd.DataFram
             result[t] = pd.DataFrame()
 
     return result
+
+
+def fetch_earnings_dates(tickers: list[str]) -> dict[str, Any]:
+    """
+    Fetch next earnings date for each ticker via yfinance calendar.
+    Returns {ticker: {"earnings_date": "YYYY-MM-DD", "days_away": int}} or {} if unavailable.
+    """
+    import yfinance as yf
+    from datetime import date as _date
+
+    result: dict[str, Any] = {}
+    today = _date.today()
+    for t in tickers:
+        try:
+            tick = yf.Ticker(t)
+            cal = tick.calendar
+            if not cal or "Earnings Date" not in cal:
+                continue
+            ed = cal.get("Earnings Date")
+            if not ed:
+                continue
+            # Can be list or single date
+            if isinstance(ed, list):
+                ed = ed[0] if ed else None
+            if not ed:
+                continue
+            # Convert to datetime.date
+            if hasattr(ed, "date"):
+                ed = ed.date()
+            days = (ed - today).days
+            if days < -7:
+                # Stale (past earnings); skip
+                continue
+            result[t] = {
+                "earnings_date": ed.strftime("%Y-%m-%d"),
+                "earnings_days_away": days,
+            }
+        except Exception:
+            continue
+    return result

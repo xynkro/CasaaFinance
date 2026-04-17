@@ -14,6 +14,7 @@ export function StockDetail({
   decision,
   ticker: tickerProp,
   techScore,
+  techHistory,
   currency,
   onClose,
 }: {
@@ -21,6 +22,7 @@ export function StockDetail({
   decision?: DecisionRow;
   ticker?: string;
   techScore?: TechnicalScoreRow;
+  techHistory?: TechnicalScoreRow[];
   currency: "USD" | "SGD";
   onClose: () => void;
 }) {
@@ -232,7 +234,7 @@ export function StockDetail({
       {/* Scrollable body: tech score + chart + TA analysis */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
         {/* Our technical analysis panel (when techScore available) */}
-        {techScore && <TechAnalysisPanel techScore={techScore} />}
+        {techScore && <TechAnalysisPanel techScore={techScore} techHistory={techHistory} ticker={ticker} />}
 
         {/* TradingView advanced chart */}
         <div className="h-[55vh] min-h-[320px] border-b border-white/6">
@@ -273,7 +275,48 @@ function scoreColor(v: number): string {
   return "text-slate-400";
 }
 
-function TechAnalysisPanel({ techScore: t }: { techScore: TechnicalScoreRow }) {
+function Sparkline({
+  values,
+  color,
+  width = 80,
+  height = 24,
+}: {
+  values: number[];
+  color: string;
+  width?: number;
+  height?: number;
+}) {
+  if (!values.length) return <div style={{ width, height }} />;
+  const min = Math.min(...values, -50);
+  const max = Math.max(...values, 50);
+  const range = max - min || 1;
+  const step = width / Math.max(values.length - 1, 1);
+  const points = values
+    .map((v, i) => {
+      const x = i * step;
+      const y = height - ((v - min) / range) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  // Draw a horizontal zero line for reference
+  const zeroY = height - ((0 - min) / range) * height;
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <line x1="0" y1={zeroY} x2={width} y2={zeroY} stroke="rgba(255,255,255,0.08)" strokeDasharray="2 2" />
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TechAnalysisPanel({
+  techScore: t,
+  techHistory,
+  ticker,
+}: {
+  techScore: TechnicalScoreRow;
+  techHistory?: TechnicalScoreRow[];
+  ticker: string;
+}) {
   const close = Number(t.close);
   const rsi = Number(t.rsi_14);
   const stochK = Number(t.stoch_k);
@@ -291,12 +334,25 @@ function TechAnalysisPanel({ techScore: t }: { techScore: TechnicalScoreRow }) {
   const vol = Number(t.volatility_annual) * 100;
 
   const scores = [
-    { label: "BUY", val: Number(t.score_buy) },
-    { label: "CSP", val: Number(t.score_csp) },
-    { label: "CC", val: Number(t.score_cc) },
-    { label: "LC", val: Number(t.score_long_call) },
-    { label: "LP", val: Number(t.score_long_put) },
+    { label: "BUY", val: Number(t.score_buy), color: "#10b981" },
+    { label: "CSP", val: Number(t.score_csp), color: "#34d399" },
+    { label: "CC", val: Number(t.score_cc), color: "#f59e0b" },
+    { label: "LC", val: Number(t.score_long_call), color: "#6366f1" },
+    { label: "LP", val: Number(t.score_long_put), color: "#ef4444" },
   ];
+
+  // Build historical series for sparklines (last 20 days if available)
+  const history = (techHistory ?? [])
+    .filter((r) => r.ticker === ticker)
+    .slice(-20);
+  const histBuy = history.map((r) => Number(r.score_buy));
+  const histCsp = history.map((r) => Number(r.score_csp));
+  const histCc = history.map((r) => Number(r.score_cc));
+  const hasHistory = history.length >= 3;
+
+  const earningsDate = t.earnings_date;
+  const earningsDaysAway = Number(t.earnings_days_away);
+  const hasEarnings = earningsDate && earningsDaysAway >= 0;
 
   return (
     <div className="px-4 py-4 border-b border-white/6 space-y-4">
@@ -321,18 +377,57 @@ function TechAnalysisPanel({ techScore: t }: { techScore: TechnicalScoreRow }) {
         </div>
       </div>
 
-      {/* Strategy scores */}
+      {/* Earnings warning banner */}
+      {hasEarnings && (
+        <div className={`glass rounded-lg p-2.5 border flex items-center gap-2 ${
+          earningsDaysAway <= 7
+            ? "border-red-500/30 bg-red-500/10"
+            : earningsDaysAway <= 14
+              ? "border-amber-500/30 bg-amber-500/10"
+              : "border-slate-500/20 bg-slate-500/5"
+        }`}>
+          <Zap size={14} className={
+            earningsDaysAway <= 7 ? "text-red-400" :
+            earningsDaysAway <= 14 ? "text-amber-400" : "text-slate-400"
+          } />
+          <div className="flex-1 text-[11px]">
+            <span className="font-semibold text-white">Earnings</span>
+            <span className="text-slate-400"> · {earningsDate}</span>
+            <span className={`ml-2 tabular-nums font-bold ${
+              earningsDaysAway <= 7 ? "text-red-400" :
+              earningsDaysAway <= 14 ? "text-amber-400" : "text-slate-300"
+            }`}>
+              {earningsDaysAway === 0 ? "TODAY" : earningsDaysAway === 1 ? "tomorrow" : `${earningsDaysAway}d away`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Strategy scores with sparklines */}
       <div>
-        <div className="text-[10px] text-slate-600 mb-1.5">Strategy scores</div>
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-[10px] text-slate-600">Strategy scores</div>
+          {hasHistory && (
+            <div className="text-[10px] text-slate-600">{history.length}d history</div>
+          )}
+        </div>
         <div className="grid grid-cols-5 gap-1.5">
-          {scores.map((s) => (
-            <div key={s.label} className="glass rounded-lg p-2 text-center">
-              <div className="text-[10px] text-slate-500">{s.label}</div>
-              <div className={`text-sm font-bold tabular-nums ${scoreColor(s.val)}`}>
-                {s.val > 0 ? "+" : ""}{s.val.toFixed(0)}
+          {scores.map((s, idx) => {
+            const series = idx === 0 ? histBuy : idx === 1 ? histCsp : idx === 2 ? histCc : [];
+            return (
+              <div key={s.label} className="glass rounded-lg p-2 text-center">
+                <div className="text-[10px] text-slate-500">{s.label}</div>
+                <div className={`text-sm font-bold tabular-nums ${scoreColor(s.val)}`}>
+                  {s.val > 0 ? "+" : ""}{s.val.toFixed(0)}
+                </div>
+                {hasHistory && series.length >= 3 && idx <= 2 && (
+                  <div className="mt-1 flex justify-center">
+                    <Sparkline values={series} color={s.color} width={40} height={14} />
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
         {t.top_drivers && (
           <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">

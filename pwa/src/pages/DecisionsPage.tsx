@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { DecisionRow, TechnicalScoreRow } from "../data";
 import { Card } from "../cards/Card";
+import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
 import { StockDetail } from "../components/StockDetail";
 import { Target, Clock, CheckCircle, XCircle, AlertTriangle, ChevronRight } from "lucide-react";
 
@@ -153,21 +154,18 @@ function EmptyState() {
 export function DecisionsPage({
   decisions,
   technicalScores,
+  technicalScoresHistory,
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
+  technicalScoresHistory?: TechnicalScoreRow[];
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const techByTicker = new Map<string, TechnicalScoreRow>();
   for (const t of technicalScores ?? []) techByTicker.set(t.ticker, t);
 
-  if (!decisions.length) {
-    return (
-      <div className="px-4 pb-4">
-        <EmptyState />
-      </div>
-    );
-  }
+  // If we have no WSR decisions, still show BuyRecommendationsCard if we have scores
+  const showBuyRecs = (technicalScores?.length ?? 0) > 0;
 
   // Group by status: pending/watching first, then filled, then killed/expired
   const order: Record<string, number> = { pending: 0, watching: 1, filled: 2, killed: 3, expired: 4 };
@@ -185,28 +183,44 @@ export function DecisionsPage({
   return (
     <>
       <div className="px-4 pb-4 flex flex-col gap-4">
-        {/* Summary pills */}
-        <div className="flex gap-2 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
-          {Object.entries(counts).map(([status, count]) => {
-            const cfg = STATUS_CONFIG[status] ?? DEFAULT_STATUS;
-            return (
-              <div
-                key={status}
-                className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full ${cfg.bg} border ${cfg.border}`}
-              >
-                <span className={`text-xs font-semibold ${cfg.text}`}>{count}</span>
-                <span className={`text-[10px] ${cfg.text} opacity-70`}>{cfg.label}</span>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Decision cards */}
-        {sorted.map((d, i) => (
-          <div key={`${d.ticker}-${d.date}-${i}`} className={`fade-up fade-up-${Math.min(i + 1, 4)}`}>
-            <DecisionCard decision={d} onTap={() => setSelected(d)} />
+        {/* Buy recommendations from daily technical scan */}
+        {showBuyRecs && (
+          <div className="fade-up fade-up-1">
+            <BuyRecommendationsCard
+              technicalScores={technicalScores ?? []}
+              technicalScoresHistory={technicalScoresHistory}
+            />
           </div>
-        ))}
+        )}
+
+        {decisions.length > 0 ? (
+          <>
+            {/* Summary pills */}
+            <div className="flex gap-2 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
+              {Object.entries(counts).map(([status, count]) => {
+                const cfg = STATUS_CONFIG[status] ?? DEFAULT_STATUS;
+                return (
+                  <div
+                    key={status}
+                    className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full ${cfg.bg} border ${cfg.border}`}
+                  >
+                    <span className={`text-xs font-semibold ${cfg.text}`}>{count}</span>
+                    <span className={`text-[10px] ${cfg.text} opacity-70`}>{cfg.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Decision cards */}
+            {sorted.map((d, i) => (
+              <div key={`${d.ticker}-${d.date}-${i}`} className={`fade-up fade-up-${Math.min(i + 2, 4)}`}>
+                <DecisionCard decision={d} onTap={() => setSelected(d)} />
+              </div>
+            ))}
+          </>
+        ) : !showBuyRecs && (
+          <EmptyState />
+        )}
       </div>
 
       {selected && (
@@ -214,6 +228,7 @@ export function DecisionsPage({
           decision={selected}
           ticker={selected.ticker}
           techScore={techByTicker.get(selected.ticker)}
+          techHistory={technicalScoresHistory}
           currency={selected.account?.toLowerCase() === "sarah" ? "SGD" : "USD"}
           onClose={() => setSelected(null)}
         />

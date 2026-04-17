@@ -180,6 +180,8 @@ export interface TechnicalScoreRow {
   volatility_annual: string;
   catalyst_flag: string;
   vol_regime: string;
+  earnings_date: string;
+  earnings_days_away: string;
   score_buy: string;
   score_csp: string;
   score_cc: string;
@@ -264,6 +266,7 @@ export interface DashboardData {
   options: OptionRow[];
   optionRecommendations: OptionRecommendationRow[];
   technicalScores: TechnicalScoreRow[];
+  technicalScoresHistory: TechnicalScoreRow[];  // full history for sparklines
   wheelNextLeg: WheelNextLegRow[];
   scanResults: ScanResultRow[];
   decisions: DecisionRow[];
@@ -331,6 +334,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       options: latestGroup(optionRows),
       optionRecommendations: optionRecs,
       technicalScores: latestGroup(techRows),
+      technicalScoresHistory: sortByDate(techRows),
       wheelNextLeg: latestGroup(wheelRows),
       scanResults: latestGroup(scanRows),
       decisions: latestGroup(decisions),
@@ -345,7 +349,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
     return {
       dailyHistory: [], daily: null, caspar: null, sarah: null,
       casparPositions: [], sarahPositions: [], options: [], optionRecommendations: [],
-      technicalScores: [], wheelNextLeg: [], scanResults: [], decisions: [],
+      technicalScores: [], technicalScoresHistory: [],
+      wheelNextLeg: [], scanResults: [], decisions: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [], error: String(e),
     };

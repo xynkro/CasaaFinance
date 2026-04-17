@@ -22,10 +22,12 @@ export function PositionsTable({
   positions,
   currency,
   technicalScores,
+  technicalScoresHistory,
 }: {
   positions: PositionRow[];
   currency: "USD" | "SGD";
   technicalScores?: TechnicalScoreRow[];
+  technicalScoresHistory?: TechnicalScoreRow[];
 }) {
   const [selected, setSelected] = useState<PositionRow | null>(null);
   const prefix = currency === "SGD" ? "S$" : "$";
@@ -104,6 +106,7 @@ export function PositionsTable({
         <StockDetail
           position={selected}
           techScore={techByTicker.get(selected.ticker)}
+          techHistory={technicalScoresHistory}
           currency={currency}
           onClose={() => setSelected(null)}
         />
