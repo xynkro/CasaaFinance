@@ -43,10 +43,10 @@ function Dashboard() {
   const renderPage = () => {
     switch (tab) {
       case 0: return <HomePage data={data} loading={loading} />;
-      case 1: return <PortfolioPage label="Caspar" currency="USD" snapshot={data?.caspar ?? null} positions={data?.casparPositions ?? []} loading={loading && !data} />;
-      case 2: return <PortfolioPage label="Sarah" currency="SGD" snapshot={data?.sarah ?? null} positions={data?.sarahPositions ?? []} loading={loading && !data} />;
-      case 3: return <OptionsPage options={data?.options ?? []} recommendations={data?.optionRecommendations ?? []} technicalScores={data?.technicalScores ?? []} wheelNextLeg={data?.wheelNextLeg ?? []} casparPositions={data?.casparPositions ?? []} sarahPositions={data?.sarahPositions ?? []} loading={loading && !data} />;
-      case 4: return <DecisionsPage decisions={data?.decisions ?? []} />;
+      case 1: return <PortfolioPage label="Caspar" currency="USD" snapshot={data?.caspar ?? null} positions={data?.casparPositions ?? []} technicalScores={data?.technicalScores ?? []} loading={loading && !data} />;
+      case 2: return <PortfolioPage label="Sarah" currency="SGD" snapshot={data?.sarah ?? null} positions={data?.sarahPositions ?? []} technicalScores={data?.technicalScores ?? []} loading={loading && !data} />;
+      case 3: return <OptionsPage options={data?.options ?? []} recommendations={data?.optionRecommendations ?? []} technicalScores={data?.technicalScores ?? []} wheelNextLeg={data?.wheelNextLeg ?? []} scanResults={data?.scanResults ?? []} casparPositions={data?.casparPositions ?? []} sarahPositions={data?.sarahPositions ?? []} loading={loading && !data} />;
+      case 4: return <DecisionsPage decisions={data?.decisions ?? []} technicalScores={data?.technicalScores ?? []} />;
       case 5: return <HistoryPage casparHistory={data?.casparHistory ?? []} sarahHistory={data?.sarahHistory ?? []} macroHistory={data?.macroHistory ?? []} />;
       case 6: return <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />;
       case 7: return <SettingsPage settings={settings} onUpdate={updateSettings} onLogout={handleLogout} />;

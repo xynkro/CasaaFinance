@@ -4,9 +4,11 @@ import type {
   PositionRow,
   TechnicalScoreRow,
   WheelNextLegRow,
+  ScanResultRow,
 } from "../data";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
+import { ScanCard } from "../cards/ScanCard";
 import { RecommendationCard } from "../cards/RecommendationCard";
 
 export function OptionsPage({
@@ -14,6 +16,7 @@ export function OptionsPage({
   recommendations,
   technicalScores,
   wheelNextLeg,
+  scanResults,
   casparPositions,
   sarahPositions,
   loading,
@@ -22,6 +25,7 @@ export function OptionsPage({
   recommendations: OptionRecommendationRow[];
   technicalScores: TechnicalScoreRow[];
   wheelNextLeg: WheelNextLegRow[];
+  scanResults: ScanResultRow[];
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
   loading: boolean;
@@ -43,6 +47,10 @@ export function OptionsPage({
       </div>
 
       <div className="fade-up fade-up-3">
+        <ScanCard candidates={scanResults} />
+      </div>
+
+      <div className="fade-up fade-up-4">
         <RecommendationCard recommendations={recommendations} />
       </div>
     </div>

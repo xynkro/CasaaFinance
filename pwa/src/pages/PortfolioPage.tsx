@@ -1,4 +1,4 @@
-import type { SnapshotRow, PositionRow } from "../data";
+import type { SnapshotRow, PositionRow, TechnicalScoreRow } from "../data";
 import { PnlCard } from "../cards/PnlCard";
 import { PositionsTable } from "../components/PositionsTable";
 
@@ -7,12 +7,14 @@ export function PortfolioPage({
   currency,
   snapshot,
   positions,
+  technicalScores,
   loading,
 }: {
   label: string;
   currency: "USD" | "SGD";
   snapshot: SnapshotRow | null;
   positions: PositionRow[];
+  technicalScores?: TechnicalScoreRow[];
   loading: boolean;
 }) {
   return (
@@ -21,7 +23,7 @@ export function PortfolioPage({
         <PnlCard label={label} currency={currency} snapshot={snapshot} positions={positions} loading={loading} />
       </div>
       <div className="fade-up fade-up-2">
-        <PositionsTable positions={positions} currency={currency} />
+        <PositionsTable positions={positions} currency={currency} technicalScores={technicalScores} />
       </div>
     </div>
   );

@@ -367,6 +367,57 @@ class WheelNextLegRow:
 
 
 @dataclass
+class ScanResultRow:
+    """Daily cross-ticker scan result — a ranked CSP or CC candidate."""
+    TAB_NAME = "scan_results"
+    HEADERS = [
+        "date", "ticker", "strategy", "right", "strike", "expiry", "dte",
+        "delta", "premium", "bid", "ask",
+        "annual_yield_pct", "cash_required", "breakeven",
+        "iv", "iv_rank", "spread_pct",
+        "underlying_last", "technical_score", "composite_score",
+        "catalyst_flag",
+    ]
+
+    date: str
+    ticker: str
+    strategy: str              # "CSP" | "CC"
+    right: str                 # "P" | "C"
+    strike: float
+    expiry: str                # "YYYYMMDD"
+    dte: int
+    delta: float
+    premium: float
+    bid: float
+    ask: float
+    annual_yield_pct: float
+    cash_required: float
+    breakeven: float
+    iv: float                  # implied vol from chain
+    iv_rank: float             # 0-100 proxy
+    spread_pct: float          # bid-ask spread as % of mid
+    underlying_last: float
+    technical_score: float
+    composite_score: float     # 0-100
+    catalyst_flag: bool
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.ticker, self.strategy, self.right,
+            _num(self.strike, 2), self.expiry, str(self.dte),
+            _num(self.delta, 3), _num(self.premium, 4),
+            _num(self.bid, 4), _num(self.ask, 4),
+            _num(self.annual_yield_pct, 2), _num(self.cash_required, 2),
+            _num(self.breakeven, 2),
+            _num(self.iv, 4), _num(self.iv_rank, 1), _num(self.spread_pct, 2),
+            _num(self.underlying_last, 4),
+            _num(self.technical_score, 1), _num(self.composite_score, 1),
+            "TRUE" if self.catalyst_flag else "",
+        ]
+
+
+@dataclass
 class OptionRecommendationRow:
     """Actionable option strategy recommendations (from ad-hoc scans or analysis)."""
     TAB_NAME = "option_recommendations"

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PositionRow } from "../data";
+import type { PositionRow, TechnicalScoreRow } from "../data";
 import { StockDetail } from "./StockDetail";
 import { ChevronRight } from "lucide-react";
 
@@ -18,9 +18,19 @@ function pctFmt(v: string): { text: string; positive: boolean } {
   };
 }
 
-export function PositionsTable({ positions, currency }: { positions: PositionRow[]; currency: "USD" | "SGD" }) {
+export function PositionsTable({
+  positions,
+  currency,
+  technicalScores,
+}: {
+  positions: PositionRow[];
+  currency: "USD" | "SGD";
+  technicalScores?: TechnicalScoreRow[];
+}) {
   const [selected, setSelected] = useState<PositionRow | null>(null);
   const prefix = currency === "SGD" ? "S$" : "$";
+  const techByTicker = new Map<string, TechnicalScoreRow>();
+  for (const t of technicalScores ?? []) techByTicker.set(t.ticker, t);
 
   if (!positions.length) {
     return (
@@ -93,6 +103,7 @@ export function PositionsTable({ positions, currency }: { positions: PositionRow
       {selected && (
         <StockDetail
           position={selected}
+          techScore={techByTicker.get(selected.ticker)}
           currency={currency}
           onClose={() => setSelected(null)}
         />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import type { PositionRow, DecisionRow } from "../data";
-import { X, TrendingUp, TrendingDown, ChevronLeft } from "lucide-react";
+import type { PositionRow, DecisionRow, TechnicalScoreRow } from "../data";
+import { X, TrendingUp, TrendingDown, ChevronLeft, Zap, Activity } from "lucide-react";
 import { sectorFor } from "../lib/emojis";
 
 function fmt(v: string | number, prefix = "$"): string {
@@ -13,12 +13,14 @@ export function StockDetail({
   position,
   decision,
   ticker: tickerProp,
+  techScore,
   currency,
   onClose,
 }: {
   position?: PositionRow;
   decision?: DecisionRow;
   ticker?: string;
+  techScore?: TechnicalScoreRow;
   currency: "USD" | "SGD";
   onClose: () => void;
 }) {
@@ -227,8 +229,11 @@ export function StockDetail({
         </div>
       )}
 
-      {/* Scrollable body: chart + technical analysis */}
+      {/* Scrollable body: tech score + chart + TA analysis */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+        {/* Our technical analysis panel (when techScore available) */}
+        {techScore && <TechAnalysisPanel techScore={techScore} />}
+
         {/* TradingView advanced chart */}
         <div className="h-[55vh] min-h-[320px] border-b border-white/6">
           <div ref={chartRef} className="tradingview-widget-container h-full w-full" />
@@ -250,6 +255,198 @@ export function StockDetail({
           <div ref={taRef} className="tradingview-widget-container w-full" />
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------- Technical Analysis Panel (our backend scoring) ----------
+
+const SIGNAL_COLOR: Record<string, string> = {
+  BUY: "text-emerald-400",
+  HOLD: "text-slate-400",
+  "SELL (SL)": "text-red-400",
+};
+
+function scoreColor(v: number): string {
+  if (v >= 30) return "text-emerald-400";
+  if (v <= -30) return "text-red-400";
+  return "text-slate-400";
+}
+
+function TechAnalysisPanel({ techScore: t }: { techScore: TechnicalScoreRow }) {
+  const close = Number(t.close);
+  const rsi = Number(t.rsi_14);
+  const stochK = Number(t.stoch_k);
+  const stochD = Number(t.stoch_d);
+  const support = Number(t.support);
+  const resistance = Number(t.resistance);
+  const sma20 = Number(t.sma_20);
+  const sma50 = Number(t.sma_50);
+  const sma200 = Number(t.sma_200);
+  const wvf = Number(t.wvf);
+  const bbPctB = Number(t.bb_pct_b);
+  const catalyst = t.catalyst_flag === "TRUE";
+  const squeeze = t.bb_squeeze === "TRUE";
+  const wvfBottom = t.wvf_bottom === "TRUE";
+  const vol = Number(t.volatility_annual) * 100;
+
+  const scores = [
+    { label: "BUY", val: Number(t.score_buy) },
+    { label: "CSP", val: Number(t.score_csp) },
+    { label: "CC", val: Number(t.score_cc) },
+    { label: "LC", val: Number(t.score_long_call) },
+    { label: "LP", val: Number(t.score_long_put) },
+  ];
+
+  return (
+    <div className="px-4 py-4 border-b border-white/6 space-y-4">
+      {/* Signal + trend */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Activity size={14} className="text-indigo-400" />
+          <h3 className="text-sm font-semibold text-slate-200">Casaa Score</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`text-sm font-bold tabular-nums ${SIGNAL_COLOR[t.entry_exit_signal] || "text-slate-400"}`}>
+            {t.entry_exit_signal || "HOLD"}
+          </span>
+          <span className="text-[10px] text-slate-500">·</span>
+          <span className="text-[10px] text-slate-400">{t.trend}</span>
+          {catalyst && (
+            <span className="flex items-center gap-0.5 text-[10px] text-orange-400 ml-1">
+              <Zap size={10} />
+              <span className="font-semibold">CATALYST</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Strategy scores */}
+      <div>
+        <div className="text-[10px] text-slate-600 mb-1.5">Strategy scores</div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {scores.map((s) => (
+            <div key={s.label} className="glass rounded-lg p-2 text-center">
+              <div className="text-[10px] text-slate-500">{s.label}</div>
+              <div className={`text-sm font-bold tabular-nums ${scoreColor(s.val)}`}>
+                {s.val > 0 ? "+" : ""}{s.val.toFixed(0)}
+              </div>
+            </div>
+          ))}
+        </div>
+        {t.top_drivers && (
+          <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
+            {t.top_drivers}
+          </p>
+        )}
+      </div>
+
+      {/* Core indicators */}
+      <div>
+        <div className="text-[10px] text-slate-600 mb-1.5">Indicators</div>
+        <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+          <div className="glass rounded-lg p-2">
+            <div className="text-slate-600">RSI(14)</div>
+            <div className={`tabular-nums font-semibold ${
+              rsi > 70 ? "text-red-400" : rsi < 30 ? "text-amber-400" : "text-slate-300"
+            }`}>
+              {rsi.toFixed(0)}
+            </div>
+          </div>
+          <div className="glass rounded-lg p-2">
+            <div className="text-slate-600">Stoch K/D</div>
+            <div className="tabular-nums text-slate-300">{stochK.toFixed(0)}/{stochD.toFixed(0)}</div>
+          </div>
+          <div className="glass rounded-lg p-2">
+            <div className="text-slate-600">MACD</div>
+            <div className={`tabular-nums font-semibold text-[11px] ${
+              t.macd_cross === "bullish" ? "text-emerald-400" :
+              t.macd_cross === "bearish" ? "text-red-400" : "text-slate-400"
+            }`}>
+              {t.macd_cross === "none" ? "—" : t.macd_cross}
+            </div>
+          </div>
+          <div className="glass rounded-lg p-2">
+            <div className="text-slate-600">BB %B</div>
+            <div className={`tabular-nums font-semibold ${
+              bbPctB > 0.9 ? "text-red-400" : bbPctB < 0.1 ? "text-amber-400" : "text-slate-300"
+            }`}>
+              {bbPctB.toFixed(2)}{squeeze ? " ⊗" : ""}
+            </div>
+          </div>
+          <div className="glass rounded-lg p-2">
+            <div className="text-slate-600">σ (1y)</div>
+            <div className="tabular-nums text-slate-300">{vol.toFixed(0)}%</div>
+          </div>
+          <div className="glass rounded-lg p-2">
+            <div className="text-slate-600">WVF</div>
+            <div className={`tabular-nums font-semibold ${wvfBottom ? "text-emerald-400" : "text-slate-300"}`}>
+              {wvf.toFixed(1)}{wvfBottom ? " ↓" : ""}
+            </div>
+          </div>
+          <div className="glass rounded-lg p-2">
+            <div className="text-slate-600">Vol/avg</div>
+            <div className={`tabular-nums ${
+              t.vol_spike_type === "bullish" ? "text-emerald-400" :
+              t.vol_spike_type === "bearish" ? "text-red-400" : "text-slate-300"
+            }`}>
+              {Number(t.vol_ratio).toFixed(1)}×
+            </div>
+          </div>
+          <div className="glass rounded-lg p-2">
+            <div className="text-slate-600">Candle</div>
+            <div className="tabular-nums text-slate-300 text-[10px] capitalize">
+              {t.candle_pattern?.replace("_", " ") || "—"}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Support/resistance + SMAs */}
+      <div>
+        <div className="text-[10px] text-slate-600 mb-1.5">Levels</div>
+        <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+          <div className="glass rounded-lg p-2 flex items-center justify-between">
+            <span className="text-slate-600">Resistance</span>
+            <span className="tabular-nums text-red-400 font-semibold">${resistance.toFixed(2)}</span>
+          </div>
+          <div className="glass rounded-lg p-2 flex items-center justify-between">
+            <span className="text-slate-600">Support</span>
+            <span className="tabular-nums text-emerald-400 font-semibold">${support.toFixed(2)}</span>
+          </div>
+          <div className="glass rounded-lg p-2 flex items-center justify-between">
+            <span className="text-slate-600">SMA20</span>
+            <span className={`tabular-nums ${close > sma20 ? "text-emerald-400" : "text-red-400"}`}>
+              ${sma20.toFixed(2)}
+            </span>
+          </div>
+          <div className="glass rounded-lg p-2 flex items-center justify-between">
+            <span className="text-slate-600">SMA50</span>
+            <span className={`tabular-nums ${close > sma50 ? "text-emerald-400" : "text-red-400"}`}>
+              ${sma50.toFixed(2)}
+            </span>
+          </div>
+          <div className="glass rounded-lg p-2 flex items-center justify-between">
+            <span className="text-slate-600">SMA200</span>
+            <span className={`tabular-nums ${close > sma200 ? "text-emerald-400" : "text-red-400"}`}>
+              {sma200 > 0 ? `$${sma200.toFixed(2)}` : "—"}
+            </span>
+          </div>
+          <div className="glass rounded-lg p-2 flex items-center justify-between">
+            <span className="text-slate-600">Fib 0.618</span>
+            <span className="tabular-nums text-slate-300">${Number(t.fib_0618).toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+
+      {t.divergence && t.divergence !== "none" && (
+        <div className={`flex items-center gap-1.5 text-[10px] ${
+          t.divergence === "bullish" ? "text-emerald-400" : "text-red-400"
+        }`}>
+          <span className="font-semibold capitalize">{t.divergence} divergence detected</span>
+          <span className="text-slate-500">(price vs RSI over 20d)</span>
+        </div>
+      )}
     </div>
   );
 }

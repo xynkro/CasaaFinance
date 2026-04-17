@@ -666,14 +666,21 @@ def push_to_sheet(results: dict):
         sh.ensure_headers(client, S.WheelNextLegRow.TAB_NAME, S.WheelNextLegRow.HEADERS)
         sh.append_rows(client, S.WheelNextLegRow.TAB_NAME, [w.to_row() for w in wheel])
 
+    # Scan results
+    scan = results.get("scan_results", [])
+    if scan:
+        sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
+        sh.append_rows(client, S.ScanResultRow.TAB_NAME, [s.to_row() for s in scan])
+
     macro = results["macro"]
     sh.ensure_headers(client, S.MacroRow.TAB_NAME, S.MacroRow.HEADERS)
     sh.append_row(client, S.MacroRow.TAB_NAME, macro.to_row())
 
+    scan = results.get("scan_results", [])
     print(f"  Pushed: snapshot_caspar, {len(pos_c)} caspar positions, "
           f"snapshot_sarah, {len(pos_s)} sarah positions, "
           f"{len(opts)} options, {len(tech)} technical scores, "
-          f"{len(wheel)} wheel next-legs, macro")
+          f"{len(wheel)} wheel next-legs, {len(scan)} scan results, macro")
 
 
 def main():
@@ -811,6 +818,52 @@ def main():
               f"confidence {opt.confidence_pct}% | {opt.wheel_leg}"
               f"{f' | adj_basis ${opt.adj_cost_basis:.2f}' if opt.adj_cost_basis else ''}")
         print(f"      → {opt.confidence_reasoning}")
+
+    # Cross-ticker option scanner — top CSP/CC candidates daily
+    print("Running option scanner...")
+    from src.option_scanner import scan_watchlist
+    available_cash = {
+        "caspar": float(grab.get("accounts", {}).get("caspar", {}).get("summary", {}).get("total_cash", 0)),
+        "sarah": float(grab.get("accounts", {}).get("sarah", {}).get("summary", {}).get("total_cash_sgd", 0)),
+    }
+    try:
+        scan_results = scan_watchlist(
+            list(indicator_tickers), indicators, technical_scores,
+            SGX_TICKERS, available_cash, today,
+        )
+    except Exception as e:
+        print(f"  scanner error: {e}")
+        scan_results = []
+
+    scan_rows = []
+    for r in scan_results:
+        scan_rows.append(S.ScanResultRow(
+            date=r["date"], ticker=r["ticker"], strategy=r["strategy"],
+            right=r["right"], strike=r["strike"], expiry=r["expiry"],
+            dte=r["dte"], delta=r["delta"], premium=r["premium"],
+            bid=r["bid"], ask=r["ask"],
+            annual_yield_pct=r["annual_yield_pct"],
+            cash_required=r["cash_required"], breakeven=r["breakeven"],
+            iv=r["iv"], iv_rank=r["iv_rank"], spread_pct=r["spread_pct"],
+            underlying_last=r["underlying_last"],
+            technical_score=r["technical_score"],
+            composite_score=r["composite_score"],
+            catalyst_flag=r["catalyst_flag"],
+        ))
+    results["scan_results"] = scan_rows
+    # Show top 5 of each strategy
+    top_csp = [r for r in scan_results if r["strategy"] == "CSP"][:5]
+    top_cc = [r for r in scan_results if r["strategy"] == "CC"][:5]
+    print(f"  Top 5 CSP candidates:")
+    for r in top_csp:
+        print(f"    {r['ticker']:<6s} ${r['strike']:>7.2f}P exp {r['expiry']} "
+              f"Δ{r['delta']:+.2f} prem ${r['premium']:>5.2f} "
+              f"yld {r['annual_yield_pct']:>5.1f}% composite {r['composite_score']:>5.1f}")
+    print(f"  Top 5 CC candidates:")
+    for r in top_cc:
+        print(f"    {r['ticker']:<6s} ${r['strike']:>7.2f}C exp {r['expiry']} "
+              f"Δ{r['delta']:+.2f} prem ${r['premium']:>5.2f} "
+              f"yld {r['annual_yield_pct']:>5.1f}% composite {r['composite_score']:>5.1f}")
 
     # Wheel continuation — next-leg suggestions for each open option
     print("Computing wheel continuation...")

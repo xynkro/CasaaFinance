@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { DecisionRow } from "../data";
+import type { DecisionRow, TechnicalScoreRow } from "../data";
 import { Card } from "../cards/Card";
 import { StockDetail } from "../components/StockDetail";
 import { Target, Clock, CheckCircle, XCircle, AlertTriangle, ChevronRight } from "lucide-react";
@@ -150,8 +150,16 @@ function EmptyState() {
   );
 }
 
-export function DecisionsPage({ decisions }: { decisions: DecisionRow[] }) {
+export function DecisionsPage({
+  decisions,
+  technicalScores,
+}: {
+  decisions: DecisionRow[];
+  technicalScores?: TechnicalScoreRow[];
+}) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
+  const techByTicker = new Map<string, TechnicalScoreRow>();
+  for (const t of technicalScores ?? []) techByTicker.set(t.ticker, t);
 
   if (!decisions.length) {
     return (
@@ -205,6 +213,7 @@ export function DecisionsPage({ decisions }: { decisions: DecisionRow[] }) {
         <StockDetail
           decision={selected}
           ticker={selected.ticker}
+          techScore={techByTicker.get(selected.ticker)}
           currency={selected.account?.toLowerCase() === "sarah" ? "SGD" : "USD"}
           onClose={() => setSelected(null)}
         />
