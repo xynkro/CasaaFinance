@@ -693,15 +693,23 @@ def push_to_sheet(results: dict):
         sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
         sh.append_rows(client, S.ScanResultRow.TAB_NAME, [s.to_row() for s in scan])
 
+    # Exit plans
+    exit_plans = results.get("exit_plans", [])
+    if exit_plans:
+        sh.ensure_headers(client, S.ExitPlanRow.TAB_NAME, S.ExitPlanRow.HEADERS)
+        sh.append_rows(client, S.ExitPlanRow.TAB_NAME, [e.to_row() for e in exit_plans])
+
     macro = results["macro"]
     sh.ensure_headers(client, S.MacroRow.TAB_NAME, S.MacroRow.HEADERS)
     sh.append_row(client, S.MacroRow.TAB_NAME, macro.to_row())
 
     scan = results.get("scan_results", [])
+    exit_plans_count = len(results.get("exit_plans", []))
     print(f"  Pushed: snapshot_caspar, {len(pos_c)} caspar positions, "
           f"snapshot_sarah, {len(pos_s)} sarah positions, "
           f"{len(opts)} options, {len(tech)} technical scores, "
-          f"{len(wheel)} wheel next-legs, {len(scan)} scan results, macro")
+          f"{len(wheel)} wheel next-legs, {len(scan)} scan results, "
+          f"{exit_plans_count} exit plans, macro")
 
 
 def main():
@@ -841,6 +849,98 @@ def main():
               f"confidence {opt.confidence_pct}% | {opt.wheel_leg}"
               f"{f' | adj_basis ${opt.adj_cost_basis:.2f}' if opt.adj_cost_basis else ''}")
         print(f"      → {opt.confidence_reasoning}")
+
+    # Exit plans — per-position stop/target/recommendation
+    print("Computing exit plans...")
+    from src.exit_plan import compute_stock_exit_plan, compute_option_exit_plan
+    exit_rows = []
+
+    for acct_key in ("caspar", "sarah"):
+        acct = grab.get("accounts", {}).get(acct_key, {})
+        for p in acct.get("positions", []):
+            sym = p.get("symbol", "")
+            qty = float(p.get("qty", 0))
+            if qty <= 0:
+                continue
+            entry = float(p.get("avg_cost", 0))
+            ind = indicators.get(sym, {})
+            live_price = prices.get(sym, float(p.get("last", 0)))
+            if entry <= 0 or live_price <= 0:
+                continue
+            try:
+                plan = compute_stock_exit_plan(sym, entry, live_price, qty, ind)
+            except Exception as e:
+                print(f"  exit plan failed for {sym}: {e}")
+                continue
+            exit_rows.append(S.ExitPlanRow(
+                date=today, account=acct_key, ticker=sym,
+                position_type="STOCK", category=plan["category"],
+                is_blue_chip=plan["is_blue_chip"],
+                entry=plan["entry"], current=plan["current"], qty=qty,
+                upl_pct=plan["upl_pct"],
+                stop_loss=plan["stop_loss"], stop_key=plan["stop_key"],
+                target_1=plan["target_1"], target_2=plan["target_2"],
+                time_stop_days=plan["time_stop_days"], days_held=plan["days_held"],
+                profit_capture_pct=0.0, target_close_at=0.0,
+                status=plan["status"],
+                recommendation=plan["recommendation"],
+                reasoning=plan["reasoning"],
+            ))
+
+        # Option exit plans
+        for o in acct.get("options", []):
+            sym = o.get("symbol", "")
+            ind = indicators.get(sym, {})
+            # Build option dict with derived fields
+            qty = float(o.get("qty", 0))
+            right = o.get("right", "")
+            # Need to recompute dte + confidence — grab values from option_rows we already built
+            matching = next(
+                (or_ for or_ in option_rows if or_.ticker == sym and or_.right == right
+                 and abs(or_.strike - float(o.get("strike", 0))) < 0.01),
+                None,
+            )
+            if not matching:
+                continue
+            opt_dict = {
+                "ticker": sym,
+                "credit": matching.credit,
+                "last": matching.last,
+                "dte": matching.dte,
+                "moneyness": matching.moneyness,
+                "confidence_pct": matching.confidence_pct,
+            }
+            try:
+                plan = compute_option_exit_plan(opt_dict, ind)
+            except Exception as e:
+                print(f"  option exit plan failed for {sym}: {e}")
+                continue
+            pos_type = (
+                "OPTION_CSP" if (qty < 0 and right == "P") else
+                "OPTION_CC" if (qty < 0 and right == "C") else
+                "OPTION_OTHER"
+            )
+            exit_rows.append(S.ExitPlanRow(
+                date=today, account=acct_key, ticker=sym,
+                position_type=pos_type, category="option",
+                is_blue_chip=False,
+                entry=matching.credit, current=matching.last, qty=qty,
+                upl_pct=0.0,
+                stop_loss=0.0, stop_key="",
+                target_1=0.0, target_2=0.0,
+                time_stop_days=0, days_held=0,
+                profit_capture_pct=plan["profit_capture_pct"],
+                target_close_at=plan["target_close_at"],
+                status=plan["status"],
+                recommendation=plan["recommendation"],
+                reasoning=plan["reasoning"],
+            ))
+
+    results["exit_plans"] = exit_rows
+    # Log warnings/stops/targets
+    for r in exit_rows:
+        if r.status not in ("HEALTHY", "HOLD"):
+            print(f"  {r.account}/{r.ticker} [{r.position_type}] {r.status}: {r.recommendation}")
 
     # Cross-ticker option scanner — top CSP/CC candidates daily
     print("Running option scanner...")

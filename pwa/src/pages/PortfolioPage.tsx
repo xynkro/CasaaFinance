@@ -1,22 +1,26 @@
-import type { SnapshotRow, PositionRow, TechnicalScoreRow } from "../data";
+import type { SnapshotRow, PositionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
 import { PnlCard } from "../cards/PnlCard";
 import { PositionsTable } from "../components/PositionsTable";
 
 export function PortfolioPage({
   label,
   currency,
+  account,
   snapshot,
   positions,
   technicalScores,
   technicalScoresHistory,
+  exitPlans,
   loading,
 }: {
   label: string;
   currency: "USD" | "SGD";
+  account: "caspar" | "sarah";
   snapshot: SnapshotRow | null;
   positions: PositionRow[];
   technicalScores?: TechnicalScoreRow[];
   technicalScoresHistory?: TechnicalScoreRow[];
+  exitPlans?: ExitPlanRow[];
   loading: boolean;
 }) {
   return (
@@ -28,8 +32,10 @@ export function PortfolioPage({
         <PositionsTable
           positions={positions}
           currency={currency}
+          account={account}
           technicalScores={technicalScores}
           technicalScoresHistory={technicalScoresHistory}
+          exitPlans={exitPlans}
         />
       </div>
     </div>

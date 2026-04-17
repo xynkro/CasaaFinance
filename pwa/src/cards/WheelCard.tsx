@@ -1,4 +1,4 @@
-import type { OptionRow, PositionRow, TechnicalScoreRow } from "../data";
+import type { OptionRow, PositionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
 import { Card } from "./Card";
 import { CircleDot, AlertTriangle, TrendingUp, TrendingDown, Shield, Info, Zap } from "lucide-react";
 import { useState } from "react";
@@ -120,7 +120,17 @@ function scoreColor(score: number): string {
   return "text-slate-400";
 }
 
-function OptionItem({ opt, stockPositions, techScore }: { opt: OptionRow; stockPositions: PositionRow[]; techScore?: TechnicalScoreRow }) {
+function OptionItem({
+  opt,
+  stockPositions,
+  techScore,
+  exitPlan,
+}: {
+  opt: OptionRow;
+  stockPositions: PositionRow[];
+  techScore?: TechnicalScoreRow;
+  exitPlan?: ExitPlanRow;
+}) {
   const [expanded, setExpanded] = useState(false);
   const right = opt.right === "C" ? "CALL" : opt.right === "P" ? "PUT" : opt.right;
   const dte = Number(opt.dte);
@@ -214,6 +224,22 @@ function OptionItem({ opt, stockPositions, techScore }: { opt: OptionRow; stockP
         </div>
       )}
 
+      {/* Exit plan summary */}
+      {exitPlan && (
+        <div className="flex items-center gap-1.5 text-[10px] pt-1.5 border-t border-white/5">
+          <Shield size={10} className="text-indigo-400" />
+          <span className="text-slate-500">Captured:</span>
+          <span className={`tabular-nums font-semibold ${
+            Number(exitPlan.profit_capture_pct) >= 50 ? "text-emerald-400" : "text-slate-300"
+          }`}>
+            {Number(exitPlan.profit_capture_pct).toFixed(0)}%
+          </span>
+          <span className="text-slate-600">·</span>
+          <span className="text-slate-500">Close at</span>
+          <span className="text-emerald-400 font-semibold tabular-nums">${Number(exitPlan.target_close_at).toFixed(2)}</span>
+        </div>
+      )}
+
       {/* Expanded: confidence reasoning + indicator table + tech scores */}
       {expanded && (
         <div className="pt-2.5 border-t border-white/5 space-y-2">
@@ -303,17 +329,27 @@ export function WheelCard({
   casparPositions,
   sarahPositions,
   technicalScores,
+  exitPlans,
   loading,
 }: {
   options: OptionRow[];
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
   technicalScores?: TechnicalScoreRow[];
+  exitPlans?: ExitPlanRow[];
   loading?: boolean;
 }) {
   const techByTicker = new Map<string, TechnicalScoreRow>();
   for (const t of technicalScores ?? []) {
     techByTicker.set(t.ticker, t);
+  }
+  // Map option exit plans by "account|ticker|right" since same ticker could have
+  // both CSP and CC (rare but possible); we just need account+ticker here.
+  const exitByKey = new Map<string, ExitPlanRow>();
+  for (const e of exitPlans ?? []) {
+    if (e.position_type?.startsWith("OPTION")) {
+      exitByKey.set(`${e.account}|${e.ticker}`, e);
+    }
   }
   if (loading) {
     return (
@@ -387,6 +423,7 @@ export function WheelCard({
                   opt={opt}
                   stockPositions={acct === "caspar" ? casparPositions : sarahPositions}
                   techScore={techByTicker.get(opt.ticker)}
+                  exitPlan={exitByKey.get(`${opt.account}|${opt.ticker}`)}
                 />
               ))}
             </div>

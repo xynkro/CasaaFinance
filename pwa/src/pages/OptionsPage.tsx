@@ -5,6 +5,7 @@ import type {
   TechnicalScoreRow,
   WheelNextLegRow,
   ScanResultRow,
+  ExitPlanRow,
 } from "../data";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
@@ -17,6 +18,7 @@ export function OptionsPage({
   technicalScores,
   wheelNextLeg,
   scanResults,
+  exitPlans,
   casparPositions,
   sarahPositions,
   loading,
@@ -26,6 +28,7 @@ export function OptionsPage({
   technicalScores: TechnicalScoreRow[];
   wheelNextLeg: WheelNextLegRow[];
   scanResults: ScanResultRow[];
+  exitPlans: ExitPlanRow[];
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
   loading: boolean;
@@ -38,6 +41,7 @@ export function OptionsPage({
           casparPositions={casparPositions}
           sarahPositions={sarahPositions}
           technicalScores={technicalScores}
+          exitPlans={exitPlans}
           loading={loading}
         />
       </div>

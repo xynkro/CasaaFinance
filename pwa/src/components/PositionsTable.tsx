@@ -1,6 +1,7 @@
 import { useState } from "react";
-import type { PositionRow, TechnicalScoreRow } from "../data";
+import type { PositionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
 import { StockDetail } from "./StockDetail";
+import { ExitStatusBadge } from "./ExitPlanPanel";
 import { ChevronRight } from "lucide-react";
 
 function fmt(v: string, prefix = "$"): string {
@@ -23,16 +24,26 @@ export function PositionsTable({
   currency,
   technicalScores,
   technicalScoresHistory,
+  exitPlans,
+  account,
 }: {
   positions: PositionRow[];
   currency: "USD" | "SGD";
   technicalScores?: TechnicalScoreRow[];
   technicalScoresHistory?: TechnicalScoreRow[];
+  exitPlans?: ExitPlanRow[];
+  account?: "caspar" | "sarah";
 }) {
   const [selected, setSelected] = useState<PositionRow | null>(null);
   const prefix = currency === "SGD" ? "S$" : "$";
   const techByTicker = new Map<string, TechnicalScoreRow>();
   for (const t of technicalScores ?? []) techByTicker.set(t.ticker, t);
+  const exitByTicker = new Map<string, ExitPlanRow>();
+  for (const e of exitPlans ?? []) {
+    if (e.position_type === "STOCK" && (!account || e.account === account)) {
+      exitByTicker.set(e.ticker, e);
+    }
+  }
 
   if (!positions.length) {
     return (
@@ -57,6 +68,7 @@ export function PositionsTable({
             const upl = Number(pos.upl);
             const weight = pctFmt(pos.weight);
             const isUp = upl >= 0;
+            const exitPlan = exitByTicker.get(pos.ticker);
 
             return (
               <button
@@ -73,7 +85,10 @@ export function PositionsTable({
                     </span>
                   </div>
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-slate-100">{pos.ticker}</div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-semibold text-slate-100">{pos.ticker}</span>
+                      <ExitStatusBadge plan={exitPlan} />
+                    </div>
                     <div className="text-xs text-slate-500">
                       {Number(pos.qty).toFixed(0)} @ {fmt(pos.avg_cost, prefix)}
                     </div>
@@ -107,6 +122,7 @@ export function PositionsTable({
           position={selected}
           techScore={techByTicker.get(selected.ticker)}
           techHistory={technicalScoresHistory}
+          exitPlan={exitByTicker.get(selected.ticker)}
           currency={currency}
           onClose={() => setSelected(null)}
         />

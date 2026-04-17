@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { PositionRow, DecisionRow, TechnicalScoreRow } from "../data";
+import type { PositionRow, DecisionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
 import { X, TrendingUp, TrendingDown, ChevronLeft, Zap, Activity } from "lucide-react";
 import { sectorFor } from "../lib/emojis";
+import { ExitPlanPanel } from "./ExitPlanPanel";
 
 function fmt(v: string | number, prefix = "$"): string {
   const n = Number(v);
@@ -15,6 +16,7 @@ export function StockDetail({
   ticker: tickerProp,
   techScore,
   techHistory,
+  exitPlan,
   currency,
   onClose,
 }: {
@@ -23,6 +25,7 @@ export function StockDetail({
   ticker?: string;
   techScore?: TechnicalScoreRow;
   techHistory?: TechnicalScoreRow[];
+  exitPlan?: ExitPlanRow;
   currency: "USD" | "SGD";
   onClose: () => void;
 }) {
@@ -233,6 +236,9 @@ export function StockDetail({
 
       {/* Scrollable body: tech score + chart + TA analysis */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
+        {/* Exit plan panel (when available) — goes first so it's most visible */}
+        {exitPlan && <ExitPlanPanel plan={exitPlan} />}
+
         {/* Our technical analysis panel (when techScore available) */}
         {techScore && <TechAnalysisPanel techScore={techScore} techHistory={techHistory} ticker={ticker} />}
 

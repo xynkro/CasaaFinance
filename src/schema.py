@@ -422,6 +422,58 @@ class ScanResultRow:
 
 
 @dataclass
+class ExitPlanRow:
+    """Daily exit plan for each open position (stock or option)."""
+    TAB_NAME = "exit_plans"
+    HEADERS = [
+        "date", "account", "ticker", "position_type",
+        "category", "is_blue_chip",
+        "entry", "current", "qty", "upl_pct",
+        "stop_loss", "stop_key", "target_1", "target_2",
+        "time_stop_days", "days_held",
+        "profit_capture_pct", "target_close_at",
+        "status", "recommendation", "reasoning",
+    ]
+
+    date: str
+    account: str
+    ticker: str
+    position_type: str        # "STOCK" | "OPTION_CSP" | "OPTION_CC" | "OPTION_OTHER"
+    category: str             # "blue_chip" | "etf_broad" | "etf_commodity" | "etf_leveraged" | "speculative"
+    is_blue_chip: bool
+    entry: float
+    current: float
+    qty: float
+    upl_pct: float
+    stop_loss: float
+    stop_key: str             # Which rule dominated (pct/support/fib/atr/sma_200)
+    target_1: float
+    target_2: float
+    time_stop_days: int       # 0 if none
+    days_held: int            # 0 if unknown
+    profit_capture_pct: float # For options; 0 for stocks
+    target_close_at: float    # Option target close price; 0 for stocks
+    status: str               # HEALTHY/WARNING/STOP_TRIGGERED/T1_HIT/T2_HIT/TIME_STOP/ROLL_OR_ASSIGN/PROFIT_TARGET_HIT/LET_EXPIRE/BREACH_WARNING/CATALYST_WARNING
+    recommendation: str
+    reasoning: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.account, self.ticker, self.position_type,
+            self.category, "TRUE" if self.is_blue_chip else "",
+            _num(self.entry, 4), _num(self.current, 4),
+            _num(self.qty, 2), _num(self.upl_pct, 4),
+            _num(self.stop_loss, 4), self.stop_key,
+            _num(self.target_1, 4), _num(self.target_2, 4),
+            str(self.time_stop_days), str(self.days_held),
+            _num(self.profit_capture_pct, 1),
+            _num(self.target_close_at, 4),
+            self.status, self.recommendation, self.reasoning,
+        ]
+
+
+@dataclass
 class OptionRecommendationRow:
     """Actionable option strategy recommendations (from ad-hoc scans or analysis)."""
     TAB_NAME = "option_recommendations"
