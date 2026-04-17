@@ -156,17 +156,20 @@ export function RecommendationCard({ recommendations }: { recommendations: Optio
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Lightbulb size={14} className="text-amber-400" />
-          <h2 className="text-sm font-medium text-slate-400">Strategy Recommendations</h2>
+          <h2 className="text-sm font-medium text-slate-400">Strategy Notes (weekly)</h2>
         </div>
         <div className="flex items-center gap-2">
           {proposedCount > 0 && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/15 text-indigo-400 border border-indigo-500/20">
-              {proposedCount} PROPOSED
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-500/15 text-slate-400 border border-slate-500/20">
+              {proposedCount} noted
             </span>
           )}
-          <span className="text-[10px] text-slate-600">{recommendations.length} total</span>
+          <span className="text-[10px] text-slate-600">context only</span>
         </div>
       </div>
+      <p className="text-[10px] text-slate-600 mb-3 leading-relaxed">
+        Manual entries from weekly ad-hoc scans. Prices + deltas are stale — verify against Daily Scan above before execution.
+      </p>
 
       <div className="space-y-2">
         {sorted.map((r, i) => (

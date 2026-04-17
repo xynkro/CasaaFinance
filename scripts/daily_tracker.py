@@ -699,6 +699,12 @@ def push_to_sheet(results: dict):
         sh.ensure_headers(client, S.ExitPlanRow.TAB_NAME, S.ExitPlanRow.HEADERS)
         sh.append_rows(client, S.ExitPlanRow.TAB_NAME, [e.to_row() for e in exit_plans])
 
+    # Options defense alerts
+    defense = results.get("options_defense", [])
+    if defense:
+        sh.ensure_headers(client, S.OptionsDefenseRow.TAB_NAME, S.OptionsDefenseRow.HEADERS)
+        sh.append_rows(client, S.OptionsDefenseRow.TAB_NAME, [d.to_row() for d in defense])
+
     macro = results["macro"]
     sh.ensure_headers(client, S.MacroRow.TAB_NAME, S.MacroRow.HEADERS)
     sh.append_row(client, S.MacroRow.TAB_NAME, macro.to_row())
@@ -987,6 +993,128 @@ def main():
         print(f"    {r['ticker']:<6s} ${r['strike']:>7.2f}C exp {r['expiry']} "
               f"Δ{r['delta']:+.2f} prem ${r['premium']:>5.2f} "
               f"yld {r['annual_yield_pct']:>5.1f}% composite {r['composite_score']:>5.1f}")
+
+    # Daily options defense — compare today vs yesterday to surface urgent actions
+    print("Computing options defense alerts...")
+    from src.options_defense import build_defense_brief
+
+    def _fetch_yesterday_rows(tab_name: str) -> list[dict]:
+        """Get rows from the sheet for the most recent date BEFORE today."""
+        try:
+            from src.sync import load_env
+            from src import sheets as sh
+            load_env()
+            client = sh.authenticate()
+            ss = sh._open_sheet(client)
+            ws = ss.worksheet(tab_name)
+            values = ws.get_all_values()
+            if len(values) < 2:
+                return []
+            headers = values[0]
+            rows = []
+            for r in values[1:]:
+                if len(r) < len(headers):
+                    r = r + [""] * (len(headers) - len(r))
+                row = dict(zip(headers, r))
+                # Extract date portion (YYYY-MM-DD from YYYY-MM-DDTHHMMSS)
+                date_val = row.get("date", "")
+                row["_date_plain"] = date_val.split("T")[0] if "T" in date_val else date_val
+                rows.append(row)
+            # Filter to dates < today, take most recent
+            from collections import defaultdict
+            by_date = defaultdict(list)
+            for r in rows:
+                if r["_date_plain"] < today:
+                    by_date[r["_date_plain"]].append(r)
+            if not by_date:
+                return []
+            latest_prev_date = max(by_date.keys())
+            return by_date[latest_prev_date]
+        except Exception as e:
+            print(f"  fetch yesterday {tab_name} error: {e}")
+            return []
+
+    yesterday_options = _fetch_yesterday_rows("options")
+    yesterday_tech = _fetch_yesterday_rows("technical_scores")
+
+    # Build lookup maps
+    yest_opt_by_key: dict[str, dict] = {}
+    for r in yesterday_options:
+        k = f"{r.get('account')}|{r.get('ticker')}|{r.get('right')}|{float(r.get('strike', 0) or 0):.2f}"
+        yest_opt_by_key[k] = r
+
+    yest_ind_by_ticker: dict[str, dict] = {}
+    for r in yesterday_tech:
+        yest_ind_by_ticker[r.get("ticker", "")] = r
+
+    # Today's options as dicts (pull catalyst_flag from ticker's indicator)
+    today_opt_dicts = []
+    for o in option_rows:
+        ind = indicators.get(o.ticker, {})
+        today_opt_dicts.append({
+            "account": o.account, "ticker": o.ticker, "right": o.right,
+            "strike": o.strike, "qty": o.qty, "dte": o.dte,
+            "moneyness": o.moneyness, "confidence_pct": o.confidence_pct,
+            "wheel_leg": o.wheel_leg,
+            "catalyst_flag": bool(ind.get("catalyst_flag", False)),
+            "credit": o.credit, "last": o.last,
+        })
+
+    # Today's indicators with tech scores merged
+    today_ind_for_defense: dict[str, dict] = {}
+    for sym, ind in indicators.items():
+        merged = dict(ind)
+        scores = technical_scores.get(sym, {})
+        merged["CSP"] = scores.get("CSP", 0)
+        merged["CC"] = scores.get("CC", 0)
+        merged["csp"] = scores.get("CSP", 0)
+        merged["cc"] = scores.get("CC", 0)
+        today_ind_for_defense[sym] = merged
+
+    # Exit plans keyed
+    exit_by_key: dict[str, dict] = {}
+    for e in exit_rows:
+        if e.position_type.startswith("OPTION"):
+            k = f"{e.account}|{e.ticker}"
+            exit_by_key[k] = {
+                "status": e.status,
+                "profit_capture_pct": e.profit_capture_pct,
+                "recommendation": e.recommendation,
+            }
+
+    try:
+        defense_alerts = build_defense_brief(
+            today_opt_dicts, yest_opt_by_key,
+            today_ind_for_defense, yest_ind_by_ticker,
+            exit_by_key,
+        )
+    except Exception as e:
+        print(f"  defense brief error: {e}")
+        defense_alerts = []
+
+    defense_rows = []
+    for a in defense_alerts:
+        defense_rows.append(S.OptionsDefenseRow(
+            date=today,
+            account=a.get("account", ""),
+            ticker=a.get("ticker", ""),
+            right=a.get("right", ""),
+            strike=float(a.get("strike", 0)),
+            severity=a.get("severity", "INFO"),
+            title=a.get("title", ""),
+            description=a.get("description", ""),
+            action=a.get("action", ""),
+            delta_info=a.get("delta_info", ""),
+        ))
+    results["options_defense"] = defense_rows
+    # Log critical + high priority
+    critical_high = [a for a in defense_alerts if a["severity"] in ("CRITICAL", "HIGH")]
+    if critical_high:
+        print(f"  {len(critical_high)} high-priority alerts:")
+        for a in critical_high:
+            print(f"    [{a['severity']}] {a['title']}: {a['description']}")
+    else:
+        print(f"  {len(defense_alerts)} alerts (all INFO/MEDIUM)")
 
     # Wheel continuation — next-leg suggestions for each open option
     print("Computing wheel continuation...")

@@ -6,7 +6,9 @@ import type {
   WheelNextLegRow,
   ScanResultRow,
   ExitPlanRow,
+  OptionsDefenseRow,
 } from "../data";
+import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
 import { ScanCard } from "../cards/ScanCard";
@@ -19,6 +21,7 @@ export function OptionsPage({
   wheelNextLeg,
   scanResults,
   exitPlans,
+  optionsDefense,
   casparPositions,
   sarahPositions,
   loading,
@@ -29,13 +32,20 @@ export function OptionsPage({
   wheelNextLeg: WheelNextLegRow[];
   scanResults: ScanResultRow[];
   exitPlans: ExitPlanRow[];
+  optionsDefense: OptionsDefenseRow[];
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
   loading: boolean;
 }) {
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
+      {/* DAILY DEFENSE — the most urgent, always-first */}
       <div className="fade-up fade-up-1">
+        <OptionsDefenseCard alerts={optionsDefense} />
+      </div>
+
+      {/* Open positions */}
+      <div className="fade-up fade-up-2">
         <WheelCard
           options={options}
           casparPositions={casparPositions}
@@ -46,14 +56,17 @@ export function OptionsPage({
         />
       </div>
 
-      <div className="fade-up fade-up-2">
+      {/* What to do when each expires (weeks out) */}
+      <div className="fade-up fade-up-3">
         <WheelContinuationCard rows={wheelNextLeg} />
       </div>
 
-      <div className="fade-up fade-up-3">
+      {/* Fresh daily scan — new idea generation */}
+      <div className="fade-up fade-up-4">
         <ScanCard candidates={scanResults} />
       </div>
 
+      {/* Weekly strategy notes — bottom, contextual only */}
       <div className="fade-up fade-up-4">
         <RecommendationCard recommendations={recommendations} />
       </div>

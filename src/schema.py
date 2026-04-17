@@ -422,6 +422,36 @@ class ScanResultRow:
 
 
 @dataclass
+class OptionsDefenseRow:
+    """Daily defense alert for an open option position — what to do TODAY."""
+    TAB_NAME = "options_defense"
+    HEADERS = [
+        "date", "account", "ticker", "right", "strike",
+        "severity", "title", "description", "action", "delta_info",
+    ]
+
+    date: str
+    account: str
+    ticker: str
+    right: str
+    strike: float
+    severity: str      # CRITICAL | HIGH | MEDIUM | INFO
+    title: str
+    description: str
+    action: str
+    delta_info: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.account, self.ticker, self.right,
+            _num(self.strike, 2),
+            self.severity, self.title, self.description,
+            self.action, self.delta_info,
+        ]
+
+
+@dataclass
 class ExitPlanRow:
     """Daily exit plan for each open position (stock or option)."""
     TAB_NAME = "exit_plans"
