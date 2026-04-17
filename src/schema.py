@@ -232,6 +232,141 @@ class OptionRow:
 
 
 @dataclass
+class TechnicalScoreRow:
+    """Daily per-ticker technical indicators + strategy scores + entry/exit signal."""
+    TAB_NAME = "technical_scores"
+    HEADERS = [
+        "date", "ticker", "close", "trend",
+        "rsi_14", "stoch_k", "stoch_d",
+        "macd_hist", "macd_cross",
+        "bb_pct_b", "bb_squeeze",
+        "wvf", "wvf_bottom",
+        "sma_20", "sma_50", "sma_200",
+        "support", "resistance",
+        "fib_0236", "fib_0382", "fib_050", "fib_0618", "fib_0764",
+        "vol_ratio", "vol_spike_type", "candle_pattern",
+        "divergence", "momentum_5d", "momentum_20d",
+        "volatility_annual", "catalyst_flag", "vol_regime",
+        "score_buy", "score_csp", "score_cc",
+        "score_long_call", "score_long_put",
+        "entry_exit_signal", "top_drivers",
+    ]
+
+    date: str
+    ticker: str
+    close: float
+    trend: str
+    rsi_14: float
+    stoch_k: float
+    stoch_d: float
+    macd_hist: float
+    macd_cross: str
+    bb_pct_b: float
+    bb_squeeze: bool
+    wvf: float
+    wvf_bottom: bool
+    sma_20: float
+    sma_50: float
+    sma_200: float
+    support: float
+    resistance: float
+    fib_0236: float
+    fib_0382: float
+    fib_050: float
+    fib_0618: float
+    fib_0764: float
+    vol_ratio: float
+    vol_spike_type: str
+    candle_pattern: str
+    divergence: str
+    momentum_5d: float
+    momentum_20d: float
+    volatility_annual: float
+    catalyst_flag: bool
+    vol_regime: str
+    score_buy: float
+    score_csp: float
+    score_cc: float
+    score_long_call: float
+    score_long_put: float
+    entry_exit_signal: str
+    top_drivers: str   # pipe-separated e.g. "CSP: +MACD cross|+Fib position"
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.ticker, _num(self.close, 4), self.trend,
+            _num(self.rsi_14, 1), _num(self.stoch_k, 1), _num(self.stoch_d, 1),
+            _num(self.macd_hist, 4), self.macd_cross,
+            _num(self.bb_pct_b, 3), "TRUE" if self.bb_squeeze else "",
+            _num(self.wvf, 2), "TRUE" if self.wvf_bottom else "",
+            _num(self.sma_20, 4), _num(self.sma_50, 4), _num(self.sma_200, 4),
+            _num(self.support, 4), _num(self.resistance, 4),
+            _num(self.fib_0236, 4), _num(self.fib_0382, 4), _num(self.fib_050, 4),
+            _num(self.fib_0618, 4), _num(self.fib_0764, 4),
+            _num(self.vol_ratio, 2), self.vol_spike_type, self.candle_pattern,
+            self.divergence, _num(self.momentum_5d, 2), _num(self.momentum_20d, 2),
+            _num(self.volatility_annual, 4),
+            "TRUE" if self.catalyst_flag else "", self.vol_regime,
+            _num(self.score_buy, 1), _num(self.score_csp, 1), _num(self.score_cc, 1),
+            _num(self.score_long_call, 1), _num(self.score_long_put, 1),
+            self.entry_exit_signal, self.top_drivers,
+        ]
+
+
+@dataclass
+class WheelNextLegRow:
+    """Per-open-option next-leg recommendation."""
+    TAB_NAME = "wheel_next_leg"
+    HEADERS = [
+        "date", "account", "ticker", "current_right", "current_strike",
+        "current_expiry", "current_dte", "current_status",
+        "next_action", "next_strategy", "next_right", "next_strike",
+        "next_expiry", "next_dte", "next_delta",
+        "next_premium", "next_yield_pct", "next_breakeven",
+        "recommendation", "reasoning", "confidence",
+    ]
+
+    date: str
+    account: str
+    ticker: str
+    current_right: str
+    current_strike: float
+    current_expiry: str
+    current_dte: int
+    current_status: str      # "HOLD" | "EXPIRING_WORTHLESS" | "LIKELY_ASSIGNED" | "ROLL"
+    next_action: str         # "LET_EXPIRE" | "ROLL_UP" | "ROLL_OUT" | "CLOSE" | "NEW_LEG"
+    next_strategy: str       # "CSP" | "CC" | "SWITCH" | "WAIT"
+    next_right: str
+    next_strike: float
+    next_expiry: str
+    next_dte: int
+    next_delta: float
+    next_premium: float
+    next_yield_pct: float
+    next_breakeven: float
+    recommendation: str      # one-line actionable
+    reasoning: str           # explainability
+    confidence: int          # 0-100
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.account, self.ticker, self.current_right,
+            _num(self.current_strike, 2), self.current_expiry, str(self.current_dte),
+            self.current_status,
+            self.next_action, self.next_strategy, self.next_right,
+            _num(self.next_strike, 2) if self.next_strike else "",
+            self.next_expiry, str(self.next_dte) if self.next_dte else "",
+            _num(self.next_delta, 3) if self.next_delta else "",
+            _num(self.next_premium, 2) if self.next_premium else "",
+            _num(self.next_yield_pct, 1) if self.next_yield_pct else "",
+            _num(self.next_breakeven, 2) if self.next_breakeven else "",
+            self.recommendation, self.reasoning, str(self.confidence),
+        ]
+
+
+@dataclass
 class OptionRecommendationRow:
     """Actionable option strategy recommendations (from ad-hoc scans or analysis)."""
     TAB_NAME = "option_recommendations"

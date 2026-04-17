@@ -15,6 +15,8 @@ const GIDS: Record<string, string> = {
   decision_queue: "1744723757",
   options: "326503132",
   option_recommendations: "129728101",
+  technical_scores: "657341624",
+  wheel_next_leg: "805863395",
   macro: "447436838",
   wsr_archive: "1065773181",
 };
@@ -120,6 +122,72 @@ export interface OptionRow {
   sma_50: string;
 }
 
+export interface TechnicalScoreRow {
+  date: string;
+  ticker: string;
+  close: string;
+  trend: string;
+  rsi_14: string;
+  stoch_k: string;
+  stoch_d: string;
+  macd_hist: string;
+  macd_cross: string;
+  bb_pct_b: string;
+  bb_squeeze: string;
+  wvf: string;
+  wvf_bottom: string;
+  sma_20: string;
+  sma_50: string;
+  sma_200: string;
+  support: string;
+  resistance: string;
+  fib_0236: string;
+  fib_0382: string;
+  fib_050: string;
+  fib_0618: string;
+  fib_0764: string;
+  vol_ratio: string;
+  vol_spike_type: string;
+  candle_pattern: string;
+  divergence: string;
+  momentum_5d: string;
+  momentum_20d: string;
+  volatility_annual: string;
+  catalyst_flag: string;
+  vol_regime: string;
+  score_buy: string;
+  score_csp: string;
+  score_cc: string;
+  score_long_call: string;
+  score_long_put: string;
+  entry_exit_signal: string;
+  top_drivers: string;
+}
+
+export interface WheelNextLegRow {
+  date: string;
+  account: string;
+  ticker: string;
+  current_right: string;
+  current_strike: string;
+  current_expiry: string;
+  current_dte: string;
+  current_status: string;
+  next_action: string;
+  next_strategy: string;
+  next_right: string;
+  next_strike: string;
+  next_expiry: string;
+  next_dte: string;
+  next_delta: string;
+  next_premium: string;
+  next_yield_pct: string;
+  next_breakeven: string;
+  recommendation: string;
+  reasoning: string;
+  confidence: string;
+}
+
 export interface OptionRecommendationRow {
   date: string;
   source: string;
@@ -170,6 +238,8 @@ export interface DashboardData {
   sarahPositions: PositionRow[];
   options: OptionRow[];
   optionRecommendations: OptionRecommendationRow[];
+  technicalScores: TechnicalScoreRow[];
+  wheelNextLeg: WheelNextLegRow[];
   decisions: DecisionRow[];
   macro: MacroRow | null;
   // History (all rows, sorted by date ascending)
@@ -207,7 +277,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, optionRecs, decisions, macroRows, archiveRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, optionRecs, techRows, wheelRows, decisions, macroRows, archiveRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
@@ -216,6 +286,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<PositionRow>("positions_sarah").catch(() => [] as PositionRow[]),
         fetchTab<OptionRow>("options").catch(() => [] as OptionRow[]),
         fetchTab<OptionRecommendationRow>("option_recommendations").catch(() => [] as OptionRecommendationRow[]),
+        fetchTab<TechnicalScoreRow>("technical_scores").catch(() => [] as TechnicalScoreRow[]),
+        fetchTab<WheelNextLegRow>("wheel_next_leg").catch(() => [] as WheelNextLegRow[]),
         fetchTab<DecisionRow>("decision_queue").catch(() => [] as DecisionRow[]),
         fetchTab<MacroRow>("macro"),
         fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
@@ -231,6 +303,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
       sarahPositions: latestGroup(sarahPos),
       options: latestGroup(optionRows),
       optionRecommendations: optionRecs,
+      technicalScores: latestGroup(techRows),
+      wheelNextLeg: latestGroup(wheelRows),
       decisions: latestGroup(decisions),
       macro: latest(macroRows),
       casparHistory: dedup(casparRows),
@@ -242,7 +316,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
   } catch (e) {
     return {
       dailyHistory: [], daily: null, caspar: null, sarah: null,
-      casparPositions: [], sarahPositions: [], options: [], optionRecommendations: [], decisions: [],
+      casparPositions: [], sarahPositions: [], options: [], optionRecommendations: [],
+      technicalScores: [], wheelNextLeg: [], decisions: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [], error: String(e),
     };

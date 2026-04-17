@@ -265,74 +265,26 @@ def calc_assignment_risk(moneyness: str, dte: int, trend_risk: str = "") -> str:
 
 
 def fetch_indicators(tickers: list[str]) -> dict[str, dict]:
-    """Fetch 1-year prices for option underlyings and compute indicators:
-    momentum (5d, 20d), annualized volatility, SMA20/50, RSI14."""
-    import yfinance as yf
+    """Fetch full 1y OHLCV + compute complete indicator bundle via src.indicators."""
+    from src.indicators import fetch_ohlcv, compute_indicators
 
     if not tickers:
         return {}
 
     yahoo_syms = [yahoo_ticker(t) for t in tickers]
+    ohlcv = fetch_ohlcv(yahoo_syms, period="1y")
+
     result: dict[str, dict] = {}
-
-    data = yf.download(yahoo_syms, period="1y", progress=False, threads=True)
-    if data.empty:
-        return {t: {} for t in tickers}
-
-    close = data.get("Close")
-    if close is None:
-        return {t: {} for t in tickers}
-
     for orig, ysym in zip(tickers, yahoo_syms):
-        ind: dict = {}
+        df = ohlcv.get(ysym)
+        if df is None or df.empty or len(df) < 20:
+            result[orig] = {}
+            continue
         try:
-            if len(yahoo_syms) == 1:
-                series = close.dropna()
-            else:
-                col = close[ysym] if ysym in close.columns else None
-                series = col.dropna() if col is not None else None
-
-            if series is None or len(series) < 20:
-                result[orig] = {}
-                continue
-
-            # Momentum
-            if len(series) >= 6:
-                ind["momentum_5d"] = round(
-                    (float(series.iloc[-1]) - float(series.iloc[-6])) / float(series.iloc[-6]) * 100, 2
-                )
-            if len(series) >= 21:
-                ind["momentum_20d"] = round(
-                    (float(series.iloc[-1]) - float(series.iloc[-21])) / float(series.iloc[-21]) * 100, 2
-                )
-
-            # Volatility (annualized from daily returns)
-            returns = series.pct_change().dropna()
-            if len(returns) >= 10:
-                daily_vol = float(returns.std())
-                ind["volatility_annual"] = round(daily_vol * math.sqrt(252), 4)
-
-            # SMAs
-            if len(series) >= 20:
-                ind["sma_20"] = round(float(series.iloc[-20:].mean()), 4)
-            if len(series) >= 50:
-                ind["sma_50"] = round(float(series.iloc[-50:].mean()), 4)
-
-            # RSI-14 (classic formula)
-            if len(series) >= 15:
-                delta = series.diff().dropna()
-                gains = delta.where(delta > 0, 0).iloc[-14:].mean()
-                losses = -delta.where(delta < 0, 0).iloc[-14:].mean()
-                if losses > 0:
-                    rsi = 100 - (100 / (1 + gains / losses))
-                else:
-                    rsi = 100.0 if gains > 0 else 50.0
-                ind["rsi_14"] = round(float(rsi), 1)
-
-        except (KeyError, IndexError, ValueError):
-            pass
-
-        result[orig] = ind
+            result[orig] = compute_indicators(df)
+        except Exception as e:
+            print(f"  indicator compute failed for {orig}: {e}")
+            result[orig] = {}
 
     return result
 
@@ -367,17 +319,21 @@ def calc_confidence(
     sma_20: float,
     sma_50: float,
     vix: float,
+    strategy: str = "",
+    technical_scores: dict | None = None,
+    catalyst_flag: bool = False,
 ) -> tuple[int, str]:
     """
     Compute confidence % of assignment (0-100) with reasoned explanation.
-    Combines: Black-Scholes N(d2) base probability + momentum + RSI + SMA trend + VIX.
+    Combines: Black-Scholes N(d2) + momentum + RSI + SMA + VIX + strategy
+    technical score + catalyst detection.
     """
     if underlying <= 0 or strike <= 0 or dte < 0:
         return (50, "insufficient data")
 
     # Base: Black-Scholes probability of finishing ITM
     T = max(dte, 1) / 365.0
-    sigma = sigma_annual if sigma_annual > 0 else 0.4  # fallback to 40% if unknown
+    sigma = sigma_annual if sigma_annual > 0 else 0.4
     r = 0.045
     base_prob = bs_prob_itm(underlying, strike, T, sigma, r, right)
     base_pct = base_prob * 100
@@ -389,7 +345,7 @@ def calc_confidence(
             mom_adj = min(15, momentum_5d * 0.8)
         elif momentum_5d < -3:
             mom_adj = max(-10, momentum_5d * 0.5)
-    else:  # P
+    else:
         if momentum_5d < -3:
             mom_adj = min(15, abs(momentum_5d) * 0.8)
         elif momentum_5d > 3:
@@ -402,10 +358,9 @@ def calc_confidence(
         uptrend = sma_20 > sma_50
         if right == "C":
             trend_adj = 5 if uptrend else -5
-            trend_label = "uptrend" if uptrend else "downtrend"
         else:
             trend_adj = -5 if uptrend else 5
-            trend_label = "uptrend" if uptrend else "downtrend"
+        trend_label = "uptrend" if uptrend else "downtrend"
 
     # RSI overbought/oversold — contrarian signal
     rsi_adj = 0.0
@@ -417,23 +372,46 @@ def calc_confidence(
         rsi_label = f"RSI {rsi_14:.0f} oversold"
         rsi_adj = 3 if right == "C" else -4
 
-    # VIX — higher = wider distribution (slightly more assignment uncertainty both ways)
+    # VIX — higher = wider distribution
     vix_adj = 0.0
     if vix > 25:
         vix_adj = 3
     elif vix < 14:
         vix_adj = -2
 
-    raw = base_pct + mom_adj + trend_adj + rsi_adj + vix_adj
+    # Technical-score adjustment.
+    # If strategy (CSP/CC) is specified and technical score says environment
+    # favors that strategy, the position is safer → lower assignment confidence.
+    # Hostile environment → higher assignment confidence.
+    tech_adj = 0.0
+    tech_label = ""
+    if strategy in ("CSP", "CC") and technical_scores:
+        strat_score = technical_scores.get(strategy, 0.0)
+        # score range [-100, +100]. scale to ±8 points of confidence adjustment
+        # (positive score = FAVORABLE env = LOWER assignment risk)
+        tech_adj = -(strat_score / 100) * 8
+        if abs(strat_score) >= 30:
+            if strat_score > 0:
+                tech_label = f"{strategy} env FAVORABLE ({strat_score:+.0f})"
+            else:
+                tech_label = f"{strategy} env HOSTILE ({strat_score:+.0f})"
+
+    # Catalyst: if detected, bump risk up regardless of BS
+    cat_adj = 0.0
+    cat_label = ""
+    if catalyst_flag:
+        cat_adj = 10
+        cat_label = "catalyst detected"
+
+    raw = base_pct + mom_adj + trend_adj + rsi_adj + vix_adj + tech_adj + cat_adj
     confidence = int(max(0, min(100, round(raw))))
 
     # Reasoning string
     dist_pct = (underlying - strike) / strike * 100
-    parts = []
-    parts.append(f"BS {base_pct:.0f}%")
+    parts = [f"BS {base_pct:.0f}%"]
     if right == "C":
         if dist_pct > 0:
-            parts.append(f"stock ${underlying:.2f} is {dist_pct:.1f}% above strike (ITM)")
+            parts.append(f"${underlying:.2f} is {dist_pct:.1f}% above strike (ITM)")
         else:
             parts.append(f"${underlying:.2f} is {abs(dist_pct):.1f}% below ${strike:.0f} strike")
     else:
@@ -445,11 +423,15 @@ def calc_confidence(
     parts.append(f"σ {sigma * 100:.0f}%")
     if abs(momentum_5d) > 2:
         direction = "toward" if mom_adj > 0 else "away"
-        parts.append(f"5d momentum {momentum_5d:+.1f}% {direction}")
+        parts.append(f"5d mom {momentum_5d:+.1f}% {direction}")
     if rsi_label:
         parts.append(rsi_label)
     if trend_label:
         parts.append(trend_label)
+    if tech_label:
+        parts.append(tech_label)
+    if cat_label:
+        parts.append(cat_label)
     if vix > 25:
         parts.append(f"VIX {vix:.0f} elevated")
 
@@ -497,7 +479,14 @@ def calc_trend_risk(right: str, strike: float, underlying: float, momentum_5d: f
             return "SAFE"
 
 
-def build_options(grab: dict, prices: dict[str, float], indicators: dict[str, dict], macro: dict[str, float], today: str):
+def build_options(
+    grab: dict,
+    prices: dict[str, float],
+    indicators: dict[str, dict],
+    technical_scores: dict[str, dict[str, float]],
+    macro: dict[str, float],
+    today: str,
+):
     """Build option rows with moneyness, wheel stage, and adjusted cost basis."""
     from src import schema as S
 
@@ -557,11 +546,29 @@ def build_options(grab: dict, prices: dict[str, float], indicators: dict[str, di
             sma_20 = ind.get("sma_20", 0.0)
             sma_50 = ind.get("sma_50", 0.0)
             vix = macro.get("vix", 18.0) or 18.0
+            catalyst_flag = bool(ind.get("catalyst_flag", False))
             trend = calc_trend_risk(right, strike, underlying_last, mom_5d, is_short)
             assignment_risk = calc_assignment_risk(moneyness, dte, trend)
+
+            # Infer strategy for technical score blending
+            has_stock = any(
+                p.get("symbol") == sym and float(p.get("qty", 0)) > 0
+                for p in positions_raw
+            )
+            if is_short and right == "P":
+                strategy_for_tech = "CSP"
+            elif is_short and right == "C" and has_stock:
+                strategy_for_tech = "CC"
+            else:
+                strategy_for_tech = ""
+
+            ticker_scores = technical_scores.get(sym, {})
             confidence_pct, confidence_reasoning = calc_confidence(
                 right, strike, underlying_last, dte,
                 vol_annual, mom_5d, rsi_14, sma_20, sma_50, vix,
+                strategy=strategy_for_tech,
+                technical_scores=ticker_scores,
+                catalyst_flag=catalyst_flag,
             )
 
             # Determine wheel leg
@@ -647,13 +654,26 @@ def push_to_sheet(results: dict):
         sh.ensure_headers(client, S.OptionRow.TAB_NAME, S.OptionRow.HEADERS)
         sh.append_rows(client, S.OptionRow.TAB_NAME, [o.to_row() for o in opts])
 
+    # Technical scores
+    tech = results.get("technical_scores", [])
+    if tech:
+        sh.ensure_headers(client, S.TechnicalScoreRow.TAB_NAME, S.TechnicalScoreRow.HEADERS)
+        sh.append_rows(client, S.TechnicalScoreRow.TAB_NAME, [t.to_row() for t in tech])
+
+    # Wheel continuation
+    wheel = results.get("wheel_next_leg", [])
+    if wheel:
+        sh.ensure_headers(client, S.WheelNextLegRow.TAB_NAME, S.WheelNextLegRow.HEADERS)
+        sh.append_rows(client, S.WheelNextLegRow.TAB_NAME, [w.to_row() for w in wheel])
+
     macro = results["macro"]
     sh.ensure_headers(client, S.MacroRow.TAB_NAME, S.MacroRow.HEADERS)
     sh.append_row(client, S.MacroRow.TAB_NAME, macro.to_row())
 
     print(f"  Pushed: snapshot_caspar, {len(pos_c)} caspar positions, "
           f"snapshot_sarah, {len(pos_s)} sarah positions, "
-          f"{len(opts)} options, macro")
+          f"{len(opts)} options, {len(tech)} technical scores, "
+          f"{len(wheel)} wheel next-legs, macro")
 
 
 def main():
@@ -701,28 +721,88 @@ def main():
     print(f"  Caspar: net_liq=${snap_c.net_liq_usd:,.2f}  upl=${snap_c.upl:,.2f}  ({snap_c.upl_pct*100:.2f}%)")
     print(f"  Sarah:  net_liq=S${snap_s.net_liq_sgd:,.2f}  upl=S${snap_s.upl_sgd:,.2f}  ({snap_s.upl_pct*100:.2f}%)")
 
-    # Fetch indicators (vol, momentum, SMA, RSI) for option underlyings
-    option_underlyings = set()
-    for acct in ("caspar", "sarah"):
-        for o in grab.get("accounts", {}).get(acct, {}).get("options", []):
-            option_underlyings.add(o["symbol"])
-
+    # Fetch indicators for ALL tickers (stocks + option underlyings) — used for
+    # technical scoring on both stocks and options.
+    indicator_tickers = set(all_tickers)
     indicators: dict[str, dict] = {}
-    if option_underlyings:
-        print(f"Fetching indicators for {len(option_underlyings)} option underlyings...")
-        indicators = fetch_indicators(list(option_underlyings))
-        for sym in sorted(option_underlyings):
-            ind = indicators.get(sym, {})
-            if ind:
-                print(f"  {sym}: mom5d={ind.get('momentum_5d', 0):+.1f}% "
-                      f"σ={ind.get('volatility_annual', 0)*100:.0f}% "
-                      f"RSI={ind.get('rsi_14', 0):.0f} "
-                      f"SMA20={ind.get('sma_20', 0):.2f}")
+    if indicator_tickers:
+        print(f"Fetching indicators for {len(indicator_tickers)} tickers...")
+        indicators = fetch_indicators(list(indicator_tickers))
+        got = sum(1 for v in indicators.values() if v)
+        print(f"  Got indicators for {got}/{len(indicator_tickers)} tickers")
 
-    # Build options
-    print("Building options...")
+    # Compute strategy technical scores per ticker
+    print("Computing technical scores...")
+    from src.technical_score import compute_scores, entry_exit_signal, top_signal_reasons
+    technical_scores: dict[str, dict[str, float]] = {}
+    entry_signals: dict[str, str] = {}
+    top_drivers: dict[str, dict[str, list[str]]] = {}
+    for sym, ind in indicators.items():
+        if not ind:
+            continue
+        scores = compute_scores(ind)
+        technical_scores[sym] = scores
+        entry_signals[sym] = entry_exit_signal(ind, scores)
+        top_drivers[sym] = {
+            "BUY": top_signal_reasons(ind, "BUY"),
+            "CSP": top_signal_reasons(ind, "CSP"),
+            "CC": top_signal_reasons(ind, "CC"),
+        }
+        print(f"  {sym}: {entry_signals[sym]:>9s} | BUY={scores['BUY']:+4.0f} "
+              f"CSP={scores['CSP']:+4.0f} CC={scores['CC']:+4.0f} "
+              f"LC={scores['LONG_CALL']:+4.0f} LP={scores['LONG_PUT']:+4.0f}"
+              f"{' ⚠ CATALYST' if ind.get('catalyst_flag') else ''}")
+
+    # Build technical score rows for the sheet
+    from src import schema as S
     today = results["date"]
-    option_rows = build_options(grab, prices, indicators, macro, today)
+    tech_rows = []
+    for sym, ind in indicators.items():
+        if not ind:
+            continue
+        scores = technical_scores[sym]
+        drivers = top_drivers[sym]
+        drivers_str = " | ".join(
+            f"{k}: {','.join(v)}" for k, v in drivers.items() if v
+        )
+        tech_rows.append(S.TechnicalScoreRow(
+            date=today, ticker=sym,
+            close=ind.get("close", 0.0), trend=ind.get("trend", ""),
+            rsi_14=ind.get("rsi_14", 50.0),
+            stoch_k=ind.get("stoch_k", 50.0), stoch_d=ind.get("stoch_d", 50.0),
+            macd_hist=ind.get("macd_hist", 0.0),
+            macd_cross=ind.get("macd_cross", "none"),
+            bb_pct_b=ind.get("bb_pct_b", 0.5),
+            bb_squeeze=ind.get("bb_squeeze", False),
+            wvf=ind.get("wvf", 0.0),
+            wvf_bottom=ind.get("wvf_bottom", False),
+            sma_20=ind.get("sma_20", 0.0), sma_50=ind.get("sma_50", 0.0),
+            sma_200=ind.get("sma_200", 0.0),
+            support=ind.get("support", 0.0), resistance=ind.get("resistance", 0.0),
+            fib_0236=ind.get("fib_0236", 0.0), fib_0382=ind.get("fib_0382", 0.0),
+            fib_050=ind.get("fib_050", 0.0), fib_0618=ind.get("fib_0618", 0.0),
+            fib_0764=ind.get("fib_0764", 0.0),
+            vol_ratio=ind.get("vol_ratio", 1.0),
+            vol_spike_type=ind.get("vol_spike_type", "none"),
+            candle_pattern=ind.get("candle_pattern", "none"),
+            divergence=ind.get("divergence", "none"),
+            momentum_5d=ind.get("momentum_5d", 0.0),
+            momentum_20d=ind.get("momentum_20d", 0.0),
+            volatility_annual=ind.get("volatility_annual", 0.0),
+            catalyst_flag=ind.get("catalyst_flag", False),
+            vol_regime=ind.get("vol_regime", "normal"),
+            score_buy=scores["BUY"], score_csp=scores["CSP"],
+            score_cc=scores["CC"],
+            score_long_call=scores["LONG_CALL"],
+            score_long_put=scores["LONG_PUT"],
+            entry_exit_signal=entry_signals.get(sym, "HOLD"),
+            top_drivers=drivers_str,
+        ))
+    results["technical_scores"] = tech_rows
+
+    # Build options (with technical score blending)
+    print("Building options...")
+    option_rows = build_options(grab, prices, indicators, technical_scores, macro, today)
     results["options"] = option_rows
     for opt in option_rows:
         exp_fmt = f"{opt.expiry[:4]}-{opt.expiry[4:6]}-{opt.expiry[6:]}" if len(opt.expiry) == 8 else opt.expiry
@@ -731,6 +811,74 @@ def main():
               f"confidence {opt.confidence_pct}% | {opt.wheel_leg}"
               f"{f' | adj_basis ${opt.adj_cost_basis:.2f}' if opt.adj_cost_basis else ''}")
         print(f"      → {opt.confidence_reasoning}")
+
+    # Wheel continuation — next-leg suggestions for each open option
+    print("Computing wheel continuation...")
+    from src.wheel_continuation import compute_next_leg
+    wheel_rows = []
+    for opt in option_rows:
+        sym = opt.ticker
+        ind = indicators.get(sym, {})
+        scores = technical_scores.get(sym, {})
+        if not ind:
+            continue
+        # Gather stock positions for this account as dicts for the function
+        stock_positions = []
+        for acct_key in ("caspar", "sarah"):
+            acct = grab.get("accounts", {}).get(acct_key, {})
+            for p in acct.get("positions", []):
+                stock_positions.append({
+                    "ticker": p.get("symbol"),
+                    "qty": p.get("qty"),
+                    "avg_cost": p.get("avg_cost"),
+                    "account": acct_key,
+                })
+        option_dict = {
+            "ticker": opt.ticker,
+            "right": opt.right,
+            "strike": opt.strike,
+            "expiry": opt.expiry,
+            "qty": opt.qty,
+            "account": opt.account,
+            "dte": opt.dte,
+            "confidence_pct": opt.confidence_pct,
+            "moneyness": opt.moneyness,
+            "adj_cost_basis": opt.adj_cost_basis,
+            "credit": opt.credit,
+        }
+        try:
+            next_leg = compute_next_leg(
+                option_dict, ind, scores, SGX_TICKERS, stock_positions, technical_scores,
+            )
+        except Exception as e:
+            print(f"  next-leg compute failed for {sym}: {e}")
+            continue
+        wheel_rows.append(S.WheelNextLegRow(
+            date=today,
+            account=next_leg["account"],
+            ticker=next_leg["ticker"],
+            current_right=next_leg["current_right"],
+            current_strike=next_leg["current_strike"],
+            current_expiry=next_leg["current_expiry"],
+            current_dte=next_leg["current_dte"],
+            current_status=next_leg["current_status"],
+            next_action=next_leg["next_action"],
+            next_strategy=next_leg["next_strategy"],
+            next_right=next_leg["next_right"],
+            next_strike=next_leg["next_strike"],
+            next_expiry=next_leg["next_expiry"],
+            next_dte=next_leg["next_dte"],
+            next_delta=next_leg["next_delta"],
+            next_premium=next_leg["next_premium"],
+            next_yield_pct=next_leg["next_yield_pct"],
+            next_breakeven=next_leg["next_breakeven"],
+            recommendation=next_leg["recommendation"],
+            reasoning=next_leg["reasoning"],
+            confidence=next_leg["confidence"],
+        ))
+        print(f"  {opt.account}: {opt.ticker} {opt.strike}{opt.right} "
+              f"→ [{next_leg['current_status']}] {next_leg['recommendation']}")
+    results["wheel_next_leg"] = wheel_rows
 
     if args.dryrun:
         print("\n--dryrun: not pushing to sheet.")

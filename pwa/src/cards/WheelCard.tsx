@@ -1,6 +1,6 @@
-import type { OptionRow, PositionRow } from "../data";
+import type { OptionRow, PositionRow, TechnicalScoreRow } from "../data";
 import { Card } from "./Card";
-import { CircleDot, AlertTriangle, TrendingUp, TrendingDown, Shield, Info } from "lucide-react";
+import { CircleDot, AlertTriangle, TrendingUp, TrendingDown, Shield, Info, Zap } from "lucide-react";
 import { useState } from "react";
 
 // ---------- helpers ----------
@@ -114,7 +114,13 @@ function ConfidenceGauge({ value }: { value: number }) {
   );
 }
 
-function OptionItem({ opt, stockPositions }: { opt: OptionRow; stockPositions: PositionRow[] }) {
+function scoreColor(score: number): string {
+  if (score >= 30) return "text-emerald-400";
+  if (score <= -30) return "text-red-400";
+  return "text-slate-400";
+}
+
+function OptionItem({ opt, stockPositions, techScore }: { opt: OptionRow; stockPositions: PositionRow[]; techScore?: TechnicalScoreRow }) {
   const [expanded, setExpanded] = useState(false);
   const right = opt.right === "C" ? "CALL" : opt.right === "P" ? "PUT" : opt.right;
   const dte = Number(opt.dte);
@@ -208,7 +214,7 @@ function OptionItem({ opt, stockPositions }: { opt: OptionRow; stockPositions: P
         </div>
       )}
 
-      {/* Expanded: confidence reasoning + indicator table */}
+      {/* Expanded: confidence reasoning + indicator table + tech scores */}
       {expanded && (
         <div className="pt-2.5 border-t border-white/5 space-y-2">
           <div className="flex items-start gap-1.5">
@@ -217,7 +223,43 @@ function OptionItem({ opt, stockPositions }: { opt: OptionRow; stockPositions: P
               {opt.confidence_reasoning || "No reasoning available"}
             </p>
           </div>
-          <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+
+          {/* Strategy scores for this ticker */}
+          {techScore && (
+            <div className="pt-1.5 border-t border-white/5">
+              <div className="text-[10px] text-slate-600 mb-1">Strategy scores</div>
+              <div className="grid grid-cols-5 gap-1.5 text-[10px]">
+                {[
+                  { label: "BUY", val: Number(techScore.score_buy) },
+                  { label: "CSP", val: Number(techScore.score_csp) },
+                  { label: "CC", val: Number(techScore.score_cc) },
+                  { label: "LC", val: Number(techScore.score_long_call) },
+                  { label: "LP", val: Number(techScore.score_long_put) },
+                ].map((s) => (
+                  <div key={s.label} className="text-center">
+                    <div className="text-slate-600">{s.label}</div>
+                    <div className={`tabular-nums font-semibold ${scoreColor(s.val)}`}>
+                      {s.val > 0 ? "+" : ""}{s.val.toFixed(0)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {techScore.top_drivers && (
+                <div className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
+                  {techScore.top_drivers}
+                </div>
+              )}
+              {techScore.catalyst_flag === "TRUE" && (
+                <div className="flex items-center gap-1 text-[10px] text-orange-400 mt-1.5">
+                  <Zap size={10} />
+                  <span className="font-semibold">Catalyst detected — elevated vol regime</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Indicator table */}
+          <div className="grid grid-cols-4 gap-1.5 text-[10px] pt-1.5 border-t border-white/5">
             <div>
               <div className="text-slate-600">Vol (σ)</div>
               <div className="tabular-nums text-slate-300">{vol > 0 ? `${vol.toFixed(0)}%` : "—"}</div>
@@ -249,13 +291,19 @@ export function WheelCard({
   options,
   casparPositions,
   sarahPositions,
+  technicalScores,
   loading,
 }: {
   options: OptionRow[];
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
+  technicalScores?: TechnicalScoreRow[];
   loading?: boolean;
 }) {
+  const techByTicker = new Map<string, TechnicalScoreRow>();
+  for (const t of technicalScores ?? []) {
+    techByTicker.set(t.ticker, t);
+  }
   if (loading) {
     return (
       <Card>
@@ -327,6 +375,7 @@ export function WheelCard({
                   key={`${opt.ticker}-${opt.strike}-${opt.right}-${i}`}
                   opt={opt}
                   stockPositions={acct === "caspar" ? casparPositions : sarahPositions}
+                  techScore={techByTicker.get(opt.ticker)}
                 />
               ))}
             </div>
