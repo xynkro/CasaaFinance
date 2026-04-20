@@ -7,6 +7,7 @@ import { SectorMixCard } from "../cards/SectorMixCard";
 import { WsrSummaryCard } from "../cards/WsrSummaryCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { BriefDetailModal } from "../components/BriefDetailModal";
+import { WsrDetailModal } from "../components/WsrDetailModal";
 import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
 
 type HomeSubTab = "daily" | "wsr";
@@ -23,6 +24,7 @@ function loadLastSub(): HomeSubTab {
 
 export function HomePage({ data, loading }: { data: DashboardData | null; loading: boolean }) {
   const [briefOpen, setBriefOpen] = useState(false);
+  const [wsrOpen, setWsrOpen] = useState(false);
   const [sub, setSub] = useState<HomeSubTab>(loadLastSub);
   const daily = data?.daily ?? null;
   const wsr = data?.wsrSummary ?? null;
@@ -49,7 +51,7 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
         {/* MacroStrip stays below the sticky tab so it scrolls away */}
         <MacroStrip macro={data?.macro ?? null} />
 
-        {/* Primary card — swapped by sub-tab */}
+        {/* Primary compact card — tap to open full detail modal */}
         <div className="fade-up fade-up-1 mt-4">
           {sub === "daily" ? (
             <DailyBriefCard
@@ -58,7 +60,11 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
               onOpen={daily ? () => setBriefOpen(true) : undefined}
             />
           ) : (
-            <WsrSummaryCard wsr={wsr} />
+            <WsrSummaryCard
+              wsr={wsr}
+              loading={loading && !data}
+              onOpen={wsr ? () => setWsrOpen(true) : undefined}
+            />
           )}
         </div>
 
@@ -84,6 +90,9 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
 
       {briefOpen && daily && (
         <BriefDetailModal row={daily} onClose={() => setBriefOpen(false)} />
+      )}
+      {wsrOpen && wsr && (
+        <WsrDetailModal wsr={wsr} onClose={() => setWsrOpen(false)} />
       )}
     </>
   );

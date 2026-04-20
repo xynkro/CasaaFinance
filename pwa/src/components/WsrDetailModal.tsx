@@ -1,0 +1,235 @@
+import { useRef, useState } from "react";
+import type { WsrSummaryRow } from "../data";
+import { X, ChevronLeft, Target, Sparkles, Activity, AlertTriangle, BookOpen, FileText } from "lucide-react";
+
+function shortDate(d: string): string {
+  const s = d.slice(0, 10);
+  const [y, m, day] = s.split("-");
+  const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${Number(day)} ${months[Number(m)]} ${y}`;
+}
+
+const REGIME_STYLE: Record<string, { bg: string; text: string; border: string; label: string }> = {
+  bull_early_cycle: { bg: "bg-emerald-500/12", text: "text-emerald-400", border: "border-emerald-500/30", label: "Bull · Early" },
+  bull_mid_cycle:   { bg: "bg-emerald-500/12", text: "text-emerald-400", border: "border-emerald-500/30", label: "Bull · Mid" },
+  bull_late_cycle:  { bg: "bg-amber-500/12",   text: "text-amber-400",   border: "border-amber-500/30",   label: "Bull · Late" },
+  neutral:          { bg: "bg-slate-500/12",   text: "text-slate-300",   border: "border-slate-500/30",   label: "Neutral" },
+  bear_early:       { bg: "bg-red-500/12",     text: "text-red-400",     border: "border-red-500/30",     label: "Bear · Early" },
+  bear_mid:         { bg: "bg-red-500/12",     text: "text-red-400",     border: "border-red-500/30",     label: "Bear · Mid" },
+  bear_late:        { bg: "bg-red-500/12",     text: "text-red-400",     border: "border-red-500/30",     label: "Bear · Late" },
+  risk_off:         { bg: "bg-red-500/12",     text: "text-red-400",     border: "border-red-500/30",     label: "Risk Off" },
+};
+
+function Paragraphs({ text, className }: { text: string; className?: string }) {
+  if (!text) return null;
+  const paras = text.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
+  return (
+    <>
+      {paras.map((p, i) => (
+        <p key={i} className={className ?? "text-sm text-slate-200 leading-relaxed"}>
+          {p}
+        </p>
+      ))}
+    </>
+  );
+}
+
+function Section({
+  icon: Icon,
+  color,
+  title,
+  text,
+}: {
+  icon: typeof Target;
+  color: string;
+  title: string;
+  text: string;
+}) {
+  if (!text) return null;
+  return (
+    <section className="pt-4 border-t border-white/5">
+      <div className="flex items-center gap-2 mb-2.5">
+        <Icon size={14} className={color} />
+        <h3 className={`text-[11px] font-semibold uppercase tracking-wider ${color}`}>{title}</h3>
+      </div>
+      <div className="space-y-2.5">
+        <Paragraphs text={text} className="text-sm text-slate-200 leading-relaxed" />
+      </div>
+    </section>
+  );
+}
+
+export function WsrDetailModal({
+  wsr,
+  onClose,
+}: {
+  wsr: WsrSummaryRow;
+  onClose: () => void;
+}) {
+  const touchRef = useRef<{ startX: number; startY: number; moving: boolean }>({
+    startX: 0, startY: 0, moving: false,
+  });
+  const [dragX, setDragX] = useState(0);
+  const [showRaw, setShowRaw] = useState(false);
+
+  const SWIPE_THRESHOLD = 80;
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchRef.current = {
+      startX: e.touches[0].clientX,
+      startY: e.touches[0].clientY,
+      moving: false,
+    };
+  };
+
+  const onTouchMove = (e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - touchRef.current.startX;
+    const dy = e.touches[0].clientY - touchRef.current.startY;
+    if (!touchRef.current.moving) {
+      if (Math.abs(dy) > Math.abs(dx)) return;
+      if (Math.abs(dx) < 10) return;
+      if (dx <= 0) return;
+      touchRef.current.moving = true;
+    }
+    if (touchRef.current.moving && dx > 0) {
+      setDragX(dx);
+    }
+  };
+
+  const onTouchEnd = () => {
+    if (touchRef.current.moving && dragX > SWIPE_THRESHOLD) {
+      onClose();
+    } else {
+      setDragX(0);
+    }
+    touchRef.current.moving = false;
+  };
+
+  const confidence = Number(wsr.confidence) || 0;
+  const confPct = Math.round(confidence * 100);
+  const regime = REGIME_STYLE[wsr.regime] ?? REGIME_STYLE.neutral;
+  const weekEvents = (wsr.week_events || "").split(/\s*\|\s*/).filter(Boolean);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-[#050916]"
+      style={{
+        transform: `translateX(${dragX}px)`,
+        transitionDuration: touchRef.current.moving ? "0ms" : "250ms",
+        opacity: 1 - Math.min(dragX / 400, 0.3),
+      }}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-3 pt-safe-top border-b border-white/6">
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1 pr-2 py-2 text-indigo-400 active:text-indigo-300"
+          aria-label="Back"
+        >
+          <ChevronLeft size={20} />
+          <span className="text-sm">Back</span>
+        </button>
+        <div className="flex items-center gap-2">
+          <BookOpen size={16} className="text-indigo-400" />
+          <div className="text-right">
+            <h2 className="text-base font-bold text-white leading-tight">Weekly Strategy</h2>
+            <span className="text-[10px] text-slate-400">{shortDate(wsr.date || "")}</span>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-2 rounded-lg text-slate-400 active:text-white"
+          aria-label="Close"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      {/* Regime + confidence bar */}
+      <div className="px-4 py-4 border-b border-white/6 space-y-3">
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${regime.bg} ${regime.text} ${regime.border}`}>
+            {regime.label}
+          </span>
+          <span className="text-[11px] text-slate-400">Regime</span>
+        </div>
+        <div className="flex items-center gap-2.5">
+          <span className="text-[10px] text-slate-400 font-bold shrink-0">CONFIDENCE</span>
+          <div className="flex-1 h-2 rounded-full bg-white/8 overflow-hidden">
+            <div
+              className="h-full transition-all"
+              style={{
+                width: `${confPct}%`,
+                background: `linear-gradient(90deg, rgb(var(--accent-rgb)), var(--accent-bright))`,
+              }}
+            />
+          </div>
+          <span className="text-sm font-bold tabular-nums text-white shrink-0">{confPct}%</span>
+        </div>
+      </div>
+
+      {/* Scrollable body */}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4">
+        {/* Verdict — primary focus */}
+        {wsr.verdict && (
+          <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/20 p-4 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-base">🎯</span>
+              <h3 className="text-[11px] uppercase tracking-wider font-bold text-indigo-400">Verdict</h3>
+            </div>
+            <div className="space-y-2.5">
+              <Paragraphs text={wsr.verdict} className="text-[15px] text-slate-100 leading-relaxed" />
+            </div>
+          </div>
+        )}
+
+        <Section icon={Target} color="text-emerald-400" title="Action Plan" text={wsr.action_summary} />
+        <Section icon={Sparkles} color="text-amber-400" title="Options Book" text={wsr.options_summary} />
+        <Section icon={Activity} color="text-cyan-400" title="Macro Regime Read" text={wsr.macro_read} />
+        <Section icon={AlertTriangle} color="text-red-400" title="Red Team Flags" text={wsr.redteam_summary} />
+
+        {weekEvents.length > 0 && (
+          <section className="pt-4 border-t border-white/5">
+            <div className="flex items-center gap-2 mb-2.5">
+              <Activity size={14} className="text-slate-300" />
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-300">Week Lookback</h3>
+            </div>
+            <ul className="space-y-2">
+              {weekEvents.map((ev, i) => (
+                <li key={i} className="flex gap-2.5 text-sm text-slate-200 leading-relaxed">
+                  <span className="text-indigo-400/60 mt-1 shrink-0">•</span>
+                  <span>{ev}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {wsr.raw_md && (
+          <section className="pt-4 mt-4 border-t border-white/5">
+            <button
+              onClick={() => setShowRaw((v) => !v)}
+              className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-300 hover:text-white"
+            >
+              <FileText size={13} />
+              {showRaw ? "Hide full markdown ↑" : "Show full markdown ↓"}
+            </button>
+            {showRaw && (
+              <div className="mt-3 p-3 rounded-lg bg-black/30 border border-white/5">
+                <pre className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">
+                  {wsr.raw_md}
+                </pre>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Footer spacing */}
+        <div className="h-6" />
+      </div>
+    </div>
+  );
+}
