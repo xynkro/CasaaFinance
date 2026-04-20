@@ -54,6 +54,50 @@ def _first_sentence(text: str, max_len: int = 280) -> str:
     return text[:max_len]
 
 
+def _full_paragraph(text: str, max_len: int = 1200, max_paragraphs: int = 3) -> str:
+    """
+    Grab multiple paragraphs cleaned of markdown noise. Preserves sentence
+    structure so the user gets the full strategic context, not just a
+    one-liner.
+    """
+    if not text:
+        return ""
+    # Strip blockquotes/warnings lines but keep normal content
+    lines = [l for l in text.splitlines() if not l.strip().startswith(">")]
+
+    # Group into paragraphs (split on blank lines or table rows starting with |)
+    paragraphs: list[str] = []
+    buf: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        is_table = stripped.startswith("|") or stripped.startswith("---")
+        is_bullet_heading = stripped.startswith("#") or stripped.startswith("**Confidence:")
+        if not stripped or is_table or is_bullet_heading:
+            if buf:
+                paragraphs.append(" ".join(buf))
+                buf = []
+        else:
+            buf.append(stripped)
+    if buf:
+        paragraphs.append(" ".join(buf))
+
+    # Strip markdown inline formatting
+    cleaned: list[str] = []
+    for p in paragraphs[:max_paragraphs]:
+        p = re.sub(r"\*{1,3}", "", p)
+        p = re.sub(r"`([^`]+)`", r"\1", p)
+        # Collapse the trailing (Judgement, 0.75) / (Synthesis) citations for brevity
+        p = re.sub(r"\s*\((?:Judgement|Synthesis)(?:,\s*[\d.]+)?\)", "", p)
+        p = re.sub(r"\s+", " ", p).strip()
+        if p:
+            cleaned.append(p)
+
+    out = "\n\n".join(cleaned)
+    if len(out) > max_len:
+        out = out[:max_len - 3] + "..."
+    return out
+
+
 def parse_wsr_md(md_path: Path, date: str) -> dict[str, Any]:
     """
     Parse a WSR markdown file into a dict ready for WsrSummaryRow construction.
@@ -75,32 +119,39 @@ def parse_wsr_md(md_path: Path, date: str) -> dict[str, Any]:
         except ValueError:
             pass
 
-    # Verdict — full paragraph
+    # Verdict — full paragraph (this is the synthesis)
     verdict_raw = _extract_first_heading_text(text, "Verdict")
-    verdict_summary = _first_sentence(verdict_raw, max_len=280)
-    # Strip blockquote degraded-run warnings
-    verdict_summary = re.sub(r"^\s*⚠.*?\.\s*", "", verdict_summary)
+    verdict_summary = _full_paragraph(verdict_raw, max_len=1200, max_paragraphs=2)
+    # Strip any leading ⚠ degraded-run warning at the start
+    verdict_summary = re.sub(r"^\s*⚠.*?\n\n", "", verdict_summary)
 
-    # Macro regime read — first paragraph
-    macro_read = _first_sentence(
+    # Macro regime read — up to 2 paragraphs of regime/macro commentary
+    macro_read = _full_paragraph(
         _extract_first_heading_text(text, r"Macro Regime Read"),
-        max_len=300,
+        max_len=900, max_paragraphs=2,
     )
 
     # Action plan — pull bullet list or section text
-    action_section = _extract_first_heading_text(text, r"(?:Action Plan|This Week|Plan|Primary Actions?|Decisions?)")
+    action_section = _extract_first_heading_text(
+        text,
+        r"(?:Action Plan|This Week['\u2019]?s Plan|Primary Actions?|Decisions? Queue|Plan this Week)",
+    )
     if not action_section:
         # Try the "Primary action this week:" phrase from verdict
-        primary_m = re.search(r"[Pp]rimary action.*?(?=\.|\n)", text)
+        primary_m = re.search(r"[Pp]rimary action.*?(?=\.\s|\n)", text)
         action_section = primary_m.group(0) if primary_m else ""
-    action_summary = _first_sentence(action_section, max_len=300)
+    action_summary = _full_paragraph(action_section, max_len=900, max_paragraphs=3)
 
     # Options commentary — look for "Options" section or "Options book"
-    options_section = _extract_first_heading_text(text, r"Options(?:\s+Book)?")
+    options_section = _extract_first_heading_text(text, r"Options(?:\s+(?:Book|Positions?))?")
     if not options_section:
-        opts_m = re.search(r"[Oo]ptions book:?\s*(.+?)(?=\.|\n\n)", text)
+        opts_m = re.search(r"[Oo]ptions book:?\s*(.+?)(?=\n\n|\n##)", text, re.DOTALL)
         options_section = opts_m.group(1) if opts_m else ""
-    options_summary = _first_sentence(options_section, max_len=300)
+    options_summary = _full_paragraph(options_section, max_len=800, max_paragraphs=2)
+
+    # Red-team / risk flags
+    redteam_section = _extract_first_heading_text(text, r"Red[-\s]?Team(?:\s+Flags?)?")
+    redteam_summary = _full_paragraph(redteam_section, max_len=900, max_paragraphs=2)
 
     # Key events from "Week Lookback" table
     events = []
@@ -117,24 +168,25 @@ def parse_wsr_md(md_path: Path, date: str) -> dict[str, Any]:
                     events.append(f"{day}: {event}")
         events = events[:5]
 
-    # Strip markdown symbols from all fields
-    def _clean(s: str) -> str:
+    # Strip residual markdown symbols from single-line fields (preserve paragraph breaks in longer fields)
+    def _clean_inline(s: str) -> str:
         s = re.sub(r"\*{1,3}", "", s)
         s = re.sub(r"`([^`]+)`", r"\1", s)
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
+        s = re.sub(r"[ \t]+", " ", s)
+        return s.strip()
 
     return {
         "date": date,
         "source": md_path.name,
-        "verdict": _clean(verdict_summary),
+        "verdict": _clean_inline(verdict_summary),
         "confidence": confidence,
         "regime": regime,
-        "macro_read": _clean(macro_read),
-        "action_summary": _clean(action_summary),
-        "options_summary": _clean(options_summary),
-        "week_events": " | ".join(_clean(e) for e in events),
-        "raw_md": text[:15000],  # keep full-ish markdown for in-app view
+        "macro_read": _clean_inline(macro_read),
+        "action_summary": _clean_inline(action_summary),
+        "options_summary": _clean_inline(options_summary),
+        "redteam_summary": _clean_inline(redteam_summary),
+        "week_events": " | ".join(_clean_inline(e) for e in events),
+        "raw_md": text[:20000],
     }
 
 

@@ -428,7 +428,7 @@ class WsrSummaryRow:
     HEADERS = [
         "date", "source", "verdict", "confidence", "regime",
         "macro_read", "action_summary", "options_summary",
-        "week_events", "raw_md",
+        "redteam_summary", "week_events", "raw_md",
     ]
 
     date: str
@@ -439,15 +439,17 @@ class WsrSummaryRow:
     macro_read: str
     action_summary: str
     options_summary: str
-    week_events: str
-    raw_md: str
+    redteam_summary: str = ""
+    week_events: str = ""
+    raw_md: str = ""
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
         return [
             d, self.source, self.verdict, _num(self.confidence, 2),
             self.regime, self.macro_read, self.action_summary,
-            self.options_summary, self.week_events, self.raw_md,
+            self.options_summary, self.redteam_summary,
+            self.week_events, self.raw_md,
         ]
 
 

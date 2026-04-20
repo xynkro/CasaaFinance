@@ -135,6 +135,7 @@ export interface WsrSummaryRow {
   macro_read: string;
   action_summary: string;
   options_summary: string;
+  redteam_summary: string;
   week_events: string;
   raw_md: string;
 }
