@@ -67,7 +67,7 @@ export function OptionsPage({
       </div>
 
       {/* Weekly strategy notes — bottom, contextual only */}
-      <div className="fade-up fade-up-4">
+      <div className="fade-up fade-up-5">
         <RecommendationCard recommendations={recommendations} />
       </div>
     </div>

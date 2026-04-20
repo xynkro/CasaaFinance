@@ -6,23 +6,31 @@
   --bg-blur: 0px;
   --base-font: 16px;
   --card-opacity: 0.5;
-  --header-h: calc(env(safe-area-inset-top, 0px) + 56px);
-  --tabbar-h: calc(env(safe-area-inset-bottom, 0px) + 56px);
+  --safe-top: 8px;
+  --safe-bottom: 8px;
+  --tabbar-h: 68px;
+  --header-h: 60px;
+  --accent-rgb: 129,140,248;
+  --accent: #818cf8;
+  --accent-bright: #a5b4fc;
 }
 
 body {
   margin: 0;
-  background: #050a18;
+  background: radial-gradient(ellipse at top, #0a1330 0%, #05091a 60%, #020510 100%);
   color: #e2e8f0;
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   font-size: var(--base-font);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   -webkit-font-smoothing: antialiased;
-  overflow: hidden;           /* prevent body scroll — content scrolls inside app-content */
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
   position: fixed;
   inset: 0;
+  letter-spacing: -0.01em;
 }
 
-/* ===== App shell: fixed header + fixed tabs + scrollable middle ===== */
+/* ===== App shell ===== */
 
 .app-shell {
   display: flex;
@@ -32,84 +40,118 @@ body {
   overflow: hidden;
 }
 
-/* Full-screen background image + darkness overlay */
+/* Richer layered background */
 .bg-layer {
   position: fixed;
   inset: 0;
   z-index: 0;
-  background: url('/bg.jpg') center / cover no-repeat;
-  background-color: #050a18;
+  background:
+    radial-gradient(circle at 20% 10%, rgba(99, 102, 241, 0.08), transparent 50%),
+    radial-gradient(circle at 85% 90%, rgba(168, 85, 247, 0.06), transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.04), transparent 60%),
+    #050916;
 }
 .bg-layer::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(5, 10, 24, var(--bg-darkness));
+  background: rgba(5, 9, 22, var(--bg-darkness));
   backdrop-filter: blur(var(--bg-blur));
   -webkit-backdrop-filter: blur(var(--bg-blur));
 }
 
-/* Fixed header */
+/* Fixed header with accent glow */
 .app-header {
   position: relative;
   z-index: 30;
   flex-shrink: 0;
-  padding-top: env(safe-area-inset-top, 0px);
-  background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  padding-top: var(--safe-top);
+  background: linear-gradient(180deg,
+    rgba(15, 23, 42, 0.88) 0%,
+    rgba(15, 23, 42, 0.72) 100%);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04), 0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
-/* Scrollable content — fills between header and tab bar, scrolls internally */
+/* Scrollable content — with pull-to-refresh support */
 .app-content {
   position: relative;
   z-index: 10;
   flex: 1;
-  min-height: 0;              /* critical: allows flex child to shrink and scroll */
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  overscroll-behavior-y: contain;  /* prevent pull-past bounce */
+  overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
   padding-top: 8px;
   padding-bottom: 8px;
 }
 
-/* Glass card with dynamic opacity */
+/* ===== Glass cards with better visual language ===== */
+
 .glass {
   background: linear-gradient(
     135deg,
-    rgba(255,255,255, calc(0.05 * var(--card-opacity) / 0.5)) 0%,
-    rgba(255,255,255, calc(0.02 * var(--card-opacity) / 0.5)) 100%
+    rgba(255, 255, 255, calc(0.06 * var(--card-opacity) / 0.5)) 0%,
+    rgba(255, 255, 255, calc(0.02 * var(--card-opacity) / 0.5)) 100%
   );
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    0 4px 24px rgba(0,0,0,0.3),
-    inset 0 1px 0 rgba(255,255,255,0.05);
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: all 0.2s ease;
 }
 
 .glass-bright {
   background: linear-gradient(
     135deg,
-    rgba(255,255,255, calc(0.08 * var(--card-opacity) / 0.5)) 0%,
-    rgba(255,255,255, calc(0.03 * var(--card-opacity) / 0.5)) 100%
+    rgba(255, 255, 255, calc(0.1 * var(--card-opacity) / 0.5)) 0%,
+    rgba(255, 255, 255, calc(0.04 * var(--card-opacity) / 0.5)) 100%
   );
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 8px 32px rgba(0,0,0,0.4),
-    inset 0 1px 0 rgba(255,255,255,0.08);
+    0 8px 32px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
 
-/* PIN input digit box */
+/* Accent card — subtle accent glow along top */
+.glass-accent {
+  background: linear-gradient(
+    180deg,
+    rgba(var(--accent-rgb), 0.08) 0%,
+    rgba(255, 255, 255, calc(0.03 * var(--card-opacity) / 0.5)) 20%,
+    rgba(255, 255, 255, calc(0.01 * var(--card-opacity) / 0.5)) 100%
+  );
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+  border: 1px solid rgba(var(--accent-rgb), 0.2);
+  border-top: 1px solid rgba(var(--accent-rgb), 0.35);
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.4),
+    0 -1px 20px rgba(var(--accent-rgb), 0.08),
+    inset 0 1px 0 rgba(var(--accent-rgb), 0.15);
+}
+
+/* Hoverable clickable card state */
+.glass:active, .glass-bright:active, .glass-accent:active {
+  transform: scale(0.992);
+  transition: transform 0.08s;
+}
+
+/* ===== PIN input ===== */
+
 .pin-digit {
   width: 44px;
   height: 56px;
-  background: rgba(255,255,255,0.04);
-  border: 1.5px solid rgba(255,255,255,0.1);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   color: #f1f5f9;
   font-size: 22px;
@@ -117,49 +159,128 @@ body {
   text-align: center;
   outline: none;
   transition: all 0.2s;
-  caret-color: #818cf8;
+  caret-color: var(--accent);
 }
 
 .pin-digit:focus {
-  border-color: #818cf8;
-  box-shadow: 0 0 0 3px rgba(129,140,248,0.2);
-  background: rgba(129,140,248,0.06);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.2);
+  background: rgba(var(--accent-rgb), 0.06);
 }
 
-/* Shimmer loading animation */
+/* ===== Animations ===== */
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
-
 .shimmer {
-  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.03) 75%);
+  background: linear-gradient(90deg,
+    rgba(255, 255, 255, 0.03) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.8s infinite;
   border-radius: 8px;
 }
 
-/* Fade in animation */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
 }
+.fade-up { animation: fadeUp 0.4s cubic-bezier(0.2, 0, 0.2, 1) both; }
+.fade-up-1 { animation-delay: 0.03s; }
+.fade-up-2 { animation-delay: 0.08s; }
+.fade-up-3 { animation-delay: 0.14s; }
+.fade-up-4 { animation-delay: 0.21s; }
+.fade-up-5 { animation-delay: 0.28s; }
 
-.fade-up { animation: fadeUp 0.4s ease-out both; }
-.fade-up-1 { animation-delay: 0.05s; }
-.fade-up-2 { animation-delay: 0.1s; }
-.fade-up-3 { animation-delay: 0.15s; }
-.fade-up-4 { animation-delay: 0.2s; }
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.pulse-glow { animation: pulseGlow 2s ease-in-out infinite; }
 
-/* Accent glow for sentiment chips */
-.glow-green { box-shadow: 0 0 12px rgba(16,185,129,0.3), inset 0 1px 0 rgba(16,185,129,0.1); }
-.glow-yellow { box-shadow: 0 0 12px rgba(234,179,8,0.3), inset 0 1px 0 rgba(234,179,8,0.1); }
-.glow-red { box-shadow: 0 0 12px rgba(239,68,68,0.3), inset 0 1px 0 rgba(239,68,68,0.1); }
+@keyframes spinSmooth {
+  to { transform: rotate(360deg); }
+}
+.spin-smooth { animation: spinSmooth 0.8s linear infinite; }
 
-/* Hide scrollbar but allow scroll */
+/* ===== Accent glows ===== */
+
+.glow-green { box-shadow: 0 0 14px rgba(16, 185, 129, 0.35), inset 0 1px 0 rgba(16, 185, 129, 0.12); }
+.glow-yellow { box-shadow: 0 0 14px rgba(234, 179, 8, 0.35), inset 0 1px 0 rgba(234, 179, 8, 0.12); }
+.glow-red { box-shadow: 0 0 14px rgba(239, 68, 68, 0.35), inset 0 1px 0 rgba(239, 68, 68, 0.12); }
+.glow-accent { box-shadow: 0 0 14px rgba(var(--accent-rgb), 0.35), inset 0 1px 0 rgba(var(--accent-rgb), 0.12); }
+
+/* ===== Scrollbar ===== */
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* Safe area utilities */
-.pt-safe-top { padding-top: env(safe-area-inset-top, 0px); }
-.pb-safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+/* ===== Safe area utilities (honor the CSS var) ===== */
+.pt-safe-top { padding-top: var(--safe-top); }
+.pb-safe-bottom { padding-bottom: var(--safe-bottom); }
+
+/* ===== Pull-to-refresh indicator ===== */
+
+.ptr-container {
+  position: relative;
+}
+.ptr-indicator {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg,
+    rgba(var(--accent-rgb), 0.9) 0%,
+    rgba(var(--accent-rgb), 0.7) 100%);
+  box-shadow:
+    0 8px 24px rgba(var(--accent-rgb), 0.4),
+    0 0 0 2px rgba(var(--accent-rgb), 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+/* ===== Swipe sub-tabs ===== */
+.swipe-track {
+  display: flex;
+  width: 100%;
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  touch-action: pan-y;
+  will-change: transform;
+}
+.swipe-panel {
+  flex: 0 0 100%;
+  width: 100%;
+  min-height: 100%;
+}
+
+/* ===== Enhanced text contrast ===== */
+/* Bump too-dark slate tones up so small UI text stays legible on dark bg.
+   slate-600 (100 71 94% luminance) → slate-400 (74%). */
+.text-slate-600 { color: rgb(148 163 184) !important; }
+.text-slate-700 { color: rgb(148 163 184) !important; }
+
+/* ===== Tab bar improvements ===== */
+
+.tabbar-base {
+  position: relative;
+  z-index: 30;
+  flex-shrink: 0;
+  padding-bottom: var(--safe-bottom);
+  background: linear-gradient(180deg,
+    rgba(15, 23, 42, 0.72) 0%,
+    rgba(10, 15, 30, 0.92) 100%);
+  backdrop-filter: blur(28px) saturate(1.2);
+  -webkit-backdrop-filter: blur(28px) saturate(1.2);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+}

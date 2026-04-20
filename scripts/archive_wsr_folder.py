@@ -130,6 +130,30 @@ def archive_file(source: Path, logger: logging.Logger, force: bool = False) -> b
         logger.error(f"Sheet write failed for {source.name}: {e}")
         return False
 
+    # If it's a WSR markdown (not options scan), parse summary for Home page
+    wsr_parsed = False
+    if source.suffix.lower() == ".md":
+        try:
+            from src.wsr_md_parser import parse_wsr_md, is_wsr_file
+            if is_wsr_file(source):
+                parsed = parse_wsr_md(source, date)
+                wsr_row = S.WsrSummaryRow(**parsed)
+                sh.ensure_headers(client, S.WsrSummaryRow.TAB_NAME, S.WsrSummaryRow.HEADERS)
+                # Upsert: remove any existing row for this date, then add
+                ws_w = ss.worksheet(S.WsrSummaryRow.TAB_NAME)
+                existing = ws_w.get_all_values()
+                keep_rows = [existing[0]] if existing else []  # keep header
+                for r in existing[1:] if existing else []:
+                    if r and not r[0].startswith(date):  # keep rows from other dates
+                        keep_rows.append(r)
+                keep_rows.append(wsr_row.to_row())
+                ws_w.clear()
+                ws_w.update("A1", keep_rows, value_input_option="USER_ENTERED")
+                wsr_parsed = True
+                logger.info(f"WSR summary parsed: {source.name}")
+        except Exception as e:
+            logger.warning(f"WSR markdown parsing failed (non-fatal) for {source.name}: {e}")
+
     # If this is an options scan, extract recommendations into the sheet too
     recs_count = 0
     if source.suffix.lower() == ".md":

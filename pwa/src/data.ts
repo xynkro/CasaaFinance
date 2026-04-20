@@ -20,6 +20,7 @@ const GIDS: Record<string, string> = {
   scan_results: "1133435061",
   exit_plans: "515412556",
   options_defense: "1717646002",
+  wsr_summary: "607663282",
   macro: "447436838",
   wsr_archive: "1065773181",
 };
@@ -123,6 +124,19 @@ export interface OptionRow {
   rsi_14: string;
   sma_20: string;
   sma_50: string;
+}
+
+export interface WsrSummaryRow {
+  date: string;
+  source: string;
+  verdict: string;
+  confidence: string;
+  regime: string;
+  macro_read: string;
+  action_summary: string;
+  options_summary: string;
+  week_events: string;
+  raw_md: string;
 }
 
 export interface OptionsDefenseRow {
@@ -310,6 +324,7 @@ export interface DashboardData {
   scanResults: ScanResultRow[];
   exitPlans: ExitPlanRow[];
   optionsDefense: OptionsDefenseRow[];
+  wsrSummary: WsrSummaryRow | null;
   decisions: DecisionRow[];
   macro: MacroRow | null;
   // History (all rows, sorted by date ascending)
@@ -347,7 +362,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, optionRecs, techRows, wheelRows, scanRows, exitRows, defenseRows, decisions, macroRows, archiveRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, optionRecs, techRows, wheelRows, scanRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
@@ -361,6 +376,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<ScanResultRow>("scan_results").catch(() => [] as ScanResultRow[]),
         fetchTab<ExitPlanRow>("exit_plans").catch(() => [] as ExitPlanRow[]),
         fetchTab<OptionsDefenseRow>("options_defense").catch(() => [] as OptionsDefenseRow[]),
+        fetchTab<WsrSummaryRow>("wsr_summary").catch(() => [] as WsrSummaryRow[]),
         fetchTab<DecisionRow>("decision_queue").catch(() => [] as DecisionRow[]),
         fetchTab<MacroRow>("macro"),
         fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
@@ -382,6 +398,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       scanResults: latestGroup(scanRows),
       exitPlans: latestGroup(exitRows),
       optionsDefense: latestGroup(defenseRows),
+      wsrSummary: wsrSumRows.length ? sortByDate(wsrSumRows)[wsrSumRows.length - 1] : null,
       decisions: latestGroup(decisions),
       macro: latest(macroRows),
       casparHistory: dedup(casparRows),
@@ -395,7 +412,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
       dailyHistory: [], daily: null, caspar: null, sarah: null,
       casparPositions: [], sarahPositions: [], options: [], optionRecommendations: [],
       technicalScores: [], technicalScoresHistory: [],
-      wheelNextLeg: [], scanResults: [], exitPlans: [], optionsDefense: [], decisions: [],
+      wheelNextLeg: [], scanResults: [], exitPlans: [], optionsDefense: [],
+      wsrSummary: null, decisions: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [], error: String(e),
     };

@@ -1,7 +1,15 @@
 import type { Settings } from "../settings";
-import { LogOut, DollarSign, LayoutGrid, ListChecks, Home, Sun, Type, Layers, Droplets } from "lucide-react";
+import { LogOut, DollarSign, LayoutGrid, ListChecks, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine } from "lucide-react";
 
-const TAB_NAMES = ["Home", "Caspar", "Sarah", "Decisions", "History", "Archive", "Settings"];
+const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Archive", "Settings"];
+
+const ACCENT_COLORS: { key: Settings["accentColor"]; hex: string; label: string }[] = [
+  { key: "indigo",  hex: "#818cf8", label: "Indigo" },
+  { key: "emerald", hex: "#34d399", label: "Emerald" },
+  { key: "amber",   hex: "#fbbf24", label: "Amber" },
+  { key: "pink",    hex: "#f472b6", label: "Pink" },
+  { key: "cyan",    hex: "#22d3ee", label: "Cyan" },
+];
 
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
@@ -69,8 +77,8 @@ function SettingRow({
           <Icon size={16} className="text-slate-400" />
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-medium text-slate-200">{label}</div>
-          {description && <div className="text-xs text-slate-500">{description}</div>}
+          <div className="text-sm font-semibold text-slate-100">{label}</div>
+          {description && <div className="text-xs text-slate-400 mt-0.5">{description}</div>}
         </div>
       </div>
       <div className="shrink-0 ml-3">{children}</div>
@@ -89,9 +97,56 @@ export function SettingsPage({
 }) {
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
+      {/* Accent color */}
+      <div className="glass rounded-2xl p-5">
+        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-3">Accent Color</h3>
+        <div className="flex items-center gap-2 flex-wrap">
+          {ACCENT_COLORS.map((c) => (
+            <button
+              key={c.key}
+              onClick={() => onUpdate({ accentColor: c.key })}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
+                settings.accentColor === c.key
+                  ? "bg-white/10 border-white/25"
+                  : "bg-white/3 border-white/5 hover:border-white/15"
+              }`}
+            >
+              <div className="w-4 h-4 rounded-full shadow-lg" style={{ background: c.hex, boxShadow: `0 0 10px ${c.hex}66` }} />
+              <span className="text-xs font-medium text-slate-200">{c.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Layout — safe area */}
+      <div className="glass rounded-2xl p-5">
+        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">Layout & Safe Area</h3>
+        <div className="divide-y divide-white/5">
+          <SettingRow icon={Smartphone} label="Ignore iOS safe area" description="Use custom padding instead">
+            <Toggle on={settings.ignoreSafeArea} onToggle={() => onUpdate({ ignoreSafeArea: !settings.ignoreSafeArea })} />
+          </SettingRow>
+
+          {settings.ignoreSafeArea && (
+            <>
+              <SettingRow icon={ArrowUpFromLine} label="Top padding" description="Space above header">
+                <Slider value={settings.safeAreaTop} min={0} max={60} onChange={(v) => onUpdate({ safeAreaTop: v })} label={`${settings.safeAreaTop}px`} />
+              </SettingRow>
+
+              <SettingRow icon={ArrowDownFromLine} label="Bottom padding" description="Space below tab bar">
+                <Slider value={settings.safeAreaBottom} min={0} max={60} onChange={(v) => onUpdate({ safeAreaBottom: v })} label={`${settings.safeAreaBottom}px`} />
+              </SettingRow>
+            </>
+          )}
+
+          <SettingRow icon={LayoutGrid} label="Tab bar height" description="Size of the bottom nav">
+            <Slider value={settings.tabBarHeight} min={48} max={80} onChange={(v) => onUpdate({ tabBarHeight: v })} label={`${settings.tabBarHeight}px`} />
+          </SettingRow>
+        </div>
+      </div>
+
       {/* Appearance */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Appearance</h3>
+        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">Appearance</h3>
         <div className="divide-y divide-white/5">
           <SettingRow icon={Sun} label="Background darkness" description="Darken the background image">
             <Slider value={settings.bgDarkness} min={20} max={95} onChange={(v) => onUpdate({ bgDarkness: v })} label={`${settings.bgDarkness}%`} />
@@ -113,7 +168,7 @@ export function SettingsPage({
 
       {/* Display */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Display</h3>
+        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">Display</h3>
         <div className="divide-y divide-white/5">
           <SettingRow icon={DollarSign} label="Currency" description="How values are shown">
             <select
@@ -151,7 +206,7 @@ export function SettingsPage({
 
       {/* Account */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Account</h3>
+        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">Account</h3>
         <button
           onClick={onLogout}
           className="flex items-center gap-3 w-full py-3 text-red-400 hover:text-red-300 transition-colors"
