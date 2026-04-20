@@ -1,9 +1,11 @@
 import { useRef, useState, useEffect, type ReactNode } from "react";
 import { RefreshCw } from "lucide-react";
 
-const THRESHOLD = 80;   // px pull distance to trigger
-const MAX_PULL = 140;   // cap max pull distance
-const DAMP = 0.45;      // rubber-band dampening factor
+const THRESHOLD = 80;      // px pull distance to trigger
+const MAX_PULL = 140;      // cap max pull distance
+const DAMP = 0.45;         // rubber-band dampening factor
+const H_IGNORE = 10;       // px of horizontal motion that disqualifies the pull
+const V_MIN_TO_START = 8;  // px of vertical motion before we treat as a pull
 
 export function PullToRefresh({
   children,
@@ -17,7 +19,9 @@ export function PullToRefresh({
   const [pullDist, setPullDist] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const startY = useRef<number | null>(null);
+  const startX = useRef<number | null>(null);
   const pulling = useRef(false);
+  const disqualified = useRef(false);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -25,46 +29,63 @@ export function PullToRefresh({
 
     const onTouchStart = (e: TouchEvent) => {
       if (refreshing) return;
-      // Only start tracking if we're at the top of scroll
       if (el.scrollTop > 2) return;
       startY.current = e.touches[0].clientY;
+      startX.current = e.touches[0].clientX;
       pulling.current = false;
+      disqualified.current = false;
     };
 
     const onTouchMove = (e: TouchEvent) => {
       if (refreshing) return;
-      if (startY.current === null) return;
+      if (startY.current === null || startX.current === null) return;
+      if (disqualified.current) return;
+
       const dy = e.touches[0].clientY - startY.current;
-      if (dy <= 0) {
+      const dx = e.touches[0].clientX - startX.current;
+
+      // Horizontal gesture → disqualify this pull attempt for the rest of the
+      // touch so children (SwipeTabs) can handle it without interference.
+      if (Math.abs(dx) > H_IGNORE && Math.abs(dx) > Math.abs(dy)) {
+        disqualified.current = true;
         pulling.current = false;
         setPullDist(0);
         return;
       }
+
+      // Not enough vertical motion yet — don't start pull UI
+      if (dy < V_MIN_TO_START) {
+        pulling.current = false;
+        setPullDist(0);
+        return;
+      }
+
       if (el.scrollTop > 2) {
-        // User scrolled back up during pull; abandon
         pulling.current = false;
         setPullDist(0);
         return;
       }
-      // Rubber-band damping: harder to pull further
+
       const damped = Math.min(MAX_PULL, dy * DAMP);
       setPullDist(damped);
       pulling.current = true;
-      // Prevent native overscroll bounce so our indicator is the only feedback
-      if (dy > 6) e.preventDefault();
+      if (dy > V_MIN_TO_START) e.preventDefault();
     };
 
     const onTouchEnd = async () => {
-      if (!pulling.current) {
+      const wasPulling = pulling.current;
+      const currentPull = pullDist;
+      startY.current = null;
+      startX.current = null;
+      pulling.current = false;
+      disqualified.current = false;
+
+      if (!wasPulling) {
         setPullDist(0);
-        startY.current = null;
         return;
       }
-      const shouldRefresh = pullDist >= THRESHOLD;
-      startY.current = null;
-      pulling.current = false;
 
-      if (shouldRefresh) {
+      if (currentPull >= THRESHOLD) {
         setRefreshing(true);
         setPullDist(THRESHOLD);
         try {
@@ -91,15 +112,25 @@ export function PullToRefresh({
     };
   }, [scrollRef, refreshing, pullDist, onRefresh]);
 
-  // Progress 0→1 for visual feedback
   const progress = Math.min(1, pullDist / THRESHOLD);
-  const rotation = pullDist * 3; // rotate while pulling
+  const rotation = pullDist * 3;
   const scale = 0.6 + 0.4 * progress;
   const opacity = Math.min(1, progress * 1.5);
 
+  // Always render the SAME single wrapper div so React doesn't remount the
+  // children subtree on pull start/end (that was resetting sub-tab state).
+  // Use transform:none when idle so no new containing block is created —
+  // this preserves position:sticky on descendants.
+  const isActive = pullDist > 0 || refreshing;
+  const wrapperStyle: React.CSSProperties = {
+    width: "100%",
+    height: "100%",
+    transform: isActive ? `translateY(${pullDist * 0.5}px)` : "none",
+    transition: pulling.current || refreshing ? "none" : "transform 0.3s cubic-bezier(0.2,0.8,0.2,1)",
+  };
+
   return (
     <div className="ptr-container relative w-full h-full">
-      {/* Indicator */}
       <div
         className="ptr-indicator"
         style={{
@@ -115,23 +146,9 @@ export function PullToRefresh({
         />
       </div>
 
-      {/* Content — only apply transform when actually pulling so sticky
-          children (e.g. sub-tab selector) aren't confined to a transformed
-          containing block when idle. */}
-      {pullDist > 0 || refreshing ? (
-        <div
-          style={{
-            transform: `translateY(${pullDist * 0.5}px)`,
-            transition: pulling.current || refreshing ? "none" : "transform 0.3s cubic-bezier(0.2,0.8,0.2,1)",
-            height: "100%",
-            width: "100%",
-          }}
-        >
-          {children}
-        </div>
-      ) : (
-        children
-      )}
+      <div style={wrapperStyle}>
+        {children}
+      </div>
     </div>
   );
 }

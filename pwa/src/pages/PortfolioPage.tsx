@@ -108,6 +108,7 @@ export function PortfolioPage({
       tabs={[{ label: "History" }, { label: "Caspar" }, { label: "Sarah" }]}
       panels={[HistoryPanel, CasparPanel, SarahPanel]}
       defaultIndex={0}
+      persistKey="casaa_portfolio_subtab"
     />
   );
 }
