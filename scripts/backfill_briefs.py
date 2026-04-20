@@ -201,15 +201,33 @@ def parse_brief(text: str) -> dict:
 
     # Sentiment — scan headline + verdict + action for tone words
     tone_text = " ".join([headline, verdict, action_text, posture_text]).lower()
-    bearish_words = ["blockade", "sell", "exposed", "risk-off", "panic", "shock",
-                     "tighten", "hawkish", "selloff", "collapse", "stagflation"]
-    bullish_words = ["ceasefire", "risk-on", "retreating", "easing", "recovery",
-                     "momentum", "green", "rally", "beat", "optimism", "ath"]
+    bearish_words = [
+        "blockade", "risk-off", "risk off", "panic", "shock", "tighten", "hawkish",
+        "selloff", "sell-off", "collapse", "stagflation", "escalation", "re-escalation",
+        "reverse", "reversed", "reverses", "reversal", "tail-risk", "tail risk",
+        "red", "negative", "pullback", "bearish", "drop", "slump", "plunge",
+        "flight to safety", "de-risk", "derisk", "defensive", "hawk",
+        "sanction", "seized", "vessel", "strait", "conflict", "war", "crude spike",
+        "crisis", "breach", "warning", "alert",
+    ]
+    bullish_words = [
+        "ceasefire", "risk-on", "risk on", "retreating", "easing", "recovery",
+        "momentum up", "green", "beat", "optimism", "rally continues",
+        "breakout", "all-time high", "goldilocks", "dovish", "relief",
+        "truce", "de-escalation", "pivot to easing",
+    ]
+    bearish_count = sum(1 for w in bearish_words if w in tone_text)
+    bullish_count = sum(1 for w in bullish_words if w in tone_text)
+
     sentiment = "neutral"
-    if any(w in tone_text for w in bearish_words):
+    # Strong bearish signal — overrides everything
+    if any(trigger in tone_text for trigger in ("risk-off", "risk off", "re-escalation", "selloff", "panic")):
         sentiment = "bearish"
-    if any(w in tone_text for w in bullish_words):
-        # Give bullish signals priority when both appear (recovery-from-risk-off)
+    elif any(trigger in tone_text for trigger in ("ceasefire", "truce", "de-escalation", "breakout")):
+        sentiment = "bullish"
+    elif bearish_count > bullish_count:
+        sentiment = "bearish"
+    elif bullish_count > bearish_count:
         sentiment = "bullish"
 
     return {

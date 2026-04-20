@@ -7,42 +7,73 @@ import { SectorMixCard } from "../cards/SectorMixCard";
 import { WsrSummaryCard } from "../cards/WsrSummaryCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { BriefDetailModal } from "../components/BriefDetailModal";
+import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
+
+type HomeSubTab = "daily" | "wsr";
+
+const LAST_SUB_KEY = "casaa_home_subtab";
+
+function loadLastSub(): HomeSubTab {
+  try {
+    const v = localStorage.getItem(LAST_SUB_KEY);
+    if (v === "wsr" || v === "daily") return v;
+  } catch {}
+  return "daily";
+}
 
 export function HomePage({ data, loading }: { data: DashboardData | null; loading: boolean }) {
   const [briefOpen, setBriefOpen] = useState(false);
+  const [sub, setSub] = useState<HomeSubTab>(loadLastSub);
   const daily = data?.daily ?? null;
+  const wsr = data?.wsrSummary ?? null;
+
+  const handleSubChange = (key: string) => {
+    const next = key as HomeSubTab;
+    setSub(next);
+    try { localStorage.setItem(LAST_SUB_KEY, next); } catch {}
+  };
 
   return (
     <>
-      <div className="flex flex-col gap-4 px-4 pb-4">
+      <div className="flex flex-col px-4 pb-4">
+        {/* Sticky sub-tab selector — pins above everything in scroll area */}
+        <StickyTabs
+          active={sub}
+          onChange={handleSubChange}
+          tabs={[
+            { key: "daily", label: "Daily Brief", icon: Newspaper, badge: daily ? 1 : 0 },
+            { key: "wsr",   label: "Weekly Strategy", icon: BookOpen, badge: wsr ? 1 : 0 },
+          ]}
+        />
+
+        {/* MacroStrip stays below the sticky tab so it scrolls away */}
         <MacroStrip macro={data?.macro ?? null} />
 
-        {data?.wsrSummary && (
-          <div className="fade-up fade-up-1">
-            <WsrSummaryCard wsr={data.wsrSummary} />
-          </div>
-        )}
-
-        <div className="fade-up fade-up-2">
-          <DailyBriefCard
-            row={daily}
-            loading={loading && !data}
-            onOpen={daily ? () => setBriefOpen(true) : undefined}
-          />
+        {/* Primary card — swapped by sub-tab */}
+        <div className="fade-up fade-up-1 mt-4">
+          {sub === "daily" ? (
+            <DailyBriefCard
+              row={daily}
+              loading={loading && !data}
+              onOpen={daily ? () => setBriefOpen(true) : undefined}
+            />
+          ) : (
+            <WsrSummaryCard wsr={wsr} />
+          )}
         </div>
 
-        <div className="fade-up fade-up-3">
+        <div className="fade-up fade-up-2 mt-4">
           <RiskPulseCard macro={data?.macro ?? null} />
         </div>
 
-        <div className="fade-up fade-up-4">
+        <div className="fade-up fade-up-3 mt-4">
           <MoversCard
             casparPositions={data?.casparPositions ?? []}
             sarahPositions={data?.sarahPositions ?? []}
           />
         </div>
 
-        <div className="fade-up fade-up-5">
+        <div className="fade-up fade-up-4 mt-4">
           <SectorMixCard
             casparPositions={data?.casparPositions ?? []}
             sarahPositions={data?.sarahPositions ?? []}

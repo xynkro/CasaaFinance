@@ -115,17 +115,23 @@ export function PullToRefresh({
         />
       </div>
 
-      {/* Content — nudge down when pulling for tactile feel */}
-      <div
-        style={{
-          transform: `translateY(${pullDist * 0.5}px)`,
-          transition: pulling.current || refreshing ? "none" : "transform 0.3s cubic-bezier(0.2,0.8,0.2,1)",
-          height: "100%",
-          width: "100%",
-        }}
-      >
-        {children}
-      </div>
+      {/* Content — only apply transform when actually pulling so sticky
+          children (e.g. sub-tab selector) aren't confined to a transformed
+          containing block when idle. */}
+      {pullDist > 0 || refreshing ? (
+        <div
+          style={{
+            transform: `translateY(${pullDist * 0.5}px)`,
+            transition: pulling.current || refreshing ? "none" : "transform 0.3s cubic-bezier(0.2,0.8,0.2,1)",
+            height: "100%",
+            width: "100%",
+          }}
+        >
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }
