@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchDashboard, type DashboardData } from "./data";
+import type { TechnicalScoreRow } from "./data";
 import { PinGate, usePinAuth } from "./PinGate";
 import { useSettings } from "./settings";
 import { TabBar } from "./components/TabBar";
@@ -10,7 +11,9 @@ import { OptionsPage } from "./pages/OptionsPage";
 import { DecisionsPage } from "./pages/DecisionsPage";
 import { ArchivePage } from "./pages/ArchivePage";
 import { SettingsPage } from "./pages/SettingsPage";
-import { RefreshCw } from "lucide-react";
+import { StockDetail } from "./components/StockDetail";
+import { TickerLookupSheet } from "./components/TickerLookupSheet";
+import { RefreshCw, Search } from "lucide-react";
 
 const TAB_TITLES = ["Home", "Portfolio", "Options", "Decisions", "Archive", "Settings"];
 const SETTINGS_TAB = 5;
@@ -21,6 +24,9 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(settings.defaultTab);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [lookupTicker, setLookupTicker] = useState<string | null>(null);
+  const [lookupTechScore, setLookupTechScore] = useState<TechnicalScoreRow | undefined>();
 
   const load = () => {
     setLoading(true);
@@ -32,7 +38,6 @@ function Dashboard() {
 
   useEffect(() => { load(); }, []);
 
-  // Scroll to top when switching tabs
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   }, [tab]);
@@ -106,31 +111,49 @@ function Dashboard() {
     <div className="app-shell">
       <div className="bg-layer" />
 
-      {/* Fixed header */}
+      {/* Header */}
       <header className="app-header">
-        <div className="flex items-center justify-between py-3 px-4">
-          <div>
-            <h1 className="text-lg font-bold text-white tracking-tight">{TAB_TITLES[tab]}</h1>
-            <p className="text-[10px] text-slate-400 mt-0.5">Casaa Finance</p>
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-baseline gap-2.5">
+            <h1 className="text-[18px] font-semibold tracking-[-0.02em] text-white leading-none">
+              {TAB_TITLES[tab]}
+            </h1>
+            <span className="text-[11px] text-slate-500 font-medium">Casaa Finance</span>
           </div>
           {tab !== SETTINGS_TAB && (
-            <button
-              onClick={() => load()}
-              disabled={loading}
-              className="p-2.5 rounded-xl glass text-slate-300 hover:text-white active:scale-95 transition-all disabled:opacity-40"
-              aria-label="Refresh"
-            >
-              <RefreshCw size={16} className={loading ? "spin-smooth" : ""} />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setLookupOpen(true)}
+                className="flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-90"
+                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                aria-label="Analyse ticker"
+              >
+                <Search size={15} style={{ color: "rgb(148 163 184)" }} />
+              </button>
+              <button
+                onClick={() => load()}
+                disabled={loading}
+                className="flex items-center justify-center w-9 h-9 rounded-xl transition-all disabled:opacity-30 active:scale-90"
+                style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+                aria-label="Refresh"
+              >
+                <RefreshCw
+                  size={15}
+                  className={loading ? "spin-smooth" : ""}
+                  style={{ color: "rgb(148 163 184)" }}
+                />
+              </button>
+            </div>
           )}
         </div>
       </header>
 
-      {/* Scrollable content — with pull-to-refresh */}
+      {/* Scrollable content */}
       <main ref={scrollRef} className="app-content">
         <PullToRefresh onRefresh={load} scrollRef={scrollRef}>
           {data?.error && (
-            <div className="mx-4 mb-4 rounded-xl glass border-red-500/30 p-3 text-sm text-red-300 fade-up">
+            <div className="mx-4 mb-3 rounded-xl p-3 text-sm text-red-300 fade-up"
+                 style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)" }}>
               {data.error}
             </div>
           )}
@@ -138,13 +161,32 @@ function Dashboard() {
         </PullToRefresh>
       </main>
 
-      {/* Fixed bottom tab bar */}
       <TabBar
         active={tab}
         onChange={setTab}
         decisionCount={pendingCount}
         defenseAlerts={urgentDefense}
       />
+
+      {/* Global ticker lookup */}
+      <TickerLookupSheet
+        open={lookupOpen}
+        onClose={() => setLookupOpen(false)}
+        technicalScores={data?.technicalScores ?? []}
+        onSelect={(ticker, techScore) => {
+          setLookupTicker(ticker);
+          setLookupTechScore(techScore);
+        }}
+      />
+      {lookupTicker && (
+        <StockDetail
+          ticker={lookupTicker}
+          techScore={lookupTechScore}
+          techHistory={data?.technicalScoresHistory}
+          currency="USD"
+          onClose={() => { setLookupTicker(null); setLookupTechScore(undefined); }}
+        />
+      )}
     </div>
   );
 }

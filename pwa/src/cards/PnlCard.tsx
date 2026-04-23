@@ -11,9 +11,7 @@ function fmt(v: string | number | undefined, prefix = "$"): string {
 function fmtCompact(v: string | number | undefined, prefix = "$"): string {
   const n = Number(v);
   if (isNaN(n) || n === 0) return "—";
-  if (Math.abs(n) >= 1000) {
-    return `${prefix}${(n / 1000).toFixed(1)}k`;
-  }
+  if (Math.abs(n) >= 1000) return `${prefix}${(n / 1000).toFixed(1)}k`;
   return fmt(v, prefix);
 }
 
@@ -29,24 +27,35 @@ function pct(v: string | undefined): { text: string; positive: boolean } {
 function Skeleton() {
   return (
     <Card>
-      <div className="flex items-center justify-between mb-3">
-        <div className="shimmer h-4 w-16" />
-        <div className="shimmer h-3 w-20" />
+      <div className="flex items-center justify-between mb-4">
+        <div className="shimmer h-3.5 w-16 rounded" />
+        <div className="shimmer h-3 w-20 rounded" />
       </div>
-      <div className="shimmer h-8 w-36 mb-2" />
-      <div className="flex gap-4">
-        <div className="shimmer h-3 w-24" />
-        <div className="shimmer h-3 w-20" />
+      <div className="shimmer h-9 w-40 rounded mb-1" />
+      <div className="shimmer h-5 w-20 rounded mb-4" />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="shimmer h-12 rounded-xl" />
+        <div className="shimmer h-12 rounded-xl" />
+        <div className="shimmer h-12 rounded-xl" />
+        <div className="shimmer h-12 rounded-xl" />
       </div>
     </Card>
   );
 }
 
-function StatRow({ label, value }: { label: string; value: string }) {
+function StatTile({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
-    <div className="flex justify-between">
-      <span className="text-slate-500">{label}</span>
-      <span className="text-slate-300 tabular-nums">{value}</span>
+    <div
+      className="rounded-xl px-3 py-2.5"
+      style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
+    >
+      <div className="label-caps mb-1">{label}</div>
+      <div
+        className="text-sm font-semibold tabular-nums"
+        style={{ color: accent ? "inherit" : "rgb(226 232 240)" }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -69,7 +78,7 @@ export function PnlCard({
   if (!snapshot) {
     return (
       <Card>
-        <div className="flex items-center gap-2 text-slate-500">
+        <div className="flex items-center gap-2" style={{ color: "rgb(100 116 139)" }}>
           <Wallet size={16} />
           <span className="text-sm">{label} — no data yet</span>
         </div>
@@ -82,40 +91,56 @@ export function PnlCard({
   const Icon = uplPct.positive ? TrendingUp : TrendingDown;
   const posCount = positions?.length ?? 0;
   const totalMktVal = positions?.reduce((sum, p) => sum + Number(p.mkt_val || 0), 0) ?? 0;
+  const positiveColor = "#34d399";
+  const negativeColor = "#f87171";
+  const pnlColor = uplPct.positive ? positiveColor : negativeColor;
 
   return (
     <Card>
+      {/* Header row */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${uplPct.positive ? "bg-emerald-400" : "bg-red-400"}`} />
-          <h2 className="text-sm font-medium text-slate-400">{label}</h2>
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ background: pnlColor, boxShadow: `0 0 6px ${pnlColor}60` }}
+          />
+          <span className="text-[13px] font-semibold text-slate-300">{label}</span>
         </div>
-        <time className="text-xs text-slate-500 tabular-nums">{snapshot.date}</time>
+        <time className="text-[11px] tabular-nums" style={{ color: "rgb(100 116 139)" }}>
+          {(snapshot.date ?? "").slice(0, 10)}
+        </time>
       </div>
 
-      <div className="flex items-baseline gap-3 mb-3">
-        <span className="text-2xl font-bold text-white tracking-tight tabular-nums">
+      {/* Big NLV number */}
+      <div className="mb-1">
+        <span className="text-[28px] font-bold tracking-[-0.03em] text-white tabular-nums leading-none">
           {fmt(snapshot.net_liq, prefix)}
         </span>
+      </div>
+
+      {/* P&L badge */}
+      <div className="flex items-center gap-2 mb-4">
         <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold tabular-nums ${
-            uplPct.positive
-              ? "bg-emerald-500/15 text-emerald-400"
-              : "bg-red-500/15 text-red-400"
-          }`}
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold tabular-nums"
+          style={{
+            background: `${pnlColor}18`,
+            color: pnlColor,
+          }}
         >
-          <Icon size={12} />
+          <Icon size={11} />
           {uplPct.text}
+        </span>
+        <span className="text-xs tabular-nums" style={{ color: "rgb(100 116 139)" }}>
+          UPL {fmt(snapshot.upl, prefix)}
         </span>
       </div>
 
-      {/* Summary stats grid */}
-      <div className="grid grid-cols-2 gap-x-5 gap-y-1.5 text-xs">
-        <StatRow label="Cash" value={fmt(snapshot.cash, prefix)} />
-        <StatRow label="UPL" value={fmt(snapshot.upl, prefix)} />
-        <StatRow label="Market value" value={fmtCompact(totalMktVal, prefix)} />
-        <StatRow label="Positions" value={posCount > 0 ? `${posCount} holdings` : "—"} />
-      </div>
+      {/* Stats grid */}
+      <div className="grid grid-cols-2 gap-2">
+        <StatTile label="Cash"         value={fmt(snapshot.cash, prefix)} />
+        <StatTile label="Market Value" value={fmtCompact(totalMktVal, prefix)} />
+        <StatTile label="Positions"    value={posCount > 0 ? `${posCount} holdings` : "—"} />
+        <StatTile label="Day UPL"      value={fmt(snapshot.upl, prefix)} /></div>
     </Card>
   );
 }
