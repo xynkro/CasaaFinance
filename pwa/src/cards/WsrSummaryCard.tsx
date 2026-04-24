@@ -70,7 +70,7 @@ export function WsrSummaryCard({
   const verdictBrief = firstSentence(wsr.verdict, 240);
 
   return (
-    <Card className="glass-bright">
+    <Card variant="bright">
       <button
         type="button"
         onClick={onOpen}

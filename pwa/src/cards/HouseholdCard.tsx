@@ -39,7 +39,7 @@ export function HouseholdCard({
   const sarahPct = (sarahUsd / totalUsd) * 100;
 
   return (
-    <Card className="glass-bright">
+    <Card variant="bright">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Users size={14} className="text-indigo-400" />

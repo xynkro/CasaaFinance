@@ -79,7 +79,7 @@ export function WsrLiteCard({
   const dormCount   = triggers.filter((t) => t.status === "DORMANT").length;
 
   return (
-    <Card className="glass-bright">
+    <Card variant="bright">
       <button
         type="button"
         onClick={onOpen}
