@@ -47,8 +47,8 @@ export function WsrLiteCard({
     );
   }
 
-  // Empty / stale state
-  if (!wsrLite || !isWsrLiteFresh(wsrLite.date)) {
+  // No data at all
+  if (!wsrLite) {
     return (
       <Card>
         <div className="flex items-center gap-3 py-3">
@@ -73,6 +73,7 @@ export function WsrLiteCard({
   const parsed = parseWsrLite(wsrLite.raw_md ?? "");
   const { bottomLine, triggers, regimeUnchanged } = parsed;
   const dateStr = wsrLite.date.slice(0, 10);
+  const fresh = isWsrLiteFresh(wsrLite.date);
 
   const hitCount    = triggers.filter((t) => t.status === "HIT").length;
   const closeCount  = triggers.filter((t) => t.status === "CLOSE").length;
@@ -92,6 +93,9 @@ export function WsrLiteCard({
             <span className="text-base">⚡</span>
             <h2 className="text-sm font-semibold text-slate-200">Mid-Week Pulse</h2>
             <time className="text-xs text-slate-500 tabular-nums ml-1">{dateStr}</time>
+            {!fresh && (
+              <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: "rgb(100 116 139)" }}>PREV</span>
+            )}
           </div>
           {/* Regime badge */}
           <div
