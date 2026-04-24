@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Scan LunarCrush + WSB + quality watchlist for CSP/CC opportunities.
+       Runs daily at 10:30 SGT (02:30 UTC) — US market has been open ~3h,
+       options liquidity is healthy and bid/ask spreads are live. -->
+  <key>Label</key>
+  <string>com.caspar.market-scan</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/.venv/bin/python</string>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/scripts/market_scan.py</string>
+    <string>--top</string>
+    <string>30</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA</string>
+
+  <!-- 02:30 UTC daily = 10:30 SGT = US market ~3h into session -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/market-scan-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/market-scan-stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>
