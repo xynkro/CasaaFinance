@@ -214,10 +214,12 @@ export function parseWsrLite(raw_md: string): WsrLiteParsed {
   };
 }
 
-/** Returns true if the WSR Lite is "fresh" — within 72 h (covers Fri → Mon gap). */
+/** Returns true if the WSR Lite is "fresh" — within 72 h (covers Fri → Mon gap).
+ *  Handles backend timestamp suffix format: "2026-04-24T203723" → takes first 10 chars. */
 export function isWsrLiteFresh(dateStr: string): boolean {
   if (!dateStr) return false;
-  const d = new Date(dateStr);
+  // Backend appends THHMMSS (no colons) for audit trail — strip to YYYY-MM-DD
+  const d = new Date(dateStr.slice(0, 10));
   if (isNaN(d.getTime())) return false;
   return Date.now() - d.getTime() < 72 * 3_600_000;
 }

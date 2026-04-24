@@ -144,12 +144,18 @@ def archive_file(source: Path, logger: logging.Logger, force: bool = False) -> b
                 existing = ws_w.get_all_values()
                 keep_rows = [existing[0]] if existing else []
                 src_val = parsed_dict.get("source", "")
+                is_lite = src_val == "wsr_lite"
                 for r in existing[1:] if existing else []:
-                    # Remove matching date + source combo only
-                    if r and r[0].startswith(date) and (len(r) < 2 or r[1] == src_val):
+                    if not r:
                         continue
-                    if r:
-                        keep_rows.append(r)
+                    row_date = r[0][:10]  # strip timestamp suffix "2026-04-24T203723" → "2026-04-24"
+                    row_src  = r[1] if len(r) > 1 else ""
+                    same_date = row_date == date
+                    # Remove rows for same date+source, including stale filename-based sources
+                    row_is_lite = row_src == "wsr_lite" or "lite" in row_src.lower()
+                    if same_date and ((is_lite and row_is_lite) or row_src == src_val):
+                        continue
+                    keep_rows.append(r)
                 keep_rows.append(wsr_row.to_row())
                 ws_w.clear()
                 ws_w.update("A1", keep_rows, value_input_option="USER_ENTERED")
