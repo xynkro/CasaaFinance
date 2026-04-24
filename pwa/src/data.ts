@@ -326,6 +326,7 @@ export interface DashboardData {
   exitPlans: ExitPlanRow[];
   optionsDefense: OptionsDefenseRow[];
   wsrSummary: WsrSummaryRow | null;
+  wsrLite: WsrSummaryRow | null;       // latest WSR Lite (Wed/Fri), source = "wsr_lite"
   decisions: DecisionRow[];
   macro: MacroRow | null;
   // History (all rows, sorted by date ascending)
@@ -399,7 +400,14 @@ export async function fetchDashboard(): Promise<DashboardData> {
       scanResults: latestGroup(scanRows),
       exitPlans: latestGroup(exitRows),
       optionsDefense: latestGroup(defenseRows),
-      wsrSummary: wsrSumRows.length ? sortByDate(wsrSumRows)[wsrSumRows.length - 1] : null,
+      wsrSummary: (() => {
+        const full = sortByDate(wsrSumRows.filter((r) => r.source !== "wsr_lite"));
+        return full.length ? full[full.length - 1] : null;
+      })(),
+      wsrLite: (() => {
+        const lite = sortByDate(wsrSumRows.filter((r) => r.source === "wsr_lite"));
+        return lite.length ? lite[lite.length - 1] : null;
+      })(),
       decisions: latestGroup(decisions),
       macro: latest(macroRows),
       casparHistory: dedup(casparRows),
@@ -414,7 +422,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       casparPositions: [], sarahPositions: [], options: [], optionRecommendations: [],
       technicalScores: [], technicalScoresHistory: [],
       wheelNextLeg: [], scanResults: [], exitPlans: [], optionsDefense: [],
-      wsrSummary: null, decisions: [],
+      wsrSummary: null, wsrLite: null, decisions: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [], error: String(e),
     };

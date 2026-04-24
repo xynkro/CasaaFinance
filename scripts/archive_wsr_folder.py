@@ -135,20 +135,33 @@ def archive_file(source: Path, logger: logging.Logger, force: bool = False) -> b
     if source.suffix.lower() == ".md":
         try:
             from src.wsr_md_parser import parse_wsr_md, is_wsr_file
-            if is_wsr_file(source):
-                parsed = parse_wsr_md(source, date)
-                wsr_row = S.WsrSummaryRow(**parsed)
+            from src.wsr_lite_md_parser import parse_wsr_lite_md, is_wsr_lite_file
+
+            def _upsert_wsr_summary(parsed_dict: dict) -> None:
+                wsr_row = S.WsrSummaryRow(**parsed_dict)
                 sh.ensure_headers(client, S.WsrSummaryRow.TAB_NAME, S.WsrSummaryRow.HEADERS)
-                # Upsert: remove any existing row for this date, then add
                 ws_w = ss.worksheet(S.WsrSummaryRow.TAB_NAME)
                 existing = ws_w.get_all_values()
-                keep_rows = [existing[0]] if existing else []  # keep header
+                keep_rows = [existing[0]] if existing else []
+                src_val = parsed_dict.get("source", "")
                 for r in existing[1:] if existing else []:
-                    if r and not r[0].startswith(date):  # keep rows from other dates
+                    # Remove matching date + source combo only
+                    if r and r[0].startswith(date) and (len(r) < 2 or r[1] == src_val):
+                        continue
+                    if r:
                         keep_rows.append(r)
                 keep_rows.append(wsr_row.to_row())
                 ws_w.clear()
                 ws_w.update("A1", keep_rows, value_input_option="USER_ENTERED")
+
+            if is_wsr_lite_file(source):
+                parsed = parse_wsr_lite_md(source, date)
+                _upsert_wsr_summary(parsed)
+                wsr_parsed = True
+                logger.info(f"WSR Lite summary parsed: {source.name}")
+            elif is_wsr_file(source):
+                parsed = parse_wsr_md(source, date)
+                _upsert_wsr_summary(parsed)
                 wsr_parsed = True
                 logger.info(f"WSR summary parsed: {source.name}")
         except Exception as e:

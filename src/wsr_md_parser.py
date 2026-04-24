@@ -191,11 +191,13 @@ def parse_wsr_md(md_path: Path, date: str) -> dict[str, Any]:
 
 
 def is_wsr_file(path: Path) -> bool:
-    """Heuristic: filename contains 'WSR' and ends in .md, excludes ad-hoc options."""
+    """Heuristic: filename contains 'WSR' and ends in .md, excludes ad-hoc options and WSR Lite."""
     name = path.name.lower()
     if not name.endswith(".md"):
         return False
     if "options" in name or "adhoc" in name.replace("wsr", ""):
+        return False
+    if "lite" in name:  # WSR Lite has its own parser; don't clobber Monday WSR
         return False
     return "wsr" in name
 
