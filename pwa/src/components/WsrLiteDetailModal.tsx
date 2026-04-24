@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { X, ChevronLeft, Target, AlertTriangle, Moon, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { X, ChevronLeft, Target, AlertTriangle, Moon } from "lucide-react";
 import type { WsrSummaryRow } from "../data";
 import { parseWsrLite } from "../lib/wsrLiteParse";
 import type { TriggerRow, TrafficLightRow, DecisionQueueRow, CatalystDay } from "../lib/wsrLiteParse";
@@ -237,7 +238,7 @@ function BottomLineBlock({ text, confidence, tag }: { text: string; confidence: 
 
 // ── Section wrapper ───────────────────────────────────────────────────────────
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Section({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="px-4 py-4 border-b border-white/5 space-y-3">
       <div className="label-caps">{label}</div>
