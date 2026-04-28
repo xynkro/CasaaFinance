@@ -38,6 +38,23 @@ function Dashboard() {
 
   useEffect(() => { load(); }, []);
 
+  // Auto-refresh: every 15 min + whenever the app comes back to foreground
+  useEffect(() => {
+    const INTERVAL_MS = 15 * 60 * 1000;
+    const timer = setInterval(() => { load(); }, INTERVAL_MS);
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   }, [tab]);
