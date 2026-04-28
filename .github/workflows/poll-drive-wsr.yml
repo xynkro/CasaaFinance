@@ -1,0 +1,42 @@
+name: Poll Drive WSR — Manual Upload Pickup (every 30 min)
+
+on:
+  schedule:
+    - cron: "13,43 * * * *"   # :13 and :43 — off-minute, twice an hour
+  workflow_dispatch:
+    inputs:
+      force_id:
+        description: "Force-process a specific Drive file ID"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: poll-drive-wsr
+  cancel-in-progress: true
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Poll Drive folders
+        run: |
+          if [ -n "${{ inputs.force_id }}" ]; then
+            python scripts/poll_drive_wsr.py --force-id "${{ inputs.force_id }}"
+          else
+            python scripts/poll_drive_wsr.py
+          fi

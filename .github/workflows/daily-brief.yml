@@ -1,0 +1,53 @@
+name: Daily Brief — Opus 4.7 + Sonnet 4.6
+
+on:
+  schedule:
+    # 23:03 UTC Sun-Thu = 07:03 SGT Mon-Fri (07:00 SGT before US market analysis)
+    # Off-minute (:03) avoids fleet-wide :00 contention.
+    - cron: "3 23 * * 0-4"
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Dry run (no Sheets/Drive write)"
+        type: boolean
+        default: false
+      skip_web:
+        description: "Skip web_search (cheap test)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-brief
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OAUTH_TOKEN_JSON:  ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:          ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:   ${{ secrets.DRIVE_FOLDER_ID }}
+      MODEL_OPUS:        ${{ vars.MODEL_OPUS   || 'claude-opus-4-7' }}
+      MODEL_SONNET:      ${{ vars.MODEL_SONNET || 'claude-sonnet-4-6' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate daily brief
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          if [ "${{ inputs.skip_web }}" = "true" ]; then ARGS="$ARGS --skip-web"; fi
+          python scripts/generate_daily_brief.py $ARGS

@@ -1,0 +1,44 @@
+name: Market Scan — Daily Options Opportunities (10:30 SGT)
+
+on:
+  schedule:
+    # 02:33 UTC = 10:33 SGT (US market ~3h into session — good options liquidity)
+    - cron: "33 2 * * *"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+      top:
+        description: "Max rows to write to sheet"
+        type: string
+        default: "30"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: market-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run market_scan
+        run: |
+          ARGS="--top ${{ inputs.top || '30' }}"
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          python scripts/market_scan.py $ARGS

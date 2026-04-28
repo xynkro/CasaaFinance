@@ -1,0 +1,49 @@
+name: Yahoo Grab — Hourly Portfolio Prices
+
+on:
+  schedule:
+    # Every hour at :07 (off-minute to avoid fleet contention).
+    # 24 runs/day × 30s = ~12 min/day = ~360 min/month — well within free tier.
+    - cron: "7 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+      caspar_only:
+        type: boolean
+        default: false
+      sarah_only:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yahoo-grab
+  cancel-in-progress: true   # if a previous hour's run is still going, kill it
+
+jobs:
+  grab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run yahoo_grab
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          if [ "${{ inputs.caspar_only }}" = "true" ]; then ARGS="$ARGS --caspar"; fi
+          if [ "${{ inputs.sarah_only }}" = "true" ]; then ARGS="$ARGS --sarah"; fi
+          python src/yahoo_grab.py $ARGS

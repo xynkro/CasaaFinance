@@ -43,25 +43,45 @@ def _paths() -> tuple[Path, Path]:
 
 def authenticate(force: bool = False) -> gspread.Client:
     """
-    OAuth user-credential auth. First call opens a browser for consent; subsequent
-    calls refresh the cached token silently.
+    Returns an authorised gspread client. Three credential paths:
 
-    If force=True, deletes the cached token and re-runs the consent flow.
+      1. **OAUTH_TOKEN_JSON env var** (CI / GitHub Actions) — full contents of
+         a previously-cached authorized_user.json. No filesystem needed.
+      2. **GOOGLE_SERVICE_ACCOUNT_JSON env var** — service-account key JSON.
+      3. **Local OAuth flow** — falls back to gspread.oauth() with browser
+         consent on first call, refresh-token thereafter.
+
+    `force=True` only affects path 3 (deletes cached token to force re-consent).
     """
-    client_secret, token_cache = _paths()
+    # Path 1: OAuth user-credential JSON via env var (CI-friendly)
+    token_json = os.environ.get("OAUTH_TOKEN_JSON")
+    if token_json:
+        import json as _json
+        from google.oauth2.credentials import Credentials
+        info = _json.loads(token_json)
+        creds = Credentials.from_authorized_user_info(info, scopes=SCOPES)
+        return gspread.authorize(creds)
 
+    # Path 2: Service account JSON via env var (preferred for true automation)
+    sa_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if sa_json:
+        import json as _json
+        from google.oauth2.service_account import Credentials as SACreds
+        info = _json.loads(sa_json)
+        creds = SACreds.from_service_account_info(info, scopes=SCOPES)
+        return gspread.authorize(creds)
+
+    # Path 3: Local browser OAuth flow (developer machine)
+    client_secret, token_cache = _paths()
     if not client_secret.exists():
         raise FileNotFoundError(
             f"OAuth client secret not found at {client_secret}. "
-            f"Download it from GCP Console → APIs & Services → Credentials → "
-            f"OAuth 2.0 Client IDs → your Desktop app, and place at that path."
+            f"Set OAUTH_TOKEN_JSON or GOOGLE_SERVICE_ACCOUNT_JSON env var, "
+            f"or download the OAuth Desktop client_secret from GCP Console "
+            f"and place it at the configured path."
         )
-
     if force and token_cache.exists():
         token_cache.unlink()
-
-    # gspread.oauth handles the installed-app flow, caches the refresh token,
-    # and returns an authorised client.
     return gspread.oauth(
         scopes=SCOPES,
         credentials_filename=str(client_secret),
