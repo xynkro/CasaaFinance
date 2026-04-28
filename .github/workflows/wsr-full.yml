@@ -1,20 +1,20 @@
-name: WSR Full — Sunday Monday Strategy Review
+name: WSR Full — Claude Code (Max)
 
 on:
   schedule:
-    # 11:37 UTC Sunday = 19:37 SGT Sun (for Mon morning)
+    # 11:37 UTC Sunday = 19:37 SGT (for Mon morning)
     - cron: "37 11 * * 0"
   workflow_dispatch:
     inputs:
       dry:
         type: boolean
         default: false
-      skip_web:
-        type: boolean
-        default: false
 
 permissions:
   contents: read
+  pull-requests: read
+  issues: read
+  id-token: write
 
 concurrency:
   group: wsr-full
@@ -23,25 +23,28 @@ concurrency:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OAUTH_TOKEN_JSON:  ${{ secrets.OAUTH_TOKEN_JSON }}
-      SHEET_ID:          ${{ secrets.SHEET_ID }}
-      DRIVE_FOLDER_ID:   ${{ secrets.DRIVE_FOLDER_ID }}
-      MODEL_OPUS:        ${{ vars.MODEL_OPUS   || 'claude-opus-4-7' }}
-      MODEL_SONNET:      ${{ vars.MODEL_SONNET || 'claude-sonnet-4-6' }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Generate WSR Full
-        run: |
-          ARGS=""
-          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
-          if [ "${{ inputs.skip_web }}" = "true" ]; then ARGS="$ARGS --skip-web"; fi
-          python scripts/generate_wsr_full.py $ARGS
+      - run: pip install -r requirements.txt
+      - name: Run WSR Full brain
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Read prompts/cron_wsr_full.md and execute the full Monday WSR workflow.
+
+            CI context:
+            - Running on ubuntu-latest; Sheets/Drive auth via env vars.
+            - DRY_RUN=${{ inputs.dry }} — if true, pass --dry to push_brief invocations.
+            - Web research is critical for the WSR — use web_search liberally.
+            - Use Agent tool with model=sonnet for the markdown formatting step.
+            - This is the deepest synthesis of the week. Take your time.
+        env:
+          OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+          SHEET_ID:         ${{ secrets.SHEET_ID }}
+          DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}

@@ -10,22 +10,27 @@ at <https://github.com/xynkro/CasaaFinance/settings/secrets/actions>.
 
 | Secret Name | What It Is | How to Get It |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | API key for the brain (Opus 4.7 + Sonnet 4.6) | <https://console.anthropic.com/settings/keys> → Create Key |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived OAuth token for your **Claude Max subscription** — flat-rate billing, no per-token API charges | Run `claude setup-token` in a regular Terminal (NOT inside Claude Code) |
 | `SHEET_ID` | Google Sheets ID (the long alphanumeric in your sheet URL) | Open your sheet → URL is `docs.google.com/spreadsheets/d/{SHEET_ID}/edit` |
 | `DRIVE_FOLDER_ID` | Root Drive folder ID (parent of `Daily Briefs/`, `WSR Lite/`, etc.) | Open the folder in Drive → URL is `drive.google.com/drive/folders/{ID}` |
-| `OAUTH_TOKEN_JSON` | Full JSON of your cached OAuth user creds | See **OAUTH_TOKEN_JSON setup** below |
+| `OAUTH_TOKEN_JSON` | Full JSON of your cached Google OAuth user creds | See **OAUTH_TOKEN_JSON setup** below |
 
-### Optional repository **variables** (not secrets, just config)
+### CLAUDE_CODE_OAUTH_TOKEN setup (one-time, ~30 seconds)
 
-These let you bump model versions without redeploying. Set them at
-*Settings → Secrets and variables → Actions → Variables tab*:
+```bash
+# 1. In a fresh Terminal window — NOT inside an active Claude Code session:
+claude setup-token
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `MODEL_OPUS` | `claude-opus-4-7` | Synthesis model |
-| `MODEL_SONNET` | `claude-sonnet-4-6` | Formatting model |
+# 2. Follow the prompts (browser opens, sign in to your Max account, approve)
+# 3. Copy the long-lived token it prints
+# 4. Set as GitHub Secret:
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo xynkro/CasaaFinance
+# (paste the token at the prompt)
+```
 
-If unset, the workflows use the defaults above.
+This token authenticates the GitHub Actions runs against your Max
+subscription. Cost: included in your existing Max plan — **$0 marginal cost
+for the brain**.
 
 ---
 
@@ -91,11 +96,12 @@ files for UTC values.
 | Service | Usage | Cost |
 |---|---|---|
 | GitHub Actions (public repo) | Unlimited | **$0** |
-| Anthropic API — daily briefs | ~22 × $0.15 | **~$3.30** |
-| Anthropic API — WSR Lite (×2/wk) | ~9 × $0.30 | **~$2.70** |
-| Anthropic API — WSR Full (×1/wk) | ~4 × $1.20 | **~$4.80** |
+| Claude Max subscription (brain) | All daily briefs + WSRs | **$0 marginal** (already paying for Max) |
 | Google Sheets/Drive | Within free tier | **$0** |
-| **Total** | | **~$11/month** |
+| **Total marginal** | | **$0** |
+
+The brain runs on your existing Max subscription via the official
+`anthropics/claude-code-action@v1`. No per-token API billing.
 
 ---
 

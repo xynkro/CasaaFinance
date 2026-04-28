@@ -1,9 +1,8 @@
-name: Daily Brief — Opus 4.7 + Sonnet 4.6
+name: Daily Brief — Claude Code (Max)
 
 on:
   schedule:
-    # 23:03 UTC Sun-Thu = 07:03 SGT Mon-Fri (07:00 SGT before US market analysis)
-    # Off-minute (:03) avoids fleet-wide :00 contention.
+    # 23:03 UTC Sun-Thu = 07:03 SGT Mon-Fri
     - cron: "3 23 * * 0-4"
   workflow_dispatch:
     inputs:
@@ -11,13 +10,12 @@ on:
         description: "Dry run (no Sheets/Drive write)"
         type: boolean
         default: false
-      skip_web:
-        description: "Skip web_search (cheap test)"
-        type: boolean
-        default: false
 
 permissions:
   contents: read
+  pull-requests: read
+  issues: read
+  id-token: write
 
 concurrency:
   group: daily-brief
@@ -26,14 +24,7 @@ concurrency:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OAUTH_TOKEN_JSON:  ${{ secrets.OAUTH_TOKEN_JSON }}
-      SHEET_ID:          ${{ secrets.SHEET_ID }}
-      DRIVE_FOLDER_ID:   ${{ secrets.DRIVE_FOLDER_ID }}
-      MODEL_OPUS:        ${{ vars.MODEL_OPUS   || 'claude-opus-4-7' }}
-      MODEL_SONNET:      ${{ vars.MODEL_SONNET || 'claude-sonnet-4-6' }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -42,12 +33,27 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Generate daily brief
-        run: |
-          ARGS=""
-          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
-          if [ "${{ inputs.skip_web }}" = "true" ]; then ARGS="$ARGS --skip-web"; fi
-          python scripts/generate_daily_brief.py $ARGS
+      - name: Run daily brief brain
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Read prompts/cron_daily_brief.md and execute the workflow it describes.
+
+            IMPORTANT context for this CI run:
+            - You are running in GitHub Actions on ubuntu-latest, not on the user's Mac.
+            - Sheets/Drive credentials are in env vars (OAUTH_TOKEN_JSON, SHEET_ID, DRIVE_FOLDER_ID).
+              The src/sheets.py and src/drive.py code automatically uses them when present —
+              you don't need to set up auth, just call the scripts.
+            - Python venv is set up; run scripts directly with `python scripts/...`
+            - DRY_RUN=${{ inputs.dry }} — if "true", pass --dry to push_brief.py invocations.
+
+            Use the Bash, Read, Write tools. Use web_search for overnight news.
+            For the Sonnet-formatting step, use the Agent tool with model=sonnet.
+        env:
+          OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+          SHEET_ID:         ${{ secrets.SHEET_ID }}
+          DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
