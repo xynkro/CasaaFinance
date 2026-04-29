@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { OptionRecommendationRow, TechnicalScoreRow } from "../data";
-import { X, TrendingUp, TrendingDown, Activity, Target, Calendar, Zap } from "lucide-react";
+import { X, ChevronLeft, TrendingUp, TrendingDown, Activity, Target, Calendar, Zap } from "lucide-react";
 
 const STRATEGY_LABEL: Record<string, string> = {
   CSP: "Cash-Secured Put",
@@ -84,15 +84,29 @@ export function RecommendationDetailModal({
     };
   }, []);
 
-  // Ignore backdrop clicks for first 200ms after mount, in case the click
-  // that opened the modal still has propagation in flight.
-  const [armed, setArmed] = useState(false);
-  useEffect(() => {
-    const t = setTimeout(() => setArmed(true), 200);
-    return () => clearTimeout(t);
-  }, []);
-  const handleBackdropClick = () => {
-    if (armed) onClose();
+  // Right-swipe to close (matches WSR Lite modal pattern)
+  const touchRef = useRef<{ startX: number; startY: number; moving: boolean }>({
+    startX: 0, startY: 0, moving: false,
+  });
+  const [dragX, setDragX] = useState(0);
+  const SWIPE_THRESHOLD = 80;
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchRef.current = { startX: e.touches[0].clientX, startY: e.touches[0].clientY, moving: false };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const dx = e.touches[0].clientX - touchRef.current.startX;
+    const dy = e.touches[0].clientY - touchRef.current.startY;
+    if (!touchRef.current.moving) {
+      if (Math.abs(dy) > Math.abs(dx)) return;
+      if (Math.abs(dx) < 10 || dx <= 0) return;
+      touchRef.current.moving = true;
+    }
+    if (touchRef.current.moving && dx > 0) setDragX(dx);
+  };
+  const onTouchEnd = () => {
+    if (touchRef.current.moving && dragX > SWIPE_THRESHOLD) onClose();
+    else setDragX(0);
+    touchRef.current.moving = false;
   };
 
   const strategy = STRATEGY_LABEL[rec.strategy] ?? rec.strategy;
@@ -138,37 +152,56 @@ export function RecommendationDetailModal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center"
-         onClick={handleBackdropClick}>
-      <div
-        className="w-full sm:max-w-2xl max-h-[90vh] glass rounded-t-3xl sm:rounded-3xl overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="sticky top-0 z-10 px-5 pt-5 pb-3 backdrop-blur-xl"
-             style={{ background: "rgba(5,7,13,0.92)" }}>
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <TrendingUp size={14} className="text-emerald-400" />
-                <h2 className="text-xl font-bold text-white">{rec.ticker}</h2>
-                <span className="text-sm text-slate-500 font-mono tabular-nums">
-                  ${strike.toFixed(strike < 10 ? 2 : 0)}{rec.right} · {expiryDisplay}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="text-indigo-400 font-medium">{strategy}</span>
-                <span className="text-slate-700">·</span>
-                <span className={`font-semibold uppercase tracking-wider ${accountColor}`}>{accountLabel}</span>
-              </div>
-            </div>
-            <button onClick={onClose} className="p-2 rounded-full hover:bg-white/5 active:scale-90 transition-all">
-              <X size={20} className="text-slate-400" />
-            </button>
+    <div
+      className="fixed inset-0 z-50 flex flex-col bg-[#050916]"
+      style={{
+        transform: `translateX(${dragX}px)`,
+        transitionDuration: touchRef.current.moving ? "0ms" : "250ms",
+        opacity: 1 - Math.min(dragX / 400, 0.3),
+      }}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* Header — back button (left) + close (right). NO backdrop click-to-close */}
+      <div className="flex items-center justify-between px-3 py-3 pt-safe-top border-b border-white/6">
+        <button
+          onClick={onClose}
+          className="flex items-center gap-1 pr-2 py-2 text-indigo-400 active:text-indigo-300"
+          aria-label="Back"
+          style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
+        >
+          <ChevronLeft size={20} />
+          <span className="text-sm">Back</span>
+        </button>
+        <div className="flex items-center gap-2">
+          <TrendingUp size={14} className="text-emerald-400" />
+          <div className="text-right">
+            <h2 className="text-base font-bold text-white leading-tight">{rec.ticker}</h2>
+            <span className="text-[10px] text-slate-400 font-mono tabular-nums">
+              ${strike.toFixed(strike < 10 ? 2 : 0)}{rec.right} · {expiryDisplay}
+            </span>
           </div>
         </div>
+        <button
+          onClick={onClose}
+          className="p-2 rounded-lg text-slate-400 active:text-white"
+          aria-label="Close"
+          style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
+        >
+          <X size={18} />
+        </button>
+      </div>
 
-        <div className="px-5 pb-8 space-y-5">
+      {/* Strategy + account band */}
+      <div className="px-4 py-3 border-b border-white/6 flex items-center gap-3">
+        <span className="text-xs text-indigo-400 font-medium">{strategy}</span>
+        <span className="text-slate-700">·</span>
+        <span className={`text-[11px] font-semibold uppercase tracking-wider ${accountColor}`}>{accountLabel}</span>
+      </div>
+
+      {/* Scrollable body */}
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-5 py-5 space-y-5">
           {/* Quick stats row */}
           <div className="grid grid-cols-3 gap-2 mt-2">
             <div className="rounded-lg p-3 border border-emerald-500/20 bg-emerald-500/5">
@@ -367,7 +400,6 @@ export function RecommendationDetailModal({
               </div>
             </section>
           )}
-        </div>
       </div>
     </div>,
     document.body,
