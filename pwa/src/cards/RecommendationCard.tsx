@@ -2,6 +2,11 @@ import type { OptionRecommendationRow } from "../data";
 import { Card } from "./Card";
 import { Lightbulb, ChevronRight, TrendingUp } from "lucide-react";
 
+/** Stable identity for a recommendation — used as React key + selected-state token. */
+export function recKey(r: OptionRecommendationRow): string {
+  return `${r.date}|${r.source}|${r.strategy}|${r.ticker}|${r.strike}|${r.right}|${r.account}`;
+}
+
 function fmt(v: string | number, prefix = "$"): string {
   const n = Number(v);
   if (isNaN(n)) return "—";
@@ -42,7 +47,15 @@ function ThesisConfidenceBar({ value }: { value: number }) {
   );
 }
 
-function RecItem({ rec, onTap }: { rec: OptionRecommendationRow; onTap: () => void }) {
+function RecItem({
+  rec,
+  recKey,
+  onTapKey,
+}: {
+  rec: OptionRecommendationRow;
+  recKey: string;
+  onTapKey?: (key: string) => void;
+}) {
   const strategy = STRATEGY_LABEL[rec.strategy] ?? rec.strategy;
   const status = rec.status?.toLowerCase() || "proposed";
   const statusStyle = STATUS_STYLE[status] ?? STATUS_STYLE.proposed;
@@ -60,15 +73,16 @@ function RecItem({ rec, onTap }: { rec: OptionRecommendationRow; onTap: () => vo
   return (
     <button
       type="button"
+      data-rec-key={recKey}
       onClick={(e) => {
-        // Prevent the click from bubbling up to document.body — the portaled
-        // modal's backdrop is mounted there, and its onClick={onClose} would
-        // fire on the same event that opens the modal, closing it instantly.
+        // Read the rec key from the DOM at click time — guarantees we always
+        // dispatch for THIS specific button, not a stale closure capture.
         e.stopPropagation();
-        onTap();
+        const k = (e.currentTarget as HTMLButtonElement).dataset.recKey;
+        if (k && onTapKey) onTapKey(k);
       }}
       style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
-      className="w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:bg-white/[0.04] transition-colors border border-white/5 cursor-pointer relative z-[1]"
+      className="block w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:scale-[0.98] active:brightness-110 transition-all duration-150 border border-white/8 cursor-pointer relative z-[1]"
     >
       {/* Header: action + ticker + strike + status */}
       <div className="flex items-center justify-between gap-3">
@@ -122,10 +136,11 @@ function RecItem({ rec, onTap }: { rec: OptionRecommendationRow; onTap: () => vo
 
 export function RecommendationCard({
   recommendations,
-  onSelectRec,
+  onSelectKey,
 }: {
   recommendations: OptionRecommendationRow[];
-  onSelectRec?: (rec: OptionRecommendationRow) => void;
+  /** Called with a stable key when a rec is tapped. Parent looks up the rec. */
+  onSelectKey?: (key: string) => void;
 }) {
   if (!recommendations.length) {
     return (
@@ -188,14 +203,15 @@ export function RecommendationCard({
         Manual entries from weekly ad-hoc scans. Prices + deltas are stale — verify against Daily Scan above before execution.
       </p>
 
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {sorted.map((r) => {
-          const key = `${r.date}-${r.source}-${r.strategy}-${r.ticker}-${r.strike}-${r.right}`;
+          const key = recKey(r);
           return (
             <RecItem
               key={key}
               rec={r}
-              onTap={() => onSelectRec?.(r)}
+              recKey={key}
+              onTapKey={onSelectKey}
             />
           );
         })}

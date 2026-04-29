@@ -13,7 +13,7 @@ import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
 import { ScanCard } from "../cards/ScanCard";
-import { RecommendationCard } from "../cards/RecommendationCard";
+import { RecommendationCard, recKey } from "../cards/RecommendationCard";
 import { StickyTabs } from "../components/StickyTabs";
 import { Shield, Briefcase, Telescope, Lightbulb } from "lucide-react";
 import { RecommendationDetailModal } from "../components/RecommendationDetailModal";
@@ -52,10 +52,15 @@ export function OptionsPage({
     return "book";
   });
 
-  // Strategy Notes detail modal — state lives at the PAGE level, not inside
-  // the Card. This guarantees the modal renders as a sibling of all cards
-  // (matches the working WSR Lite modal pattern).
-  const [selectedRec, setSelectedRec] = useState<OptionRecommendationRow | null>(null);
+  // Strategy Notes detail modal — store the SELECTED KEY (a stable string),
+  // then look up the rec from recommendations on each render. This eliminates
+  // any stale-closure issues that could happen if the array reference changes
+  // mid-tap (e.g., during the 15-min auto-refresh).
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedRec = useMemo(
+    () => (selectedKey ? recommendations.find((r) => recKey(r) === selectedKey) ?? null : null),
+    [selectedKey, recommendations],
+  );
 
   // ticker → latest TechnicalScoreRow lookup (for the modal)
   const techByTicker = useMemo(() => {
@@ -131,19 +136,18 @@ export function OptionsPage({
         <div className="fade-up fade-up-1 mt-3">
           <RecommendationCard
             recommendations={recommendations}
-            onSelectRec={setSelectedRec}
+            onSelectKey={setSelectedKey}
           />
         </div>
       )}
 
-      {/* Modal rendered at PAGE level (sibling of all cards) — never inside
-          a glass card whose overflow:hidden + ::before could interact badly
-          with React's portal + iOS touch event chain. */}
+      {/* Modal rendered at PAGE level (sibling of all cards). Looks up
+          selectedRec by stable key, not by object reference. */}
       {selectedRec && (
         <RecommendationDetailModal
           rec={selectedRec}
           techScore={techByTicker.get(selectedRec.ticker) ?? null}
-          onClose={() => setSelectedRec(null)}
+          onClose={() => setSelectedKey(null)}
         />
       )}
     </div>
