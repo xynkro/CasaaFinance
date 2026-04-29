@@ -99,7 +99,7 @@ Agent({
 })
 ```
 
-**5b — combine and push:**
+**5b — push the WSR Lite markdown to wsr_summary + Drive:**
 
 ```python
 payload = {
@@ -123,6 +123,53 @@ Save to `/tmp/wsr_lite_payload.json`, then:
 python3 scripts/push_brief.py --json-file /tmp/wsr_lite_payload.json
 rm /tmp/wsr_lite_payload.json
 ```
+
+**5c — refresh decision_queue with current state:**
+
+The Mid-Week Pulse should refresh the Decision Queue status (some entries
+may have moved from `watching` to `pending` if price hit the zone, or
+from `pending` to `filled` if the user executed, or `killed` if thesis
+broke). Re-write the top 5 entries — same structure as WSR Full prompt's
+section 6c.
+
+```json
+{
+  "date": "<today_iso>",
+  "decisions": [
+    {
+      "ticker":         "MDT",
+      "account":        "sarah",
+      "bucket":         "quality",
+      "thesis_1liner":  "Now $86, 2.4% above entry — 'CLOSE' but not yet ACTIONABLE. Watch for pullback to $84.",
+      "conv":           4,
+      "entry":          84.00,
+      "target":         96.00,
+      "status":         "watching"
+    }
+  ]
+}
+```
+
+Save to `/tmp/wsr_lite_decisions.json` and run:
+```bash
+python3 scripts/push_decisions.py --json-file /tmp/wsr_lite_decisions.json
+rm /tmp/wsr_lite_decisions.json
+```
+
+**5d — refresh option_recommendations with current actionability:**
+
+For options book entries (CSP/CC currently held) update their thesis
+based on this week's price action. Same structure as WSR Full prompt's
+section 6d, but use `"source": "wsr_lite"`.
+
+```bash
+python3 scripts/push_recommendations.py --json-file /tmp/wsr_lite_recs.json
+rm /tmp/wsr_lite_recs.json
+```
+
+The thesis should reflect mid-week reality — e.g. "AAPL $225P now 19%
+OTM (was 17% Monday), safe to expiry — collect full $137 premium" — not
+generic rule-filter math.
 
 ## Cost discipline
 
