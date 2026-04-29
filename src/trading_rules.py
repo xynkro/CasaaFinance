@@ -85,6 +85,66 @@ LEVERAGED_ETF_RULES = {
 }
 
 
+# ── OPTIONS WRITING ELIGIBILITY (per bucket) ─────────────────────────────────
+# Critical rule: don't wheel core dividend compounders or blue-chip holds.
+# Why: writing a CC means you accept the position can be called away. For
+# SCHD (the income engine you're building toward 100 shares), being called
+# away INTERRUPTS the compounding plan and triggers re-entry friction.
+# Same for AAPL / MSFT / GOOGL etc. — long-term holds where assignment is
+# net-negative even with premium income.
+#
+# Wheeling is appropriate on tickers you're ambivalent about owning long-term:
+# spec_growth, lottery names where you'd happily exit at the strike.
+CC_ELIGIBLE_BUCKETS = {
+    "core":           False,  # SCHD, broad ETFs — never wheel away the compounder
+    "blue_chip":      False,  # AAPL, MSFT, GOOGL — only DEEP OTM if at all
+    "quality_growth": True,   # AMD, NVDA, META — OK if strike >> cost basis
+    "spec_growth":    True,   # OPEN, RDDT, SOFI — natural CC candidates
+    "lottery":        True,   # BBAI, BTBT — ride premium, exit happy
+    "leveraged_etf":  False,  # TQQQ, SSO — decay + assignment compounds losses
+    "commodity_etf":  True,   # SLV, GLD — wheelable on strength
+}
+# For blue_chip exception: if you really want to write CCs, only on strikes
+# >= 1.15× cost basis (15% above) where assignment lets you book a chunky
+# capital gain you'd accept. Below that, just hold the stock.
+CC_BLUE_CHIP_MIN_STRIKE_PCT_OF_COST = 1.15
+
+# CSP eligibility: opposite intuition — get paid to maybe BUY at a price
+# you'd happily buy at. Quality/blue-chip are the BEST CSP targets because
+# assignment = "I got paid to acquire SCHD/AAPL at the price I wanted".
+CSP_ELIGIBLE_BUCKETS = {
+    "core":           True,   # CSP on SCHD = paid to accumulate to 100 shares
+    "blue_chip":      True,   # CSP on AAPL = paid to maybe own at fair value
+    "quality_growth": True,
+    "spec_growth":    True,
+    "lottery":        False,  # Don't write puts on lottery — assignment risk too high
+    "leveraged_etf":  False,  # Decay risk on owning leveraged ETFs
+    "commodity_etf":  True,
+}
+
+
+def cc_allowed(bucket: str, strike: float = 0, cost_basis: float = 0) -> tuple[bool, str]:
+    """Return (allowed, reason). For blue_chip, also enforces strike >= 115% of cost."""
+    if bucket not in CC_ELIGIBLE_BUCKETS:
+        return False, f"Unknown bucket: {bucket}"
+    if not CC_ELIGIBLE_BUCKETS[bucket]:
+        return False, f"CC not eligible on {bucket} — assignment would interrupt thesis"
+    if bucket == "blue_chip" and cost_basis > 0:
+        min_strike = cost_basis * CC_BLUE_CHIP_MIN_STRIKE_PCT_OF_COST
+        if strike < min_strike:
+            return False, (f"Blue-chip CC requires strike ≥ ${min_strike:.2f} "
+                           f"(115% of ${cost_basis:.2f} cost). Got ${strike:.2f}.")
+    return True, "OK"
+
+
+def csp_allowed(bucket: str) -> tuple[bool, str]:
+    if bucket not in CSP_ELIGIBLE_BUCKETS:
+        return False, f"Unknown bucket: {bucket}"
+    if not CSP_ELIGIBLE_BUCKETS[bucket]:
+        return False, f"CSP not eligible on {bucket}"
+    return True, "OK"
+
+
 # ── OPTIONS WRITING RULES ────────────────────────────────────────────────────
 
 # Cash-Secured Puts — paid to maybe own quality
@@ -330,6 +390,9 @@ def all_rules_summary() -> dict:
         "time_stop_days":              TIME_STOP_DAYS,
         "trim_ladders":                TRIM_LADDERS,
         "leveraged_etf_rules":         LEVERAGED_ETF_RULES,
+        "cc_eligible_buckets":         CC_ELIGIBLE_BUCKETS,
+        "csp_eligible_buckets":        CSP_ELIGIBLE_BUCKETS,
+        "cc_blue_chip_min_strike_pct_of_cost": CC_BLUE_CHIP_MIN_STRIKE_PCT_OF_COST,
         "csp_rules":                   CSP_RULES,
         "cc_rules":                    CC_RULES,
         "roll_rules":                  ROLL_RULES,

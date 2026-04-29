@@ -171,6 +171,16 @@ The thesis should reflect mid-week reality — e.g. "AAPL $225P now 19%
 OTM (was 17% Monday), safe to expiry — collect full $137 premium" — not
 generic rule-filter math.
 
+**🚨 CC ELIGIBILITY RULE (non-negotiable):**
+
+NEVER recommend `"strategy": "CC"` on `core` (SCHD, broad ETFs),
+`leveraged_etf` (TQQQ, SSO), or `blue_chip` unless strike ≥ 115% cost.
+Wheeling SCHD specifically is a thesis violation — interrupting the
+100-share milestone for a small premium kills the long-term compounder
+plan. See `cc_eligible_buckets` in the trading rules dict.
+
+CSP on those names IS appropriate — paid to maybe acquire the compounder.
+
 ## Cost discipline
 
 - ~600-800 tokens of synthesis JSON max.

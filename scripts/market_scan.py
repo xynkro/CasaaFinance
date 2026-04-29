@@ -419,7 +419,7 @@ def run_scan(
             iv_rank=r["iv_rank"],
             thesis_confidence=0.65,
             thesis=thesis,
-            status="NEW",
+            status="proposed",
         )
         rows_to_write.append(row.to_row())
         seen_keys.add(key)

@@ -145,18 +145,32 @@ export function RecommendationCard({
     );
   }
 
-  // Sort: proposed first, then by thesis_confidence desc, then by yield desc
-  const statusOrder: Record<string, number> = { proposed: 0, executed: 1, expired: 2, skipped: 3 };
+  // Sort: brain-derived (wsr_full / wsr_lite source) first since they have real
+  // synthesis. Then "proposed" / "NEW" status (live ideas). Then by date desc
+  // (latest first). Then by confidence + yield.
+  const sortPriority: Record<string, number> = {
+    proposed: 0, new: 0, executed: 1, expired: 2, skipped: 3,
+  };
+  const isBrain = (r: OptionRecommendationRow) =>
+    r.source === "wsr_full" || r.source === "wsr_lite";
   const sorted = [...recommendations].sort((a, b) => {
-    const sa = statusOrder[a.status?.toLowerCase()] ?? 4;
-    const sb = statusOrder[b.status?.toLowerCase()] ?? 4;
+    // Brain output first
+    if (isBrain(a) !== isBrain(b)) return isBrain(a) ? -1 : 1;
+    const sa = sortPriority[(a.status ?? "").toLowerCase()] ?? 4;
+    const sb = sortPriority[(b.status ?? "").toLowerCase()] ?? 4;
     if (sa !== sb) return sa - sb;
+    // Latest-dated entries first
+    const da = (a.date ?? "").slice(0, 10);
+    const db = (b.date ?? "").slice(0, 10);
+    if (da !== db) return da > db ? -1 : 1;
     const confDiff = Number(b.thesis_confidence) - Number(a.thesis_confidence);
     if (confDiff !== 0) return confDiff;
     return Number(b.annual_yield_pct) - Number(a.annual_yield_pct);
   });
 
-  const proposedCount = recommendations.filter((r) => r.status?.toLowerCase() === "proposed").length;
+  const liveCount = recommendations.filter(
+    (r) => ["proposed", "new"].includes((r.status ?? "").toLowerCase()),
+  ).length;
 
   return (
     <Card>
@@ -166,9 +180,9 @@ export function RecommendationCard({
           <h2 className="text-sm font-medium text-slate-400">Strategy Notes (weekly)</h2>
         </div>
         <div className="flex items-center gap-2">
-          {proposedCount > 0 && (
+          {liveCount > 0 && (
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-500/15 text-slate-400 border border-slate-500/20">
-              {proposedCount} noted
+              {liveCount} live
             </span>
           )}
           <span className="text-[10px] text-slate-600">context only</span>
@@ -179,13 +193,18 @@ export function RecommendationCard({
       </p>
 
       <div className="space-y-2">
-        {sorted.map((r, i) => (
-          <RecItem
-            key={`${r.ticker}-${r.strike}-${r.right}-${i}`}
-            rec={r}
-            onTap={() => setSelected(r)}
-          />
-        ))}
+        {sorted.map((r) => {
+          // Stable key on the FULL row identity — date + source + strategy + ticker + strike + right
+          // (no array index — that was causing tap-row-N → opens-row-(N-1) bug)
+          const key = `${r.date}-${r.source}-${r.strategy}-${r.ticker}-${r.strike}-${r.right}`;
+          return (
+            <RecItem
+              key={key}
+              rec={r}
+              onTap={() => setSelected(r)}
+            />
+          );
+        })}
       </div>
 
       {selected && (

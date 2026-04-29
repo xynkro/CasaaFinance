@@ -203,6 +203,29 @@ rm /tmp/wsr_recs.json
 `LONG_CALL`, `LONG_PUT`. Use empty string for `right` when it's a share
 entry (no option contract).
 
+**🚨 CC ELIGIBILITY RULE (non-negotiable):**
+
+Before writing ANY `"strategy": "CC"` row, check `cc_eligible_buckets` in
+the trading rules. The brain MUST NOT recommend covered calls on:
+- `core` bucket (SCHD, broad ETFs) — wheeling away interrupts the
+  compounding/dividend plan. SCHD especially is the income engine being
+  built toward 100 shares — being called away before that milestone is a
+  thesis violation.
+- `blue_chip` bucket (AAPL, MSFT, GOOGL, MA, V, JPM) — only if strike ≥
+  115% of cost basis. Below that, just hold the stock.
+- `leveraged_etf` (TQQQ, SSO) — assignment + decay = compounded losses.
+
+CC IS appropriate on `quality_growth` (AMD, NVDA, META — when you'd accept
+exit at strike), `spec_growth` (OPEN, RDDT, SOFI), `lottery` (BBAI, BTBT),
+and `commodity_etf` (SLV, GLD on strength).
+
+CSP is the OPPOSITE — `core` and `blue_chip` are the BEST CSP targets
+because assignment = paid to acquire the compounder/quality at your price.
+
+If you find yourself drafting a CC on SCHD / SPY / VOO / QQQ / VTI /
+AAPL / MSFT etc., STOP and revise. Suggest CSP instead, OR no options
+trade and accumulation only.
+
 **Thesis content rule:** the thesis field is what the user sees when
 they tap a Strategy Notes card. It MUST be brain synthesis, not
 rule-filter math. Include: WHY the trade, WHY now (catalysts/levels),
