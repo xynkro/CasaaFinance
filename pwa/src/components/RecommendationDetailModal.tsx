@@ -153,14 +153,23 @@ export function RecommendationDetailModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-[#050916] modal-fade-in"
+      className="flex flex-col"
       style={{
-        // Drag transform only — entry animation handled via CSS keyframe
-        // (more reliable than RAF + state on iOS PWA).
-        transform: dragX > 0 ? `translateX(${dragX}px)` : undefined,
+        // NO animation, NO transform, NO classes that might be stripped by
+        // PurgeCSS / build optimizations. Hard-coded inline styles only.
+        // If the modal mounts, it WILL be visible. Period.
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 9999,
+        backgroundColor: "#050916",
+        // Drag transform only when actively dragging
+        transform: dragX > 0 ? `translateX(${dragX}px)` : "none",
         transition: touchRef.current.moving
           ? "none"
-          : "transform 250ms cubic-bezier(0.32, 0.72, 0, 1)",
+          : "transform 220ms cubic-bezier(0.32, 0.72, 0, 1)",
         opacity: 1 - Math.min(dragX / 400, 0.3),
       }}
       onTouchStart={onTouchStart}

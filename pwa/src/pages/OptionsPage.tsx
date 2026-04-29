@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type {
   OptionRow,
   OptionRecommendationRow,
@@ -67,18 +67,31 @@ export function OptionsPage({
     if (found) {
       foundSummary = `${found.ticker}/${found.strategy}/${found.account}`;
     }
-    // Also count how many recs in the array have this exact key (dupes)
     const matchCount = recommendations.filter((r) => recKey(r) === k).length;
     setDebugTrail((prev) => [
-      `tap: ${tappedSummary}\n  → find: ${foundSummary} (matches=${matchCount}, total=${recommendations.length})`,
+      `tap: ${tappedSummary}\n  → find: ${foundSummary} (matches=${matchCount}, total=${recommendations.length})\n  → selectedKey: ${k.length} chars; modal should mount NOW`,
       ...prev.slice(0, 3),
     ]);
     setSelectedKey(k);
   };
+
   const selectedRec = useMemo(
     () => (selectedKey ? recommendations.find((r) => recKey(r) === selectedKey) ?? null : null),
     [selectedKey, recommendations],
   );
+
+  // Track modal lifecycle in the debug trail so we can see if it mounts AND
+  // immediately unmounts (vs not mounting at all)
+  useEffect(() => {
+    if (selectedRec) {
+      const ticker = selectedRec.ticker;
+      setDebugTrail((prev) => [`  ✓ MODAL MOUNTED: ${ticker} @ ${new Date().toLocaleTimeString()}`, ...prev.slice(0, 4)]);
+      return () => {
+        setDebugTrail((prev) => [`  ✗ MODAL UNMOUNTED (${ticker}) @ ${new Date().toLocaleTimeString()}`, ...prev.slice(0, 4)]);
+      };
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRec?.ticker]);
 
   // ticker → latest TechnicalScoreRow lookup (for the modal)
   const techByTicker = useMemo(() => {
