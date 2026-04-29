@@ -369,6 +369,14 @@ body {
 .pt-safe-top    { padding-top:    max(env(safe-area-inset-top),    12px) !important; }
 .pb-safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 12px) !important; }
 
+/* Modal slide-in entry — pure CSS keyframe so it can't get stuck
+   in a stale state from React useState/useEffect timing. */
+@keyframes modalSlideIn {
+  from { transform: translateX(100%); opacity: 0.4; }
+  to   { transform: translateX(0);    opacity: 1;   }
+}
+.modal-fade-in { animation: modalSlideIn 250ms cubic-bezier(0.32, 0.72, 0, 1) both; }
+
 /* ─── PIN input ──────────────────────────────────────────────────────────── */
 .pin-digit {
   width: 48px;
