@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type {
   OptionRow,
   OptionRecommendationRow,
@@ -16,6 +16,7 @@ import { ScanCard } from "../cards/ScanCard";
 import { RecommendationCard } from "../cards/RecommendationCard";
 import { StickyTabs } from "../components/StickyTabs";
 import { Shield, Briefcase, Telescope, Lightbulb } from "lucide-react";
+import { RecommendationDetailModal } from "../components/RecommendationDetailModal";
 
 type Subtab = "defense" | "book" | "scan" | "ideas";
 const LAST_KEY = "casaa_options_subtab";
@@ -50,6 +51,21 @@ export function OptionsPage({
     } catch {}
     return "book";
   });
+
+  // Strategy Notes detail modal — state lives at the PAGE level, not inside
+  // the Card. This guarantees the modal renders as a sibling of all cards
+  // (matches the working WSR Lite modal pattern).
+  const [selectedRec, setSelectedRec] = useState<OptionRecommendationRow | null>(null);
+
+  // ticker → latest TechnicalScoreRow lookup (for the modal)
+  const techByTicker = useMemo(() => {
+    const m = new Map<string, TechnicalScoreRow>();
+    for (const t of technicalScores) {
+      const existing = m.get(t.ticker);
+      if (!existing || t.date > existing.date) m.set(t.ticker, t);
+    }
+    return m;
+  }, [technicalScores]);
 
   const handleChange = (key: string) => {
     const next = key as Subtab;
@@ -113,8 +129,22 @@ export function OptionsPage({
 
       {sub === "ideas" && (
         <div className="fade-up fade-up-1 mt-3">
-          <RecommendationCard recommendations={recommendations} technicalScores={technicalScores} />
+          <RecommendationCard
+            recommendations={recommendations}
+            onSelectRec={setSelectedRec}
+          />
         </div>
+      )}
+
+      {/* Modal rendered at PAGE level (sibling of all cards) — never inside
+          a glass card whose overflow:hidden + ::before could interact badly
+          with React's portal + iOS touch event chain. */}
+      {selectedRec && (
+        <RecommendationDetailModal
+          rec={selectedRec}
+          techScore={techByTicker.get(selectedRec.ticker) ?? null}
+          onClose={() => setSelectedRec(null)}
+        />
       )}
     </div>
   );

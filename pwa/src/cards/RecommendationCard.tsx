@@ -1,8 +1,6 @@
-import type { OptionRecommendationRow, TechnicalScoreRow } from "../data";
+import type { OptionRecommendationRow } from "../data";
 import { Card } from "./Card";
 import { Lightbulb, ChevronRight, TrendingUp } from "lucide-react";
-import { useState } from "react";
-import { RecommendationDetailModal } from "../components/RecommendationDetailModal";
 
 function fmt(v: string | number, prefix = "$"): string {
   const n = Number(v);
@@ -124,20 +122,11 @@ function RecItem({ rec, onTap }: { rec: OptionRecommendationRow; onTap: () => vo
 
 export function RecommendationCard({
   recommendations,
-  technicalScores = [],
+  onSelectRec,
 }: {
   recommendations: OptionRecommendationRow[];
-  technicalScores?: TechnicalScoreRow[];
+  onSelectRec?: (rec: OptionRecommendationRow) => void;
 }) {
-  const [selected, setSelected] = useState<OptionRecommendationRow | null>(null);
-
-  // Build ticker → latest TechnicalScoreRow lookup
-  const techByTicker = new Map<string, TechnicalScoreRow>();
-  for (const t of technicalScores) {
-    const existing = techByTicker.get(t.ticker);
-    if (!existing || t.date > existing.date) techByTicker.set(t.ticker, t);
-  }
-
   if (!recommendations.length) {
     return (
       <Card>
@@ -201,26 +190,16 @@ export function RecommendationCard({
 
       <div className="space-y-2">
         {sorted.map((r) => {
-          // Stable key on the FULL row identity — date + source + strategy + ticker + strike + right
-          // (no array index — that was causing tap-row-N → opens-row-(N-1) bug)
           const key = `${r.date}-${r.source}-${r.strategy}-${r.ticker}-${r.strike}-${r.right}`;
           return (
             <RecItem
               key={key}
               rec={r}
-              onTap={() => setSelected(r)}
+              onTap={() => onSelectRec?.(r)}
             />
           );
         })}
       </div>
-
-      {selected && (
-        <RecommendationDetailModal
-          rec={selected}
-          techScore={techByTicker.get(selected.ticker) ?? null}
-          onClose={() => setSelected(null)}
-        />
-      )}
     </Card>
   );
 }
