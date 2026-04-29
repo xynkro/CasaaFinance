@@ -7,8 +7,13 @@
   /* Layout */
   --tabbar-h: 72px;
   --header-h: 62px;
-  --safe-top: 8px;
-  --safe-bottom: 8px;
+  /* Use iOS safe-area insets (Dynamic Island, notch, home indicator) with
+     small fallback for non-PWA contexts. viewport-fit=cover is set in
+     index.html so env() exposes real values. */
+  --safe-top: max(env(safe-area-inset-top), 8px);
+  --safe-bottom: max(env(safe-area-inset-bottom), 8px);
+  --safe-left: env(safe-area-inset-left);
+  --safe-right: env(safe-area-inset-right);
 
   /* Typography */
   --base-font: 16px;

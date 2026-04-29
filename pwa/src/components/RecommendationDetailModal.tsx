@@ -84,6 +84,14 @@ export function RecommendationDetailModal({
     };
   }, []);
 
+  // Slide-in-from-right entry animation. Start off-screen, then transition
+  // on mount via requestAnimationFrame for a smooth GPU-accelerated slide.
+  const [entering, setEntering] = useState(true);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setEntering(false));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   // Right-swipe to close (matches WSR Lite modal pattern)
   const touchRef = useRef<{ startX: number; startY: number; moving: boolean }>({
     startX: 0, startY: 0, moving: false,
@@ -155,9 +163,16 @@ export function RecommendationDetailModal({
     <div
       className="fixed inset-0 z-50 flex flex-col bg-[#050916]"
       style={{
-        transform: `translateX(${dragX}px)`,
-        transitionDuration: touchRef.current.moving ? "0ms" : "250ms",
+        // On mount: start at +100vw (off-screen-right), then transition to 0.
+        // After mount: drag transform takes over.
+        transform: entering
+          ? "translateX(100%)"
+          : `translateX(${dragX}px)`,
+        transition: touchRef.current.moving
+          ? "none"
+          : "transform 280ms cubic-bezier(0.32, 0.72, 0, 1)",
         opacity: 1 - Math.min(dragX / 400, 0.3),
+        willChange: "transform",
       }}
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
