@@ -50,11 +50,9 @@ function ThesisConfidenceBar({ value }: { value: number }) {
 function RecItem({
   rec,
   recKey,
-  onTapKey,
 }: {
   rec: OptionRecommendationRow;
   recKey: string;
-  onTapKey?: (key: string) => void;
 }) {
   const strategy = STRATEGY_LABEL[rec.strategy] ?? rec.strategy;
   const status = rec.status?.toLowerCase() || "proposed";
@@ -71,18 +69,12 @@ function RecItem({
   }
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       data-rec-key={recKey}
-      onClick={(e) => {
-        // Read the rec key from the DOM at click time — guarantees we always
-        // dispatch for THIS specific button, not a stale closure capture.
-        e.stopPropagation();
-        const k = (e.currentTarget as HTMLButtonElement).dataset.recKey;
-        if (k && onTapKey) onTapKey(k);
-      }}
       style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
-      className="block w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:scale-[0.98] active:brightness-110 transition-all duration-150 border border-white/8 cursor-pointer relative z-[1]"
+      className="block w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:scale-[0.98] active:brightness-110 transition-all duration-150 border border-white/8 cursor-pointer relative isolate"
     >
       {/* Header: action + ticker + strike + status */}
       <div className="flex items-center justify-between gap-3">
@@ -130,7 +122,7 @@ function RecItem({
         </div>
       </div>
 
-    </button>
+    </div>
   );
 }
 
@@ -203,7 +195,19 @@ export function RecommendationCard({
         Manual entries from weekly ad-hoc scans. Prices + deltas are stale — verify against Daily Scan above before execution.
       </p>
 
-      <div className="space-y-2.5">
+      {/* Event delegation: a SINGLE click handler at the container level
+          listens for any tap inside, finds the nearest [data-rec-key]
+          ancestor, dispatches by that key. Removes any per-button closure
+          binding from the equation entirely. */}
+      <div
+        className="space-y-2.5"
+        onClick={(e) => {
+          const target = (e.target as HTMLElement).closest("[data-rec-key]");
+          if (!target) return;
+          const k = (target as HTMLElement).dataset.recKey;
+          if (k && onSelectKey) onSelectKey(k);
+        }}
+      >
         {sorted.map((r) => {
           const key = recKey(r);
           return (
@@ -211,7 +215,6 @@ export function RecommendationCard({
               key={key}
               rec={r}
               recKey={key}
-              onTapKey={onSelectKey}
             />
           );
         })}

@@ -136,6 +136,7 @@ function Dashboard() {
               {TAB_TITLES[tab]}
             </h1>
             <span className="text-[11px] text-slate-500 font-medium">Casaa Finance</span>
+            <span className="text-[8px] text-slate-700 font-mono">b{import.meta.env.VITE_BUILD ?? "dev"}</span>
           </div>
           {tab !== SETTINGS_TAB && (
             <div className="flex items-center gap-2">

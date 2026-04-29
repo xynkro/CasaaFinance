@@ -35,8 +35,13 @@ jobs:
 
       - name: Install & build
         working-directory: pwa
+        env:
+          # Stamp the build with the short commit SHA — visible in app header
+          # so we can verify which build a device is loading.
+          VITE_BUILD: ${{ github.sha }}
         run: |
           npm ci --legacy-peer-deps
+          export VITE_BUILD="${GITHUB_SHA:0:7}"
           npm run build
 
       - uses: actions/configure-pages@v5

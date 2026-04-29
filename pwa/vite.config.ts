@@ -24,6 +24,12 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Force the new SW to take over IMMEDIATELY rather than wait for all
+        // tabs to close. Critical for PWAs in standalone mode that never
+        // fully reload.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             urlPattern: /docs\.google\.com\/spreadsheets/,
