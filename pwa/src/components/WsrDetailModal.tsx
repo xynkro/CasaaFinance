@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useMemo } from "react";
 import type { WsrSummaryRow } from "../data";
-import { X, ChevronLeft, Target, Sparkles, Activity, AlertTriangle, BookOpen, FileText } from "lucide-react";
+import { X, ChevronLeft, BookOpen } from "lucide-react";
+import { marked } from "marked";
 
 function shortDate(d: string): string {
   const s = d.slice(0, 10);
@@ -34,31 +35,6 @@ function Paragraphs({ text, className }: { text: string; className?: string }) {
   );
 }
 
-function Section({
-  icon: Icon,
-  color,
-  title,
-  text,
-}: {
-  icon: typeof Target;
-  color: string;
-  title: string;
-  text: string;
-}) {
-  if (!text) return null;
-  return (
-    <section className="pt-4 border-t border-white/5">
-      <div className="flex items-center gap-2 mb-2.5">
-        <Icon size={14} className={color} />
-        <h3 className={`text-[11px] font-semibold uppercase tracking-wider ${color}`}>{title}</h3>
-      </div>
-      <div className="space-y-2.5">
-        <Paragraphs text={text} className="text-sm text-slate-200 leading-relaxed" />
-      </div>
-    </section>
-  );
-}
-
 export function WsrDetailModal({
   wsr,
   onClose,
@@ -70,7 +46,6 @@ export function WsrDetailModal({
     startX: 0, startY: 0, moving: false,
   });
   const [dragX, setDragX] = useState(0);
-  const [showRaw, setShowRaw] = useState(false);
 
   const SWIPE_THRESHOLD = 80;
 
@@ -108,7 +83,15 @@ export function WsrDetailModal({
   const confidence = Number(wsr.confidence) || 0;
   const confPct = Math.round(confidence * 100);
   const regime = REGIME_STYLE[wsr.regime] ?? REGIME_STYLE.neutral;
-  const weekEvents = (wsr.week_events || "").split(/\s*\|\s*/).filter(Boolean);
+
+  // Render full markdown — primary content. Strip H1 title since modal header already shows it.
+  const html = useMemo(() => {
+    if (!wsr.raw_md) return "";
+    let md = wsr.raw_md;
+    // Strip the leading `# Title` line — header above already shows the date
+    md = md.replace(/^#\s+[^\n]+\n+/, "");
+    return marked.parse(md, { breaks: false, gfm: true }) as string;
+  }, [wsr.raw_md]);
 
   return (
     <div
@@ -171,9 +154,9 @@ export function WsrDetailModal({
         </div>
       </div>
 
-      {/* Scrollable body */}
+      {/* Scrollable body — render the full WSR markdown */}
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 py-4">
-        {/* Verdict — primary focus */}
+        {/* Verdict — primary focus, pulled from structured field */}
         {wsr.verdict && (
           <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/20 p-4 mb-4">
             <div className="flex items-center gap-2 mb-2">
@@ -186,45 +169,23 @@ export function WsrDetailModal({
           </div>
         )}
 
-        <Section icon={Target} color="text-emerald-400" title="Action Plan" text={wsr.action_summary} />
-        <Section icon={Sparkles} color="text-amber-400" title="Options Book" text={wsr.options_summary} />
-        <Section icon={Activity} color="text-cyan-400" title="Macro Regime Read" text={wsr.macro_read} />
-        <Section icon={AlertTriangle} color="text-red-400" title="Red Team Flags" text={wsr.redteam_summary} />
-
-        {weekEvents.length > 0 && (
-          <section className="pt-4 border-t border-white/5">
-            <div className="flex items-center gap-2 mb-2.5">
-              <Activity size={14} className="text-slate-300" />
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-300">Week Lookback</h3>
-            </div>
-            <ul className="space-y-2">
-              {weekEvents.map((ev, i) => (
-                <li key={i} className="flex gap-2.5 text-sm text-slate-200 leading-relaxed">
-                  <span className="text-indigo-400/60 mt-1 shrink-0">•</span>
-                  <span>{ev}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+        {/* Full WSR markdown — every section, every table, every bullet */}
+        {html ? (
+          <div className="wsr-md" dangerouslySetInnerHTML={{ __html: html }} />
+        ) : (
+          <p className="text-sm text-slate-500 italic">No full markdown available for this WSR.</p>
         )}
 
+        {/* Toggle to show the raw plaintext source */}
         {wsr.raw_md && (
-          <section className="pt-4 mt-4 border-t border-white/5">
-            <button
-              onClick={() => setShowRaw((v) => !v)}
-              className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-300 hover:text-white"
-            >
-              <FileText size={13} />
-              {showRaw ? "Hide full markdown ↑" : "Show full markdown ↓"}
-            </button>
-            {showRaw && (
-              <div className="mt-3 p-3 rounded-lg bg-black/30 border border-white/5">
-                <pre className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">
-                  {wsr.raw_md}
-                </pre>
-              </div>
-            )}
-          </section>
+          <details className="mt-6 pt-4 border-t border-white/5">
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-slate-500 hover:text-white">
+              Source markdown
+            </summary>
+            <pre className="mt-3 p-3 rounded-lg bg-black/30 border border-white/5 text-[10px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">
+              {wsr.raw_md}
+            </pre>
+          </details>
         )}
 
         {/* Footer spacing */}

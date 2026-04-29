@@ -452,3 +452,56 @@ body {
 .tint-red    { background: rgba(248, 113, 113, 0.055) !important; border-color: rgba(248, 113, 113, 0.18) !important; }
 .tint-yellow { background: rgba(251, 191, 36, 0.055) !important; border-color: rgba(251, 191, 36, 0.18) !important; }
 .tint-accent { background: rgba(var(--accent-rgb), 0.055) !important; border-color: rgba(var(--accent-rgb), 0.18) !important; }
+
+/* ── WSR / brief markdown rendering (used by WsrDetailModal) ────────────── */
+.wsr-md { color: rgb(226 232 240); font-size: 14px; line-height: 1.6; }
+.wsr-md > * + * { margin-top: 0.85rem; }
+.wsr-md h1 { font-size: 18px; font-weight: 700; color: #fff; margin-top: 1.5rem; padding-bottom: 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.wsr-md h2 { font-size: 15.5px; font-weight: 700; color: rgb(var(--accent-rgb)); margin-top: 1.6rem; padding-bottom: 0.3rem; border-bottom: 1px solid rgba(var(--accent-rgb),0.2); letter-spacing: -0.005em; }
+.wsr-md h3 { font-size: 13.5px; font-weight: 600; color: rgb(203 213 225); margin-top: 1.2rem; }
+.wsr-md h4 { font-size: 12.5px; font-weight: 600; color: rgb(148 163 184); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 1rem; }
+.wsr-md p  { color: rgb(203 213 225); }
+.wsr-md strong { color: rgb(248 250 252); font-weight: 600; }
+.wsr-md em { color: rgb(165 180 252); font-style: normal; }
+.wsr-md ul, .wsr-md ol { padding-left: 1.4rem; }
+.wsr-md ul { list-style: disc; }
+.wsr-md ol { list-style: decimal; }
+.wsr-md li { color: rgb(203 213 225); margin: 0.3rem 0; padding-left: 0.2rem; }
+.wsr-md li::marker { color: rgba(var(--accent-rgb), 0.7); }
+.wsr-md blockquote {
+  border-left: 3px solid rgba(251,191,36,0.5);
+  background: rgba(251,191,36,0.05);
+  padding: 0.6rem 0.9rem;
+  border-radius: 0 6px 6px 0;
+  color: rgb(254 240 138);
+  font-size: 13px;
+}
+.wsr-md code {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  font-size: 12.5px;
+  color: rgb(165 243 252);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.wsr-md hr { border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 1.5rem 0; }
+.wsr-md a { color: rgb(129 140 248); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgba(129,140,248,0.4); }
+.wsr-md table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  margin: 0.6rem 0;
+}
+.wsr-md thead { background: rgba(255,255,255,0.04); }
+.wsr-md th, .wsr-md td {
+  border: 1px solid rgba(255,255,255,0.06);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+.wsr-md th { font-weight: 600; color: rgb(203 213 225); white-space: nowrap; }
+.wsr-md td { color: rgb(203 213 225); font-variant-numeric: tabular-nums; }
+.wsr-md tr:nth-child(even) td { background: rgba(255,255,255,0.015); }

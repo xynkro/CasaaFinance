@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type {
   OptionRow,
   OptionRecommendationRow,
@@ -13,6 +14,11 @@ import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
 import { ScanCard } from "../cards/ScanCard";
 import { RecommendationCard } from "../cards/RecommendationCard";
+import { StickyTabs } from "../components/StickyTabs";
+import { Briefcase, Telescope, Lightbulb } from "lucide-react";
+
+type Subtab = "book" | "scan" | "ideas";
+const LAST_KEY = "casaa_options_subtab";
 
 export function OptionsPage({
   options,
@@ -37,39 +43,85 @@ export function OptionsPage({
   sarahPositions: PositionRow[];
   loading: boolean;
 }) {
+  const [sub, setSub] = useState<Subtab>(() => {
+    try {
+      const saved = localStorage.getItem(LAST_KEY) as Subtab | null;
+      if (saved === "book" || saved === "scan" || saved === "ideas") return saved;
+    } catch {}
+    return "book";
+  });
+
+  const handleChange = (key: string) => {
+    const next = key as Subtab;
+    setSub(next);
+    try { localStorage.setItem(LAST_KEY, next); } catch {}
+  };
+
+  // Badges
+  const urgentDefense = optionsDefense.filter(
+    (d) => d.severity === "CRITICAL" || d.severity === "HIGH",
+  ).length;
+  const openPositions = options.length;
+  const scanCount = scanResults.length;
+  const ideaCount = recommendations.filter(
+    (r) => (r.status ?? "").toLowerCase() === "proposed",
+  ).length;
+
   return (
-    <div className="flex flex-col gap-4 px-4 pb-4">
-      {/* DAILY DEFENSE — the most urgent, always-first */}
-      <div className="fade-up fade-up-1">
-        <OptionsDefenseCard alerts={optionsDefense} />
-      </div>
+    <div className="flex flex-col px-4 pb-4">
+      {/* Sticky subtab selector */}
+      <StickyTabs
+        active={sub}
+        onChange={handleChange}
+        tabs={[
+          { key: "book",  label: "Book",  icon: Briefcase, badge: openPositions + urgentDefense },
+          { key: "scan",  label: "Scan",  icon: Telescope, badge: scanCount },
+          { key: "ideas", label: "Ideas", icon: Lightbulb, badge: ideaCount },
+        ]}
+      />
 
-      {/* Open positions */}
-      <div className="fade-up fade-up-2">
-        <WheelCard
-          options={options}
-          casparPositions={casparPositions}
-          sarahPositions={sarahPositions}
-          technicalScores={technicalScores}
-          exitPlans={exitPlans}
-          loading={loading}
-        />
-      </div>
+      {/* Defense alerts ALWAYS visible at top — too important to tab away */}
+      {urgentDefense > 0 && (
+        <div className="fade-up fade-up-1 mt-3">
+          <OptionsDefenseCard alerts={optionsDefense} />
+        </div>
+      )}
 
-      {/* What to do when each expires (weeks out) */}
-      <div className="fade-up fade-up-3">
-        <WheelContinuationCard rows={wheelNextLeg} />
-      </div>
+      {/* Tab content */}
+      {sub === "book" && (
+        <>
+          {urgentDefense === 0 && (
+            <div className="fade-up fade-up-1 mt-3">
+              <OptionsDefenseCard alerts={optionsDefense} />
+            </div>
+          )}
+          <div className="fade-up fade-up-2 mt-3">
+            <WheelCard
+              options={options}
+              casparPositions={casparPositions}
+              sarahPositions={sarahPositions}
+              technicalScores={technicalScores}
+              exitPlans={exitPlans}
+              loading={loading}
+            />
+          </div>
+          <div className="fade-up fade-up-3 mt-3">
+            <WheelContinuationCard rows={wheelNextLeg} />
+          </div>
+        </>
+      )}
 
-      {/* Fresh daily scan — new idea generation */}
-      <div className="fade-up fade-up-4">
-        <ScanCard candidates={scanResults} />
-      </div>
+      {sub === "scan" && (
+        <div className="fade-up fade-up-1 mt-3">
+          <ScanCard candidates={scanResults} />
+        </div>
+      )}
 
-      {/* Weekly strategy notes — bottom, contextual only */}
-      <div className="fade-up fade-up-5">
-        <RecommendationCard recommendations={recommendations} technicalScores={technicalScores} />
-      </div>
+      {sub === "ideas" && (
+        <div className="fade-up fade-up-1 mt-3">
+          <RecommendationCard recommendations={recommendations} technicalScores={technicalScores} />
+        </div>
+      )}
     </div>
   );
 }
