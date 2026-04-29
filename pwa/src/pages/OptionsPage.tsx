@@ -15,9 +15,9 @@ import { WheelContinuationCard } from "../cards/WheelContinuationCard";
 import { ScanCard } from "../cards/ScanCard";
 import { RecommendationCard } from "../cards/RecommendationCard";
 import { StickyTabs } from "../components/StickyTabs";
-import { Briefcase, Telescope, Lightbulb } from "lucide-react";
+import { Shield, Briefcase, Telescope, Lightbulb } from "lucide-react";
 
-type Subtab = "book" | "scan" | "ideas";
+type Subtab = "defense" | "book" | "scan" | "ideas";
 const LAST_KEY = "casaa_options_subtab";
 
 export function OptionsPage({
@@ -46,7 +46,7 @@ export function OptionsPage({
   const [sub, setSub] = useState<Subtab>(() => {
     try {
       const saved = localStorage.getItem(LAST_KEY) as Subtab | null;
-      if (saved === "book" || saved === "scan" || saved === "ideas") return saved;
+      if (saved === "defense" || saved === "book" || saved === "scan" || saved === "ideas") return saved;
     } catch {}
     return "book";
   });
@@ -69,33 +69,27 @@ export function OptionsPage({
 
   return (
     <div className="flex flex-col px-4 pb-4">
-      {/* Sticky subtab selector */}
+      {/* Sticky subtab selector — Defense first so urgent alerts are 1 tap away */}
       <StickyTabs
         active={sub}
         onChange={handleChange}
         tabs={[
-          { key: "book",  label: "Book",  icon: Briefcase, badge: openPositions + urgentDefense },
-          { key: "scan",  label: "Scan",  icon: Telescope, badge: scanCount },
-          { key: "ideas", label: "Ideas", icon: Lightbulb, badge: ideaCount },
+          { key: "defense", label: "Defense", icon: Shield,    badge: urgentDefense },
+          { key: "book",    label: "Book",    icon: Briefcase, badge: openPositions },
+          { key: "scan",    label: "Scan",    icon: Telescope, badge: scanCount },
+          { key: "ideas",   label: "Ideas",   icon: Lightbulb, badge: ideaCount },
         ]}
       />
 
-      {/* Defense alerts ALWAYS visible at top — too important to tab away */}
-      {urgentDefense > 0 && (
+      {sub === "defense" && (
         <div className="fade-up fade-up-1 mt-3">
           <OptionsDefenseCard alerts={optionsDefense} />
         </div>
       )}
 
-      {/* Tab content */}
       {sub === "book" && (
         <>
-          {urgentDefense === 0 && (
-            <div className="fade-up fade-up-1 mt-3">
-              <OptionsDefenseCard alerts={optionsDefense} />
-            </div>
-          )}
-          <div className="fade-up fade-up-2 mt-3">
+          <div className="fade-up fade-up-1 mt-3">
             <WheelCard
               options={options}
               casparPositions={casparPositions}
@@ -105,7 +99,7 @@ export function OptionsPage({
               loading={loading}
             />
           </div>
-          <div className="fade-up fade-up-3 mt-3">
+          <div className="fade-up fade-up-2 mt-3">
             <WheelContinuationCard rows={wheelNextLeg} />
           </div>
         </>

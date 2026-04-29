@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import type { OptionRecommendationRow, TechnicalScoreRow } from "../data";
 import { X, TrendingUp, TrendingDown, Activity, Target, Calendar, Zap } from "lucide-react";
 
@@ -125,7 +126,7 @@ export function RecommendationDetailModal({
     expiryDisplay = `${rec.expiry.slice(4, 6)}/${rec.expiry.slice(6, 8)}/${rec.expiry.slice(0, 4)}`;
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center"
          onClick={onClose}>
       <div
@@ -357,6 +358,7 @@ export function RecommendationDetailModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
