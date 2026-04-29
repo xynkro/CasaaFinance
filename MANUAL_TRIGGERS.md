@@ -4,6 +4,18 @@ All cloud workflows can be triggered manually via the GitHub Actions UI or
 `gh` CLI. Use these when you want to refresh data immediately rather than
 waiting for the next scheduled fire.
 
+## 🎯 Easiest path — Anthropic Routines
+
+Open <https://claude.ai/code/routines> — 8 pre-built clickable buttons:
+
+- 🟢 Grab Caspar's Portfolio  · 🟢 Grab Sarah's Portfolio  · 🟢 Grab Both Portfolios
+- 🔵 Refresh Macro + Options Prices
+- 🔭 Daily Options Scan (watchlist)
+- 🧠 Generate Daily Brief NOW  · 🧠 Generate WSR Lite NOW  · 🧠 Generate WSR Full NOW
+
+Tap "Run now" on any of them. They survive across sessions, work from
+phone or desktop, and bypass the need to remember any commands.
+
 ---
 
 ## Quick reference (gh CLI from your Mac)
@@ -14,6 +26,7 @@ waiting for the next scheduled fire.
 | **Grab Caspar's portfolio** | `gh workflow run yahoo-grab.yml -R xynkro/CasaaFinance -f caspar_only=true` |
 | **Grab Sarah's portfolio** | `gh workflow run yahoo-grab.yml -R xynkro/CasaaFinance -f sarah_only=true` |
 | Refresh macro (VIX/SPX/DXY/10Y/SGD) + options prices | `gh workflow run macro-grab.yml -R xynkro/CasaaFinance` |
+| Daily Options Scan (watchlist CSP/CC, no IBKR) | `gh workflow run daily-options-scan.yml -R xynkro/CasaaFinance` |
 | Generate today's daily brief NOW | `gh workflow run daily-brief.yml -R xynkro/CasaaFinance -f dry=false` |
 | Generate WSR Lite NOW | `gh workflow run wsr-lite.yml -R xynkro/CasaaFinance -f dry=false` |
 | Generate WSR Monday NOW | `gh workflow run wsr-full.yml -R xynkro/CasaaFinance -f dry=false` |
@@ -77,6 +90,7 @@ So the workflow is:
 | macro-grab + options-refresh | Hourly :17 | `17 * * * *` |
 | poll-drive-wsr | :13 + :43 hourly | `13,43 * * * *` |
 | market-scan | Daily 10:33 | `33 2 * * *` |
+| daily-options-scan | Mon-Fri 10:35 | `35 2 * * 1-5` |
 | daily-brief | Mon-Fri 07:03 | `3 23 * * 0-4` |
 | wsr-lite | Wed/Fri 19:33 | `33 11 * * 3,5` |
 | wsr-full | Sun 19:37 | `37 11 * * 0` |
