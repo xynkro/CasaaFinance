@@ -1,7 +1,8 @@
-import type { OptionRecommendationRow } from "../data";
+import type { OptionRecommendationRow, TechnicalScoreRow } from "../data";
 import { Card } from "./Card";
 import { Lightbulb, ChevronRight, TrendingUp } from "lucide-react";
 import { useState } from "react";
+import { RecommendationDetailModal } from "../components/RecommendationDetailModal";
 
 function fmt(v: string | number, prefix = "$"): string {
   const n = Number(v);
@@ -43,8 +44,7 @@ function ThesisConfidenceBar({ value }: { value: number }) {
   );
 }
 
-function RecItem({ rec }: { rec: OptionRecommendationRow }) {
-  const [expanded, setExpanded] = useState(false);
+function RecItem({ rec, onTap }: { rec: OptionRecommendationRow; onTap: () => void }) {
   const strategy = STRATEGY_LABEL[rec.strategy] ?? rec.strategy;
   const status = rec.status?.toLowerCase() || "proposed";
   const statusStyle = STATUS_STYLE[status] ?? STATUS_STYLE.proposed;
@@ -62,7 +62,7 @@ function RecItem({ rec }: { rec: OptionRecommendationRow }) {
   return (
     <button
       type="button"
-      onClick={() => setExpanded((e) => !e)}
+      onClick={onTap}
       className="w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:bg-white/3 transition-colors border border-white/5"
     >
       {/* Header: action + ticker + strike + status */}
@@ -111,19 +111,26 @@ function RecItem({ rec }: { rec: OptionRecommendationRow }) {
         </div>
       </div>
 
-      {expanded && rec.thesis && (
-        <div className="pt-2.5 border-t border-white/5">
-          <p className="text-[11px] text-slate-400 leading-relaxed">{rec.thesis}</p>
-          {rec.source && (
-            <p className="text-[10px] text-slate-600 mt-1.5">Source: {rec.source}</p>
-          )}
-        </div>
-      )}
     </button>
   );
 }
 
-export function RecommendationCard({ recommendations }: { recommendations: OptionRecommendationRow[] }) {
+export function RecommendationCard({
+  recommendations,
+  technicalScores = [],
+}: {
+  recommendations: OptionRecommendationRow[];
+  technicalScores?: TechnicalScoreRow[];
+}) {
+  const [selected, setSelected] = useState<OptionRecommendationRow | null>(null);
+
+  // Build ticker → latest TechnicalScoreRow lookup
+  const techByTicker = new Map<string, TechnicalScoreRow>();
+  for (const t of technicalScores) {
+    const existing = techByTicker.get(t.ticker);
+    if (!existing || t.date > existing.date) techByTicker.set(t.ticker, t);
+  }
+
   if (!recommendations.length) {
     return (
       <Card>
@@ -173,9 +180,21 @@ export function RecommendationCard({ recommendations }: { recommendations: Optio
 
       <div className="space-y-2">
         {sorted.map((r, i) => (
-          <RecItem key={`${r.ticker}-${r.strike}-${r.right}-${i}`} rec={r} />
+          <RecItem
+            key={`${r.ticker}-${r.strike}-${r.right}-${i}`}
+            rec={r}
+            onTap={() => setSelected(r)}
+          />
         ))}
       </div>
+
+      {selected && (
+        <RecommendationDetailModal
+          rec={selected}
+          techScore={techByTicker.get(selected.ticker) ?? null}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </Card>
   );
 }
