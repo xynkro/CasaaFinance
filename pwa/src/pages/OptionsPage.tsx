@@ -59,9 +59,19 @@ export function OptionsPage({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [debugTrail, setDebugTrail] = useState<string[]>([]);
   const handleSelectKey = (k: string) => {
+    // Run the lookup INSIDE the handler so we can compare what was tapped
+    // vs what find() returns. Then log both into the trail.
+    const found = recommendations.find((r) => recKey(r) === k);
+    const tappedSummary = k.split("|").slice(2).join("|");
+    let foundSummary = "(NOT FOUND in recommendations)";
+    if (found) {
+      foundSummary = `${found.ticker}/${found.strategy}/${found.account}`;
+    }
+    // Also count how many recs in the array have this exact key (dupes)
+    const matchCount = recommendations.filter((r) => recKey(r) === k).length;
     setDebugTrail((prev) => [
-      `tap[${new Date().toLocaleTimeString()}]: ${k.split("|").slice(2).join("|")}`,
-      ...prev.slice(0, 4),
+      `tap: ${tappedSummary}\n  → find: ${foundSummary} (matches=${matchCount}, total=${recommendations.length})`,
+      ...prev.slice(0, 3),
     ]);
     setSelectedKey(k);
   };
@@ -142,25 +152,32 @@ export function OptionsPage({
 
       {sub === "ideas" && (
         <div className="fade-up fade-up-1 mt-3">
-          {/* DEBUG TRAIL — last 5 taps. Remove after tap-routing is fixed. */}
-          {debugTrail.length > 0 && (
-            <div className="rounded-lg p-2 mb-3 bg-amber-500/5 border border-amber-500/20">
-              <div className="text-[9px] font-bold uppercase tracking-wider text-amber-400 mb-1">
-                Tap debug (rec_key captured)
+          {/* DEBUG TRAIL — always visible so user can confirm taps are registering */}
+          <div className="rounded-lg p-2 mb-3 bg-amber-500/8 border border-amber-500/30">
+            <div className="text-[9px] font-bold uppercase tracking-wider text-amber-400 mb-1">
+              🐛 Tap debug — last {debugTrail.length} captures (build 7e19d65)
+            </div>
+            {debugTrail.length === 0 ? (
+              <div className="text-[10px] text-amber-300 italic">
+                Waiting for taps. Tap any rec below — you should see a key appear here.
+                If nothing appears, the click handler isn't firing.
               </div>
-              {debugTrail.map((line, i) => (
-                <div key={i} className="text-[10px] text-amber-200 font-mono break-all leading-relaxed">
+            ) : (
+              debugTrail.map((line, i) => (
+                <div key={i} className="text-[10px] text-amber-200 font-mono break-all leading-relaxed whitespace-pre-line mb-1.5 pb-1.5 border-b border-amber-500/10 last:border-0">
                   {line}
                 </div>
-              ))}
+              ))
+            )}
+            {debugTrail.length > 0 && (
               <button
                 onClick={() => setDebugTrail([])}
                 className="text-[9px] text-amber-400 underline mt-1"
               >
                 clear
               </button>
-            </div>
-          )}
+            )}
+          </div>
           <RecommendationCard
             recommendations={recommendations}
             onSelectKey={handleSelectKey}
