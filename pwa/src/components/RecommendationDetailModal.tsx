@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { OptionRecommendationRow, TechnicalScoreRow } from "../data";
 import { X, TrendingUp, TrendingDown, Activity, Target, Calendar, Zap } from "lucide-react";
@@ -76,13 +76,24 @@ export function RecommendationDetailModal({
   techScore?: TechnicalScoreRow | null;
   onClose: () => void;
 }) {
-  // Lock body scroll
+  // Lock body scroll while modal is open
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = "";
     };
   }, []);
+
+  // Ignore backdrop clicks for first 200ms after mount, in case the click
+  // that opened the modal still has propagation in flight.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setArmed(true), 200);
+    return () => clearTimeout(t);
+  }, []);
+  const handleBackdropClick = () => {
+    if (armed) onClose();
+  };
 
   const strategy = STRATEGY_LABEL[rec.strategy] ?? rec.strategy;
   const accountLabel = rec.account === "caspar" ? "Caspar" : "Sarah";
@@ -128,7 +139,7 @@ export function RecommendationDetailModal({
 
   return createPortal(
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-end sm:items-center justify-center"
-         onClick={onClose}>
+         onClick={handleBackdropClick}>
       <div
         className="w-full sm:max-w-2xl max-h-[90vh] glass rounded-t-3xl sm:rounded-3xl overflow-y-auto"
         onClick={(e) => e.stopPropagation()}

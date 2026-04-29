@@ -62,8 +62,15 @@ function RecItem({ rec, onTap }: { rec: OptionRecommendationRow; onTap: () => vo
   return (
     <button
       type="button"
-      onClick={onTap}
-      className="w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:bg-white/3 transition-colors border border-white/5"
+      onClick={(e) => {
+        // Prevent the click from bubbling up to document.body — the portaled
+        // modal's backdrop is mounted there, and its onClick={onClose} would
+        // fire on the same event that opens the modal, closing it instantly.
+        e.stopPropagation();
+        onTap();
+      }}
+      style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
+      className="w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:bg-white/[0.04] transition-colors border border-white/5 cursor-pointer relative z-[1]"
     >
       {/* Header: action + ticker + strike + status */}
       <div className="flex items-center justify-between gap-3">
