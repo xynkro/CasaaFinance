@@ -57,6 +57,14 @@ export function OptionsPage({
   // any stale-closure issues that could happen if the array reference changes
   // mid-tap (e.g., during the 15-min auto-refresh).
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [debugTrail, setDebugTrail] = useState<string[]>([]);
+  const handleSelectKey = (k: string) => {
+    setDebugTrail((prev) => [
+      `tap[${new Date().toLocaleTimeString()}]: ${k.split("|").slice(2).join("|")}`,
+      ...prev.slice(0, 4),
+    ]);
+    setSelectedKey(k);
+  };
   const selectedRec = useMemo(
     () => (selectedKey ? recommendations.find((r) => recKey(r) === selectedKey) ?? null : null),
     [selectedKey, recommendations],
@@ -134,9 +142,28 @@ export function OptionsPage({
 
       {sub === "ideas" && (
         <div className="fade-up fade-up-1 mt-3">
+          {/* DEBUG TRAIL — last 5 taps. Remove after tap-routing is fixed. */}
+          {debugTrail.length > 0 && (
+            <div className="rounded-lg p-2 mb-3 bg-amber-500/5 border border-amber-500/20">
+              <div className="text-[9px] font-bold uppercase tracking-wider text-amber-400 mb-1">
+                Tap debug (rec_key captured)
+              </div>
+              {debugTrail.map((line, i) => (
+                <div key={i} className="text-[10px] text-amber-200 font-mono break-all leading-relaxed">
+                  {line}
+                </div>
+              ))}
+              <button
+                onClick={() => setDebugTrail([])}
+                className="text-[9px] text-amber-400 underline mt-1"
+              >
+                clear
+              </button>
+            </div>
+          )}
           <RecommendationCard
             recommendations={recommendations}
-            onSelectKey={setSelectedKey}
+            onSelectKey={handleSelectKey}
           />
         </div>
       )}
