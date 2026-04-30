@@ -35,7 +35,7 @@ const AXIS_STYLE = { fontSize: 10, fill: "#64748b" };
 function ChartTooltipContent({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="glass rounded-lg px-3 py-2 text-xs">
+    <div className="glass rounded-lg px-3 py-2 text-[length:var(--t-xs)]">
       <div className="text-slate-400 mb-1">{label}</div>
       {payload.map((p) => (
         <div key={p.name} className="flex items-center gap-2">
@@ -77,7 +77,7 @@ function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range)
         <button
           key={r}
           onClick={() => onChange(r)}
-          className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+          className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
             value === r
               ? "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
               : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -130,7 +130,7 @@ function PortfolioChart({
       <Card>
         <div className="flex items-center gap-2 text-slate-500">
           <TrendingUp size={16} />
-          <span className="text-sm">Portfolio history — no data yet</span>
+          <span className="text-[length:var(--t-sm)]">Portfolio history — no data yet</span>
         </div>
       </Card>
     );
@@ -140,7 +140,7 @@ function PortfolioChart({
     <Card>
       <div className="flex items-center gap-2 mb-4">
         <TrendingUp size={14} className="text-indigo-400" />
-        <h3 className="text-sm font-medium text-slate-400">Portfolio Value</h3>
+        <h3 className="text-[length:var(--t-sm)] font-medium text-slate-400">Portfolio Value</h3>
       </div>
       <ResponsiveContainer width="100%" height={200}>
         <AreaChart data={chartData}>
@@ -193,7 +193,7 @@ function MacroChart({ macro, range }: { macro: MacroRow[]; range: Range }) {
       <Card>
         <div className="flex items-center gap-2 text-slate-500">
           <Activity size={16} />
-          <span className="text-sm">Macro history — no data yet</span>
+          <span className="text-[length:var(--t-sm)]">Macro history — no data yet</span>
         </div>
       </Card>
     );
@@ -204,7 +204,7 @@ function MacroChart({ macro, range }: { macro: MacroRow[]; range: Range }) {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Activity size={14} className="text-indigo-400" />
-          <h3 className="text-sm font-medium text-slate-400">Macro</h3>
+          <h3 className="text-[length:var(--t-sm)] font-medium text-slate-400">Macro</h3>
         </div>
       </div>
 
@@ -217,7 +217,7 @@ function MacroChart({ macro, range }: { macro: MacroRow[]; range: Range }) {
             <button
               key={key}
               onClick={() => setMetric(key)}
-              className={`shrink-0 px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all border ${
+              className={`shrink-0 px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all border ${
                 isActive
                   ? "border-white/15 bg-white/5 text-white"
                   : "border-transparent text-slate-500"
@@ -273,7 +273,7 @@ function PnlChart({ caspar, sarah, range }: { caspar: SnapshotRow[]; sarah: Snap
     <Card>
       <div className="flex items-center gap-2 mb-4">
         <BarChart3 size={14} className="text-indigo-400" />
-        <h3 className="text-sm font-medium text-slate-400">UPL %</h3>
+        <h3 className="text-[length:var(--t-sm)] font-medium text-slate-400">UPL %</h3>
       </div>
       <ResponsiveContainer width="100%" height={180}>
         <AreaChart data={chartData}>
@@ -316,7 +316,7 @@ export function HistoryPage({
     <div className="px-4 pb-4 flex flex-col gap-4">
       {/* Range selector */}
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">Time Range</h3>
+        <h3 className="text-[length:var(--t-xs)] font-medium text-slate-500 uppercase tracking-wider">Time Range</h3>
         <RangeSelector value={range} onChange={setRange} />
       </div>
 

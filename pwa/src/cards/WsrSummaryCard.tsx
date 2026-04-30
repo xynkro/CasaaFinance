@@ -57,7 +57,7 @@ export function WsrSummaryCard({
       <Card>
         <div className="flex items-center gap-2 text-slate-500">
           <BookOpen size={16} />
-          <span className="text-sm">Weekly Strategy — no data yet</span>
+          <span className="text-[length:var(--t-sm)]">Weekly Strategy — no data yet</span>
         </div>
       </Card>
     );
@@ -80,18 +80,18 @@ export function WsrSummaryCard({
         {/* Header — identical styling to Daily Brief */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="text-base">📘</span>
-            <h2 className="text-sm font-semibold text-slate-200">Weekly Strategy</h2>
-            <time className="text-xs text-slate-500 tabular-nums ml-1">{dateStr}</time>
+            <span className="text-[length:var(--t-base)]">📘</span>
+            <h2 className="text-[length:var(--t-sm)] font-semibold text-slate-200">Weekly Strategy</h2>
+            <time className="text-[length:var(--t-xs)] text-slate-500 tabular-nums ml-1">{dateStr}</time>
           </div>
-          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${regime.bg} ${regime.text} ${regime.border}`}>
+          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[length:var(--t-xs)] font-semibold border ${regime.bg} ${regime.text} ${regime.border}`}>
             <span>{regime.label}</span>
           </div>
         </div>
 
         {/* Confidence bar — compact */}
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-[10px] text-slate-400 font-semibold shrink-0">CONF</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-400 font-semibold shrink-0">CONF</span>
           <div className="flex-1 h-1.5 rounded-full bg-white/8 overflow-hidden">
             <div
               className="h-full transition-all"
@@ -101,19 +101,19 @@ export function WsrSummaryCard({
               }}
             />
           </div>
-          <span className="text-xs font-bold tabular-nums text-slate-100 shrink-0">{confPct}%</span>
+          <span className="text-[length:var(--t-xs)] font-bold tabular-nums text-slate-100 shrink-0">{confPct}%</span>
         </div>
 
         {/* 3-5 line summary: verdict excerpt */}
         {verdictBrief && (
-          <p className="text-sm text-slate-100 leading-relaxed line-clamp-3">
+          <p className="text-[length:var(--t-sm)] text-slate-100 leading-relaxed line-clamp-3">
             {verdictBrief}
           </p>
         )}
 
         {/* Tap-to-expand affordance */}
         {onOpen && (
-          <div className="flex items-center justify-center gap-1 pt-3 mt-3 border-t border-white/5 text-xs text-indigo-400 font-medium">
+          <div className="flex items-center justify-center gap-1 pt-3 mt-3 border-t border-white/5 text-[length:var(--t-xs)] text-indigo-400 font-medium">
             <span>Open full strategy</span>
             <ChevronRight size={13} />
           </div>

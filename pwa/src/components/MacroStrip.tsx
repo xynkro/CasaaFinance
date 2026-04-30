@@ -43,7 +43,7 @@ export function MacroStrip({ macro }: { macro: MacroRow | null }) {
           >
             <span
               style={{
-                fontSize: "9.5px",
+                fontSize: "var(--t-2xs)",
                 fontWeight: 700,
                 letterSpacing: "0.08em",
                 textTransform: "uppercase" as const,
@@ -54,7 +54,7 @@ export function MacroStrip({ macro }: { macro: MacroRow | null }) {
             </span>
             <span
               style={{
-                fontSize: "12px",
+                fontSize: "var(--t-xs)",
                 fontWeight: 700,
                 fontVariantNumeric: "tabular-nums",
                 color: hl ? hl.color : "rgb(226 232 240)",

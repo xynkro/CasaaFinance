@@ -41,7 +41,7 @@ function CompositeGauge({ value }: { value: number }) {
           style={{ transition: "stroke-dashoffset 0.5s ease" }}
         />
       </svg>
-      <span className="absolute text-[9px] font-bold tabular-nums" style={{ color }}>
+      <span className="absolute text-[length:var(--t-2xs)] font-bold tabular-nums" style={{ color }}>
         {Math.round(value)}
       </span>
     </div>
@@ -75,11 +75,11 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
           ) : (
             <TrendingUp size={11} className="text-emerald-400 shrink-0" />
           )}
-          <span className="text-sm font-bold text-white">{cand.ticker}</span>
-          <span className="text-[10px] font-semibold text-slate-500">
+          <span className="text-[length:var(--t-sm)] font-bold text-white">{cand.ticker}</span>
+          <span className="text-[length:var(--t-2xs)] font-semibold text-slate-500">
             ${strike.toFixed(strike < 10 ? 1 : 0)}{cand.right}
           </span>
-          <span className="text-[9px] text-slate-600">exp {fmtExp(cand.expiry)}</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExp(cand.expiry)}</span>
           {catalyst && (
             <Zap size={10} className="text-orange-400 shrink-0" />
           )}
@@ -88,7 +88,7 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
       </div>
 
       {/* Key metrics */}
-      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
         <span>Δ <span className="text-slate-300 tabular-nums">{delta.toFixed(2)}</span></span>
         <span>Prem <span className="text-slate-300 tabular-nums">{fmtPrice(prem)}</span></span>
         <span>Yield <span className="text-emerald-400 tabular-nums font-semibold">{yld.toFixed(0)}%</span></span>
@@ -96,7 +96,7 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
       </div>
 
       {expanded && (
-        <div className="pt-2 border-t border-white/5 space-y-2 text-[10px]">
+        <div className="pt-2 border-t border-white/5 space-y-2 text-[length:var(--t-2xs)]">
           <div className="grid grid-cols-4 gap-1.5">
             <div>
               <div className="text-slate-600">BE</div>
@@ -139,11 +139,11 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
               <div className="tabular-nums text-slate-300">{fmtPrice(cand.ask)}</div>
             </div>
           </div>
-          <div className="text-[10px] text-slate-500">
+          <div className="text-[length:var(--t-2xs)] text-slate-500">
             Stock: <span className="text-slate-300 tabular-nums">{fmtPrice(cand.underlying_last)}</span>
           </div>
           {catalyst && (
-            <div className="flex items-center gap-1 text-orange-400 text-[10px]">
+            <div className="flex items-center gap-1 text-orange-400 text-[length:var(--t-2xs)]">
               <Zap size={10} />
               <span className="font-semibold">Catalyst — volatility elevated</span>
             </div>
@@ -188,24 +188,24 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
           ) : (
             <TrendingUp size={11} className="text-emerald-400 shrink-0" />
           ))}
-          <span className="text-sm font-bold text-white">{cand.ticker}</span>
-          <span className="text-[9px] font-semibold uppercase tracking-wide text-indigo-300">
+          <span className="text-[length:var(--t-sm)] font-bold text-white">{cand.ticker}</span>
+          <span className="text-[length:var(--t-2xs)] font-semibold uppercase tracking-wide text-indigo-300">
             {cand.strategy}
           </span>
           {hasRight && !isNaN(strike) && (
-            <span className="text-[10px] font-semibold text-slate-500">
+            <span className="text-[length:var(--t-2xs)] font-semibold text-slate-500">
               ${strike.toFixed(strike < 10 ? 1 : 0)}{cand.right}
             </span>
           )}
           {cand.expiry && (
-            <span className="text-[9px] text-slate-600">exp {fmtExp(cand.expiry)}</span>
+            <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExp(cand.expiry)}</span>
           )}
         </div>
         {!isNaN(conf) && conf > 0 && <CompositeGauge value={confPct} />}
       </div>
 
       {/* Key metrics */}
-      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
         <span>Δ <span className="text-slate-300 tabular-nums">{isNaN(delta) ? "—" : delta.toFixed(2)}</span></span>
         <span>Prem <span className="text-slate-300 tabular-nums">{isNaN(prem) ? "—" : fmtPrice(prem)}</span></span>
         <span>Yield <span className="text-emerald-400 tabular-nums font-semibold">{isNaN(yld) ? "—" : `${yld.toFixed(0)}%`}</span></span>
@@ -213,7 +213,7 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
       </div>
 
       {expanded && (
-        <div className="pt-2 border-t border-white/5 space-y-2 text-[10px]">
+        <div className="pt-2 border-t border-white/5 space-y-2 text-[length:var(--t-2xs)]">
           <div className="grid grid-cols-3 gap-1.5">
             <div>
               <div className="text-slate-600">BE</div>
@@ -233,11 +233,11 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
             </div>
           </div>
           {cand.thesis && (
-            <div className="text-[10px] text-slate-400 leading-relaxed">
+            <div className="text-[length:var(--t-2xs)] text-slate-400 leading-relaxed">
               {cand.thesis}
             </div>
           )}
-          <div className="text-[9px] text-slate-600">
+          <div className="text-[length:var(--t-2xs)] text-slate-600">
             <span className="uppercase">{cand.account || "—"}</span>
             {cand.status && <span> · {cand.status}</span>}
           </div>
@@ -297,12 +297,12 @@ export function ScanCard({
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Radar size={14} className="text-indigo-400" />
-          <h2 className="text-sm font-medium text-slate-400">Daily Scan</h2>
+          <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Daily Scan</h2>
         </div>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setTab("CSP")}
-            className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+            className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
               tab === "CSP"
                 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
                 : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -312,7 +312,7 @@ export function ScanCard({
           </button>
           <button
             onClick={() => setTab("CC")}
-            className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+            className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
               tab === "CC"
                 ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
                 : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -327,7 +327,7 @@ export function ScanCard({
       <div className="flex items-center gap-1 mb-3">
         <button
           onClick={() => setSource("my-tickers")}
-          className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+          className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
             onMyTickers
               ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
               : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -337,7 +337,7 @@ export function ScanCard({
         </button>
         <button
           onClick={() => setSource("broad")}
-          className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+          className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
             !onMyTickers
               ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
               : "text-slate-500 hover:text-slate-300 border border-transparent"
@@ -350,7 +350,7 @@ export function ScanCard({
       {empty ? (
         <div className="flex items-center gap-2 text-slate-500">
           <Radar size={16} />
-          <span className="text-sm">
+          <span className="text-[length:var(--t-sm)]">
             {onMyTickers
               ? "No candidates in My Tickers (market closed?)"
               : "No Broad candidates yet"}
@@ -358,7 +358,7 @@ export function ScanCard({
         </div>
       ) : (
         <>
-          <p className="text-[10px] text-slate-600 mb-3 leading-relaxed">
+          <p className="text-[length:var(--t-2xs)] text-slate-600 mb-3 leading-relaxed">
             {onMyTickers
               ? "My Tickers — composite = 40% technical + 25% yield + 20% IV rank + 10% cash eff + 5% liquidity."
               : "Broad — LunarCrush trending + WSB + quality watchlist (sorted by thesis confidence)."}

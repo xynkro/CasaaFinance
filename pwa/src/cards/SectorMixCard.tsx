@@ -70,10 +70,10 @@ export function SectorMixCard({
     <Card>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-base">🏢</span>
-          <h2 className="text-sm font-semibold text-slate-200">Sector Mix</h2>
+          <span className="text-[length:var(--t-base)]">🏢</span>
+          <h2 className="text-[length:var(--t-sm)] font-semibold text-slate-200">Sector Mix</h2>
         </div>
-        <span className="text-[10px] text-slate-600">{buckets.length} sectors</span>
+        <span className="text-[length:var(--t-2xs)] text-slate-600">{buckets.length} sectors</span>
       </div>
 
       {/* Stacked proportion bar */}
@@ -91,10 +91,10 @@ export function SectorMixCard({
       {/* Legend */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-2">
         {buckets.map((b, i) => (
-          <div key={b.sector} className="flex items-center justify-between gap-2 text-xs">
+          <div key={b.sector} className="flex items-center justify-between gap-2 text-[length:var(--t-xs)]">
             <div className="flex items-center gap-1.5 min-w-0">
               <div className={`w-2 h-2 rounded-sm shrink-0 ${PALETTE[i % PALETTE.length]}`} />
-              <span className="text-sm">{b.emoji}</span>
+              <span className="text-[length:var(--t-sm)]">{b.emoji}</span>
               <span className="text-slate-300 truncate">{b.sector}</span>
             </div>
             <span className="text-slate-400 tabular-nums font-medium shrink-0">{b.pct.toFixed(1)}%</span>

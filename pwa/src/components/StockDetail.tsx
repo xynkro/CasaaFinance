@@ -51,8 +51,8 @@ function ScoreChip({ label, val, color, histValues }: {
       style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
     >
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold text-slate-500">{label}</span>
-        <span className="text-base font-bold tabular-nums" style={{ color: textColor }}>
+        <span className="text-[length:var(--t-xs)] font-semibold text-slate-500">{label}</span>
+        <span className="text-[length:var(--t-base)] font-bold tabular-nums" style={{ color: textColor }}>
           {val > 0 ? "+" : ""}{val.toFixed(0)}
         </span>
       </div>
@@ -75,11 +75,11 @@ function IndicatorTile({ label, value, sub, valueColor }: {
       className="rounded-2xl p-3"
       style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
     >
-      <div className="text-[11px] text-slate-500 mb-1">{label}</div>
-      <div className="text-[15px] font-semibold tabular-nums" style={{ color: valueColor ?? "rgb(226 232 240)" }}>
+      <div className="text-[length:var(--t-xs)] text-slate-500 mb-1">{label}</div>
+      <div className="text-[length:var(--t-sm)] font-semibold tabular-nums" style={{ color: valueColor ?? "rgb(226 232 240)" }}>
         {value}
       </div>
-      {sub && <div className="text-[10px] text-slate-600 mt-0.5">{sub}</div>}
+      {sub && <div className="text-[length:var(--t-2xs)] text-slate-600 mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -88,8 +88,8 @@ function IndicatorTile({ label, value, sub, valueColor }: {
 function LevelRow({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-white/5">
-      <span className="text-[13px] text-slate-400">{label}</span>
-      <span className="text-[13px] font-semibold tabular-nums" style={{ color }}>{value}</span>
+      <span className="text-[length:var(--t-sm)] text-slate-400">{label}</span>
+      <span className="text-[length:var(--t-sm)] font-semibold tabular-nums" style={{ color }}>{value}</span>
     </div>
   );
 }
@@ -154,16 +154,16 @@ function TechAnalysisPanel({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Activity size={15} style={{ color: "rgb(var(--accent-rgb))" }} />
-          <span className="text-[15px] font-semibold text-slate-200">Casaa Score</span>
+          <span className="text-[length:var(--t-sm)] font-semibold text-slate-200">Casaa Score</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[15px] font-bold tabular-nums" style={{ color: signalColor }}>
+          <span className="text-[length:var(--t-sm)] font-bold tabular-nums" style={{ color: signalColor }}>
             {t.entry_exit_signal || "HOLD"}
           </span>
           <span className="text-slate-600">·</span>
-          <span className="text-sm text-slate-400">{t.trend}</span>
+          <span className="text-[length:var(--t-sm)] text-slate-400">{t.trend}</span>
           {catalyst && (
-            <span className="inline-flex items-center gap-0.5 text-xs text-orange-400 font-semibold">
+            <span className="inline-flex items-center gap-0.5 text-[length:var(--t-xs)] text-orange-400 font-semibold">
               <Zap size={11} /> CATALYST
             </span>
           )}
@@ -185,9 +185,9 @@ function TechAnalysisPanel({
             color: earningsDaysAway <= 7 ? "#f87171" : earningsDaysAway <= 14 ? "#fbbf24" : "rgb(148 163 184)"
           }} />
           <div>
-            <span className="text-sm font-semibold text-white">Earnings</span>
-            <span className="text-sm text-slate-400"> · {earningsDate}</span>
-            <span className="ml-2 text-sm font-bold tabular-nums" style={{
+            <span className="text-[length:var(--t-sm)] font-semibold text-white">Earnings</span>
+            <span className="text-[length:var(--t-sm)] text-slate-400"> · {earningsDate}</span>
+            <span className="ml-2 text-[length:var(--t-sm)] font-bold tabular-nums" style={{
               color: earningsDaysAway <= 7 ? "#f87171" : earningsDaysAway <= 14 ? "#fbbf24" : "rgb(226 232 240)"
             }}>
               {earningsDaysAway === 0 ? "TODAY" : earningsDaysAway === 1 ? "tomorrow" : `${earningsDaysAway}d away`}
@@ -215,7 +215,7 @@ function TechAnalysisPanel({
           ))}
         </div>
         {t.top_drivers && (
-          <p className="text-[12px] text-slate-500 mt-2.5 leading-relaxed">{t.top_drivers}</p>
+          <p className="text-[length:var(--t-xs)] text-slate-500 mt-2.5 leading-relaxed">{t.top_drivers}</p>
         )}
       </div>
 
@@ -284,8 +284,8 @@ function TechAnalysisPanel({
           <LevelRow label="SMA 50"     value={`$${sma50.toFixed(2)}`}      color={close > sma50 ? "#34d399" : "#f87171"} />
           <LevelRow label="SMA 200"    value={sma200 > 0 ? `$${sma200.toFixed(2)}` : "—"} color={close > sma200 ? "#34d399" : "#f87171"} />
           <div className="flex items-center justify-between py-2.5">
-            <span className="text-[13px] text-slate-400">Fib 0.618</span>
-            <span className="text-[13px] font-semibold tabular-nums text-slate-300">${Number(t.fib_0618).toFixed(2)}</span>
+            <span className="text-[length:var(--t-sm)] text-slate-400">Fib 0.618</span>
+            <span className="text-[length:var(--t-sm)] font-semibold tabular-nums text-slate-300">${Number(t.fib_0618).toFixed(2)}</span>
           </div>
         </div>
       </div>
@@ -293,7 +293,7 @@ function TechAnalysisPanel({
       {/* Divergence */}
       {t.divergence && t.divergence !== "none" && (
         <div
-          className="flex items-center gap-2 rounded-2xl px-4 py-3 text-sm"
+          className="flex items-center gap-2 rounded-2xl px-4 py-3 text-[length:var(--t-sm)]"
           style={{
             background: t.divergence === "bullish" ? "rgba(52,211,153,0.08)" : "rgba(248,113,113,0.08)",
             border: `1px solid ${t.divergence === "bullish" ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)"}`,
@@ -302,7 +302,7 @@ function TechAnalysisPanel({
         >
           <BarChart2 size={14} />
           <span className="font-semibold capitalize">{t.divergence} divergence</span>
-          <span className="text-slate-500 text-xs">price vs RSI (20d)</span>
+          <span className="text-slate-500 text-[length:var(--t-xs)]">price vs RSI (20d)</span>
         </div>
       )}
     </div>
@@ -424,14 +424,14 @@ export function StockDetail({
           style={{ color: "rgb(var(--accent-rgb))" }}
         >
           <ChevronLeft size={20} />
-          <span className="text-sm font-medium">Back</span>
+          <span className="text-[length:var(--t-sm)] font-medium">Back</span>
         </button>
 
         <div className="flex items-center gap-2.5 text-center">
-          <span className="text-xl">{emoji}</span>
+          <span className="text-[length:var(--t-xl)]">{emoji}</span>
           <div>
-            <h2 className="text-base font-bold text-white leading-tight">{ticker}</h2>
-            <p className="text-[11px] text-slate-500">{sector}</p>
+            <h2 className="text-[length:var(--t-base)] font-bold text-white leading-tight">{ticker}</h2>
+            <p className="text-[length:var(--t-xs)] text-slate-500">{sector}</p>
           </div>
         </div>
 
@@ -445,7 +445,7 @@ export function StockDetail({
         <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <span className="text-2xl font-bold text-white tabular-nums">{fmt(position.last, prefix)}</span>
           <span
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-semibold tabular-nums"
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[length:var(--t-xs)] font-semibold tabular-nums"
             style={{
               background: isUp ? "rgba(52,211,153,0.12)" : "rgba(248,113,113,0.12)",
               color: isUp ? "#34d399" : "#f87171",
@@ -454,7 +454,7 @@ export function StockDetail({
             {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
             {uplPct >= 0 ? "+" : ""}{uplPct.toFixed(2)}%
           </span>
-          <span className="text-xs text-slate-500 ml-auto tabular-nums">
+          <span className="text-[length:var(--t-xs)] text-slate-500 ml-auto tabular-nums">
             {Number(position.qty).toFixed(0)} @ {fmt(position.avg_cost, prefix)}
           </span>
         </div>
@@ -463,11 +463,11 @@ export function StockDetail({
       {/* ── Decision summary strip ── */}
       {decision && (
         <div className="px-4 py-4" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          <p className="text-[15px] text-slate-200 leading-relaxed mb-3">{decision.thesis_1liner}</p>
+          <p className="text-[length:var(--t-sm)] text-slate-200 leading-relaxed mb-3">{decision.thesis_1liner}</p>
           <div className="flex flex-wrap gap-2">
             {decision.bucket && (
               <span
-                className="text-[11px] font-semibold uppercase px-2.5 py-1 rounded-lg"
+                className="text-[length:var(--t-xs)] font-semibold uppercase px-2.5 py-1 rounded-lg"
                 style={{ background: "rgba(var(--accent-rgb),0.12)", color: "rgb(var(--accent-rgb))" }}
               >
                 {decision.bucket}
@@ -475,7 +475,7 @@ export function StockDetail({
             )}
             {decision.entry && (
               <span
-                className="text-[11px] px-2.5 py-1 rounded-lg"
+                className="text-[length:var(--t-xs)] px-2.5 py-1 rounded-lg"
                 style={{ background: "rgba(255,255,255,0.05)", color: "rgb(148 163 184)" }}
               >
                 Entry <span className="text-white font-semibold">{fmt(decision.entry, prefix)}</span>
@@ -483,7 +483,7 @@ export function StockDetail({
             )}
             {decision.target && (
               <span
-                className="text-[11px] px-2.5 py-1 rounded-lg"
+                className="text-[length:var(--t-xs)] px-2.5 py-1 rounded-lg"
                 style={{ background: "rgba(255,255,255,0.05)", color: "rgb(148 163 184)" }}
               >
                 Target <span className="font-semibold" style={{ color: "#34d399" }}>{fmt(decision.target, prefix)}</span>
@@ -491,7 +491,7 @@ export function StockDetail({
             )}
             {decision.conv && Number(decision.conv) > 0 && (
               <span
-                className="text-[11px] px-2.5 py-1 rounded-lg"
+                className="text-[length:var(--t-xs)] px-2.5 py-1 rounded-lg"
                 style={{ background: "rgba(255,255,255,0.05)", color: "rgb(148 163 184)" }}
               >
                 Conv <span className="text-amber-400 font-semibold">{Math.round(Number(decision.conv))}/5</span>
@@ -503,12 +503,12 @@ export function StockDetail({
               <div className="flex items-center justify-between mb-2">
                 <span className="label-caps">Thesis</span>
                 {decision.thesis_confidence && (
-                  <span className="text-[11px] text-slate-500 tabular-nums">
+                  <span className="text-[length:var(--t-xs)] text-slate-500 tabular-nums">
                     Confidence <span className="text-slate-300 font-semibold">{Math.max(0, Math.min(100, Math.round((Number(decision.thesis_confidence) || 0) * 100)))}%</span>
                   </span>
                 )}
               </div>
-              <p className="text-[13px] text-slate-400 leading-relaxed">{decision.thesis}</p>
+              <p className="text-[length:var(--t-sm)] text-slate-400 leading-relaxed">{decision.thesis}</p>
             </div>
           )}
         </div>
@@ -525,7 +525,7 @@ export function StockDetail({
           ].map((s) => (
             <div key={s.label} className="text-center py-3" style={{ borderRight: "1px solid rgba(255,255,255,0.04)" }}>
               <div className="label-caps mb-0.5">{s.label}</div>
-              <div className="text-xs font-semibold text-slate-200 tabular-nums">{s.value}</div>
+              <div className="text-[length:var(--t-xs)] font-semibold text-slate-200 tabular-nums">{s.value}</div>
             </div>
           ))}
         </div>
@@ -539,8 +539,8 @@ export function StockDetail({
         {/* TradingView chart */}
         <div className="px-4 pt-5 pb-2">
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-base">📈</span>
-            <span className="text-[15px] font-semibold text-slate-200">Chart</span>
+            <span className="text-[length:var(--t-base)]">📈</span>
+            <span className="text-[length:var(--t-sm)] font-semibold text-slate-200">Chart</span>
           </div>
         </div>
         <div className="h-[55vh] min-h-[300px]" style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}>
@@ -550,10 +550,10 @@ export function StockDetail({
         {/* TradingView TA widget */}
         <div className="px-4 pt-5 pb-2">
           <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-base">🧭</span>
-            <span className="text-[15px] font-semibold text-slate-200">Technical Analysis</span>
+            <span className="text-[length:var(--t-base)]">🧭</span>
+            <span className="text-[length:var(--t-sm)] font-semibold text-slate-200">Technical Analysis</span>
           </div>
-          <p className="text-[12px] text-slate-500 leading-relaxed">
+          <p className="text-[length:var(--t-xs)] text-slate-500 leading-relaxed">
             Real-time MA + oscillator rating. Switch intervals for short vs long-term bias.{" "}
             <span style={{ color: "#34d399" }}>Buy</span> = majority bullish;{" "}
             <span style={{ color: "#f87171" }}>Sell</span> = majority bearish.

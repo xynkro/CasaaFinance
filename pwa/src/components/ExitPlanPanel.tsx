@@ -131,7 +131,7 @@ export function ExitStatusBadge({ plan }: { plan: ExitPlanRow | null | undefined
   const meta = STATUS_META[plan.status] ?? STATUS_META.HOLD;
   const Icon = meta.icon;
   return (
-    <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold border ${meta.bg} ${meta.border}`}>
+    <div className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-bold border ${meta.bg} ${meta.border}`}>
       <Icon size={9} className={meta.text} />
       <span className={meta.text}>{meta.label}</span>
     </div>
@@ -163,21 +163,21 @@ export function ExitPlanPanel({ plan }: { plan: ExitPlanRow }) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Shield size={14} className="text-indigo-400" />
-          <h3 className="text-sm font-semibold text-slate-200">Exit Plan</h3>
+          <h3 className="text-[length:var(--t-sm)] font-semibold text-slate-200">Exit Plan</h3>
         </div>
         <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border ${meta.bg} ${meta.border}`}>
           <Icon size={11} className={meta.text} />
-          <span className={`text-[10px] font-bold ${meta.text}`}>{meta.label}</span>
+          <span className={`text-[length:var(--t-2xs)] font-bold ${meta.text}`}>{meta.label}</span>
         </div>
       </div>
 
       {/* Category + key info */}
-      <div className="flex items-center gap-2 text-[10px] text-slate-500">
+      <div className="flex items-center gap-2 text-[length:var(--t-2xs)] text-slate-500">
         <span className="px-1.5 py-0.5 rounded bg-white/5 text-slate-400 font-semibold">
           {CATEGORY_LABEL[plan.category] ?? plan.category}
         </span>
         {plan.is_blue_chip === "TRUE" && (
-          <span className="text-[10px] text-indigo-400">monitor-only</span>
+          <span className="text-[length:var(--t-2xs)] text-indigo-400">monitor-only</span>
         )}
         {Number(plan.time_stop_days) > 0 && (
           <span>Time stop: {plan.time_stop_days}d</span>
@@ -186,11 +186,11 @@ export function ExitPlanPanel({ plan }: { plan: ExitPlanRow }) {
 
       {/* Recommendation — the actionable line */}
       <div className={`rounded-lg p-3 border ${meta.bg} ${meta.border}`}>
-        <p className={`text-[12px] font-semibold leading-relaxed ${meta.text}`}>
+        <p className={`text-[length:var(--t-xs)] font-semibold leading-relaxed ${meta.text}`}>
           {plan.recommendation}
         </p>
         {plan.reasoning && (
-          <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+          <p className="text-[length:var(--t-2xs)] text-slate-500 mt-1 leading-relaxed">
             {plan.reasoning}
           </p>
         )}
@@ -201,7 +201,7 @@ export function ExitPlanPanel({ plan }: { plan: ExitPlanRow }) {
         <>
           {/* Stop — Current — T1 — T2 bar */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[10px]">
+            <div className="flex items-center justify-between text-[length:var(--t-2xs)]">
               <span className="text-red-400 tabular-nums font-semibold">{fmtPrice(stop)}</span>
               <span className="text-slate-500">stop</span>
               <span className="flex-1 text-center text-slate-600">·</span>
@@ -219,7 +219,7 @@ export function ExitPlanPanel({ plan }: { plan: ExitPlanRow }) {
                 style={{ left: `calc(${position * 100}% - 4px)` }}
               />
             </div>
-            <div className="flex items-center justify-between text-[10px]">
+            <div className="flex items-center justify-between text-[length:var(--t-2xs)]">
               <span className="text-slate-600">Entry: <span className="text-slate-400 tabular-nums">{fmtPrice(entry)}</span></span>
               <span className="text-slate-600">Current: <span className="text-white tabular-nums font-semibold">{fmtPrice(current)}</span></span>
               <span className={`tabular-nums font-semibold ${uplPct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
@@ -229,7 +229,7 @@ export function ExitPlanPanel({ plan }: { plan: ExitPlanRow }) {
           </div>
 
           {/* Rule references */}
-          <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+          <div className="grid grid-cols-3 gap-1.5 text-[length:var(--t-2xs)]">
             <div className="glass rounded-lg p-2">
               <div className="text-slate-600">Stop rule</div>
               <div className="tabular-nums text-slate-300 capitalize">
@@ -254,7 +254,7 @@ export function ExitPlanPanel({ plan }: { plan: ExitPlanRow }) {
 
       {/* Bag: show entry + current + drawdown */}
       {isBag && !isOption && (
-        <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+        <div className="grid grid-cols-2 gap-1.5 text-[length:var(--t-2xs)]">
           <div className="glass rounded-lg p-2">
             <div className="text-slate-600">Entry</div>
             <div className="tabular-nums text-slate-300">{fmtPrice(entry)}</div>
@@ -268,7 +268,7 @@ export function ExitPlanPanel({ plan }: { plan: ExitPlanRow }) {
 
       {/* Option-specific metrics */}
       {isOption && (
-        <div className="grid grid-cols-3 gap-1.5 text-[10px]">
+        <div className="grid grid-cols-3 gap-1.5 text-[length:var(--t-2xs)]">
           <div className="glass rounded-lg p-2">
             <div className="text-slate-600">Credit received</div>
             <div className="tabular-nums text-slate-300">{fmtPrice(entry)}</div>

@@ -34,20 +34,20 @@ function Row({ m, rank }: { m: Mover; rank: number }) {
   return (
     <div className="flex items-center gap-3 py-2.5">
       {/* Rank */}
-      <span className="text-[10px] text-slate-600 tabular-nums w-3 shrink-0">{rank}</span>
+      <span className="text-[length:var(--t-2xs)] text-slate-600 tabular-nums w-3 shrink-0">{rank}</span>
       {/* Sector emoji */}
-      <span className="text-base shrink-0 w-6 text-center">{m.emoji}</span>
+      <span className="text-[length:var(--t-base)] shrink-0 w-6 text-center">{m.emoji}</span>
       {/* Ticker */}
-      <span className="text-sm font-semibold text-slate-100 tabular-nums flex-1 min-w-0 truncate">
+      <span className="text-[length:var(--t-sm)] font-semibold text-slate-100 tabular-nums flex-1 min-w-0 truncate">
         {m.ticker}
       </span>
       {/* UPL amount — subtle */}
-      <span className={`text-[11px] tabular-nums shrink-0 ${isUp ? "text-emerald-400/60" : "text-red-400/60"}`}>
+      <span className={`text-[length:var(--t-xs)] tabular-nums shrink-0 ${isUp ? "text-emerald-400/60" : "text-red-400/60"}`}>
         {isUp ? "+" : "−"}{prefix}{Math.abs(m.upl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
       </span>
       {/* Percent chip */}
       <span
-        className={`inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums px-2 py-0.5 rounded shrink-0 ${
+        className={`inline-flex items-center gap-0.5 text-[length:var(--t-xs)] font-semibold tabular-nums px-2 py-0.5 rounded shrink-0 ${
           isUp ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
         }`}
       >
@@ -80,15 +80,15 @@ export function MoversCard({
     <Card>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          <span className="text-base">🏆</span>
-          <h2 className="text-sm font-semibold text-slate-200">Top Movers</h2>
+          <span className="text-[length:var(--t-base)]">🏆</span>
+          <h2 className="text-[length:var(--t-sm)] font-semibold text-slate-200">Top Movers</h2>
         </div>
-        <span className="text-[10px] text-slate-600">{movers.length} holdings</span>
+        <span className="text-[length:var(--t-2xs)] text-slate-600">{movers.length} holdings</span>
       </div>
 
       {winners.length > 0 && (
         <div>
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-emerald-400/70 pt-2">
+          <div className="flex items-center gap-1.5 text-[length:var(--t-2xs)] uppercase tracking-wider font-semibold text-emerald-400/70 pt-2">
             <span>📈</span>
             <span>Winners</span>
           </div>
@@ -100,7 +100,7 @@ export function MoversCard({
 
       {losers.length > 0 && (
         <div className="mt-2">
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider font-semibold text-red-400/70 pt-2 border-t border-white/5">
+          <div className="flex items-center gap-1.5 text-[length:var(--t-2xs)] uppercase tracking-wider font-semibold text-red-400/70 pt-2 border-t border-white/5">
             <span>📉</span>
             <span>Losers</span>
           </div>

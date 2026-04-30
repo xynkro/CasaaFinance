@@ -27,7 +27,7 @@ function Paragraphs({ text, className }: { text: string; className?: string }) {
   return (
     <>
       {paras.map((p, i) => (
-        <p key={i} className={className ?? "text-sm text-slate-200 leading-relaxed"}>
+        <p key={i} className={className ?? "text-[length:var(--t-sm)] text-slate-200 leading-relaxed"}>
           {p}
         </p>
       ))}
@@ -113,13 +113,13 @@ export function WsrDetailModal({
           aria-label="Back"
         >
           <ChevronLeft size={20} />
-          <span className="text-sm">Back</span>
+          <span className="text-[length:var(--t-sm)]">Back</span>
         </button>
         <div className="flex items-center gap-2">
           <BookOpen size={16} className="text-indigo-400" />
           <div className="text-right">
-            <h2 className="text-base font-bold text-white leading-tight">Weekly Strategy</h2>
-            <span className="text-[10px] text-slate-400">{shortDate(wsr.date || "")}</span>
+            <h2 className="text-[length:var(--t-base)] font-bold text-white leading-tight">Weekly Strategy</h2>
+            <span className="text-[length:var(--t-2xs)] text-slate-400">{shortDate(wsr.date || "")}</span>
           </div>
         </div>
         <button
@@ -134,13 +134,13 @@ export function WsrDetailModal({
       {/* Regime + confidence bar */}
       <div className="px-4 py-4 border-b border-white/6 space-y-3">
         <div className="flex items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border ${regime.bg} ${regime.text} ${regime.border}`}>
+          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[length:var(--t-xs)] font-semibold border ${regime.bg} ${regime.text} ${regime.border}`}>
             {regime.label}
           </span>
-          <span className="text-[11px] text-slate-400">Regime</span>
+          <span className="text-[length:var(--t-xs)] text-slate-400">Regime</span>
         </div>
         <div className="flex items-center gap-2.5">
-          <span className="text-[10px] text-slate-400 font-bold shrink-0">CONFIDENCE</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-400 font-bold shrink-0">CONFIDENCE</span>
           <div className="flex-1 h-2 rounded-full bg-white/8 overflow-hidden">
             <div
               className="h-full transition-all"
@@ -150,7 +150,7 @@ export function WsrDetailModal({
               }}
             />
           </div>
-          <span className="text-sm font-bold tabular-nums text-white shrink-0">{confPct}%</span>
+          <span className="text-[length:var(--t-sm)] font-bold tabular-nums text-white shrink-0">{confPct}%</span>
         </div>
       </div>
 
@@ -160,11 +160,11 @@ export function WsrDetailModal({
         {wsr.verdict && (
           <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/20 p-4 mb-4">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-base">🎯</span>
-              <h3 className="text-[11px] uppercase tracking-wider font-bold text-indigo-400">Verdict</h3>
+              <span className="text-[length:var(--t-base)]">🎯</span>
+              <h3 className="text-[length:var(--t-xs)] uppercase tracking-wider font-bold text-indigo-400">Verdict</h3>
             </div>
             <div className="space-y-2.5">
-              <Paragraphs text={wsr.verdict} className="text-[15px] text-slate-100 leading-relaxed" />
+              <Paragraphs text={wsr.verdict} className="text-[length:var(--t-sm)] text-slate-100 leading-relaxed" />
             </div>
           </div>
         )}
@@ -173,16 +173,16 @@ export function WsrDetailModal({
         {html ? (
           <div className="wsr-md" dangerouslySetInnerHTML={{ __html: html }} />
         ) : (
-          <p className="text-sm text-slate-500 italic">No full markdown available for this WSR.</p>
+          <p className="text-[length:var(--t-sm)] text-slate-500 italic">No full markdown available for this WSR.</p>
         )}
 
         {/* Toggle to show the raw plaintext source */}
         {wsr.raw_md && (
           <details className="mt-6 pt-4 border-t border-white/5">
-            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-slate-500 hover:text-white">
+            <summary className="cursor-pointer text-[length:var(--t-xs)] font-semibold uppercase tracking-wider text-slate-500 hover:text-white">
               Source markdown
             </summary>
-            <pre className="mt-3 p-3 rounded-lg bg-black/30 border border-white/5 text-[10px] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">
+            <pre className="mt-3 p-3 rounded-lg bg-black/30 border border-white/5 text-[length:var(--t-2xs)] text-slate-300 whitespace-pre-wrap leading-relaxed font-mono">
               {wsr.raw_md}
             </pre>
           </details>

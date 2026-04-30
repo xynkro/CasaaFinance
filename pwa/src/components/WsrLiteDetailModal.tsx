@@ -15,7 +15,7 @@ const TRIGGER_STYLES = {
 };
 
 function TriggerList({ rows }: { rows: TriggerRow[] }) {
-  if (!rows.length) return <p className="text-sm text-slate-500">No triggers parsed.</p>;
+  if (!rows.length) return <p className="text-[length:var(--t-sm)] text-slate-500">No triggers parsed.</p>;
   return (
     <div className="space-y-1">
       {rows.map((t) => {
@@ -31,13 +31,13 @@ function TriggerList({ rows }: { rows: TriggerRow[] }) {
             <Icon size={13} className="shrink-0 mt-0.5" style={{ color: style.color }} />
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-sm font-bold text-white">{t.ticker}</span>
-                <span className="text-xs tabular-nums text-slate-400">{t.price}</span>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ background: `${style.color}20`, color: style.color }}>
+                <span className="text-[length:var(--t-sm)] font-bold text-white">{t.ticker}</span>
+                <span className="text-[length:var(--t-xs)] tabular-nums text-slate-400">{t.price}</span>
+                <span className="text-[length:var(--t-2xs)] font-bold px-1.5 py-0.5 rounded" style={{ background: `${style.color}20`, color: style.color }}>
                   {t.status}
                 </span>
               </div>
-              {t.action && <p className="text-[12px] text-slate-400 mt-0.5 leading-relaxed">{t.action}</p>}
+              {t.action && <p className="text-[length:var(--t-xs)] text-slate-400 mt-0.5 leading-relaxed">{t.action}</p>}
             </div>
           </div>
         );
@@ -55,7 +55,7 @@ const FLAG_STYLE: Record<string, { border: string; bg: string }> = {
 };
 
 function TrafficCards({ rows }: { rows: TrafficLightRow[] }) {
-  if (!rows.length) return <p className="text-sm text-slate-500">No options data parsed.</p>;
+  if (!rows.length) return <p className="text-[length:var(--t-sm)] text-slate-500">No options data parsed.</p>;
   return (
     <div className="space-y-2">
       {rows.map((r) => {
@@ -64,14 +64,14 @@ function TrafficCards({ rows }: { rows: TrafficLightRow[] }) {
           <div key={r.ticker} className="rounded-2xl px-4 py-3" style={{ background: fs.bg, border: `1px solid ${fs.border}` }}>
             <div className="flex items-center justify-between mb-1.5">
               <div className="flex items-center gap-2">
-                <span className="text-base leading-none">{r.flag}</span>
-                <span className="text-sm font-bold text-white">{r.ticker}</span>
-                <span className="text-[11px] text-slate-500">{r.strategy} ${r.strike} · {r.dte} DTE</span>
+                <span className="text-[length:var(--t-base)] leading-none">{r.flag}</span>
+                <span className="text-[length:var(--t-sm)] font-bold text-white">{r.ticker}</span>
+                <span className="text-[length:var(--t-xs)] text-slate-500">{r.strategy} ${r.strike} · {r.dte} DTE</span>
               </div>
             </div>
-            <div className="text-[22px] font-bold tabular-nums text-white mb-0.5">{r.proximity}</div>
-            <div className="text-[11px] text-slate-500 mb-1">Underlying ~{r.underlying}</div>
-            {r.note && <p className="text-[12px] text-slate-300 italic leading-relaxed">{r.note}</p>}
+            <div className="text-[length:var(--t-xl)] font-bold tabular-nums text-white mb-0.5">{r.proximity}</div>
+            <div className="text-[length:var(--t-xs)] text-slate-500 mb-1">Underlying ~{r.underlying}</div>
+            {r.note && <p className="text-[length:var(--t-xs)] text-slate-300 italic leading-relaxed">{r.note}</p>}
           </div>
         );
       })}
@@ -101,7 +101,7 @@ function RegimePanel({ text, unchanged }: { text: string; unchanged: boolean }) 
     >
       <div className="flex items-center gap-2 mb-2.5">
         <span
-          className="text-[11px] font-bold px-2.5 py-1 rounded-lg"
+          className="text-[length:var(--t-xs)] font-bold px-2.5 py-1 rounded-lg"
           style={
             unchanged
               ? { background: "rgba(52,211,153,0.15)", color: "#34d399" }
@@ -111,7 +111,7 @@ function RegimePanel({ text, unchanged }: { text: string; unchanged: boolean }) 
           {unchanged ? "REGIME UNCHANGED" : "REGIME DRIFT"}
         </span>
       </div>
-      <p className="text-[13px] text-slate-300 leading-relaxed">{highlighted}</p>
+      <p className="text-[length:var(--t-sm)] text-slate-300 leading-relaxed">{highlighted}</p>
     </div>
   );
 }
@@ -125,7 +125,7 @@ const Q_STATUS_STYLE: Record<string, { color: string; bg: string }> = {
 };
 
 function DecisionQueueList({ rows }: { rows: DecisionQueueRow[] }) {
-  if (!rows.length) return <p className="text-sm text-slate-500">No queue data parsed.</p>;
+  if (!rows.length) return <p className="text-[length:var(--t-sm)] text-slate-500">No queue data parsed.</p>;
   return (
     <div className="space-y-1.5">
       {rows.map((r) => {
@@ -139,27 +139,27 @@ function DecisionQueueList({ rows }: { rows: DecisionQueueRow[] }) {
             style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
           >
             <span
-              className="text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shrink-0"
+              className="text-[length:var(--t-2xs)] font-bold w-5 h-5 rounded-full flex items-center justify-center shrink-0"
               style={{ background: "rgba(255,255,255,0.08)", color: "rgb(148 163 184)" }}
             >
               {r.rank}
             </span>
-            <span className="text-sm font-bold text-white w-14 shrink-0">{r.ticker}</span>
+            <span className="text-[length:var(--t-sm)] font-bold text-white w-14 shrink-0">{r.ticker}</span>
             <div className="flex-1 min-w-0">
-              <span className="text-[11px] text-slate-500 tabular-nums">
+              <span className="text-[length:var(--t-xs)] text-slate-500 tabular-nums">
                 ${r.entry} → {r.last}
               </span>
               {r.statusNote && (
-                <span className="text-[10px] text-slate-600 ml-1.5">{r.statusNote}</span>
+                <span className="text-[length:var(--t-2xs)] text-slate-600 ml-1.5">{r.statusNote}</span>
               )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {distPos && (
-                <span className="text-xs font-semibold tabular-nums" style={{ color: distColor }}>
+                <span className="text-[length:var(--t-xs)] font-semibold tabular-nums" style={{ color: distColor }}>
                   {r.distancePct}
                 </span>
               )}
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg" style={{ background: s.bg, color: s.color }}>
+              <span className="text-[length:var(--t-2xs)] font-bold px-2 py-0.5 rounded-lg" style={{ background: s.bg, color: s.color }}>
                 {r.status}
               </span>
             </div>
@@ -173,7 +173,7 @@ function DecisionQueueList({ rows }: { rows: DecisionQueueRow[] }) {
 // ── Catalyst Calendar ─────────────────────────────────────────────────────────
 
 function CatalystDays({ days }: { days: CatalystDay[] }) {
-  if (!days.length) return <p className="text-sm text-slate-500">No catalysts parsed.</p>;
+  if (!days.length) return <p className="text-[length:var(--t-sm)] text-slate-500">No catalysts parsed.</p>;
   return (
     <div className="space-y-2">
       {days.map((day) => (
@@ -182,13 +182,13 @@ function CatalystDays({ days }: { days: CatalystDay[] }) {
           className="rounded-xl p-3"
           style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}
         >
-          <div className="text-[11px] font-bold text-slate-400 mb-1.5">{day.label}</div>
+          <div className="text-[length:var(--t-xs)] font-bold text-slate-400 mb-1.5">{day.label}</div>
           {day.bullets.length === 0 || (day.bullets.length === 1 && day.bullets[0].toLowerCase().includes("no major")) ? (
-            <p className="text-[12px] text-slate-600">No major catalysts.</p>
+            <p className="text-[length:var(--t-xs)] text-slate-600">No major catalysts.</p>
           ) : (
             <ul className="space-y-1">
               {day.bullets.map((b, i) => (
-                <li key={i} className="text-[12px] text-slate-300 leading-relaxed flex items-start gap-1.5">
+                <li key={i} className="text-[length:var(--t-xs)] text-slate-300 leading-relaxed flex items-start gap-1.5">
                   <span style={{ color: "rgb(99 102 241)", marginTop: 3 }}>·</span>
                   <span>{b}</span>
                 </li>
@@ -213,7 +213,7 @@ function BottomLineBlock({ text, confidence, tag }: { text: string; confidence: 
         border: "1px solid rgba(var(--accent-rgb), 0.2)",
       }}
     >
-      <p className="text-[15px] text-slate-100 leading-relaxed mb-3">{text}</p>
+      <p className="text-[length:var(--t-sm)] text-slate-100 leading-relaxed mb-3">{text}</p>
       <div className="flex items-center gap-3">
         <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
           <div
@@ -224,9 +224,9 @@ function BottomLineBlock({ text, confidence, tag }: { text: string; confidence: 
             }}
           />
         </div>
-        <span className="text-xs font-bold tabular-nums text-white shrink-0">{pct}%</span>
+        <span className="text-[length:var(--t-xs)] font-bold tabular-nums text-white shrink-0">{pct}%</span>
         <span
-          className="text-[10px] px-2 py-0.5 rounded"
+          className="text-[length:var(--t-2xs)] px-2 py-0.5 rounded"
           style={{ background: "rgba(255,255,255,0.07)", color: "rgb(148 163 184)" }}
         >
           {tag}
@@ -315,11 +315,11 @@ export function WsrLiteDetailModal({
           style={{ color: "rgb(var(--accent-rgb))" }}
         >
           <ChevronLeft size={20} />
-          <span className="text-sm font-medium">Back</span>
+          <span className="text-[length:var(--t-sm)] font-medium">Back</span>
         </button>
         <div className="text-center">
-          <h2 className="text-sm font-bold text-white leading-tight">⚡ Mid-Week Pulse</h2>
-          <p className="text-[11px] text-slate-500">{dateStr}{dayLabel ? ` · ${dayLabel}` : ""}</p>
+          <h2 className="text-[length:var(--t-sm)] font-bold text-white leading-tight">⚡ Mid-Week Pulse</h2>
+          <p className="text-[length:var(--t-xs)] text-slate-500">{dateStr}{dayLabel ? ` · ${dayLabel}` : ""}</p>
         </div>
         <button onClick={onClose} className="p-2 rounded-xl active:opacity-60" style={{ color: "rgb(100 116 139)" }}>
           <X size={18} />

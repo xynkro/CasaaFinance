@@ -40,21 +40,21 @@ function LegItem({ row }: { row: WheelNextLegRow }) {
       {/* Top: ticker + status */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-bold text-white">{row.ticker}</span>
-          <span className="text-[10px] font-semibold text-slate-500 shrink-0">
+          <span className="text-[length:var(--t-sm)] font-bold text-white">{row.ticker}</span>
+          <span className="text-[length:var(--t-2xs)] font-semibold text-slate-500 shrink-0">
             ${Number(row.current_strike).toFixed(Number(row.current_strike) < 10 ? 1 : 0)}{row.current_right}
           </span>
-          <span className={`text-[10px] font-semibold uppercase tracking-wider ${accountColor} shrink-0`}>
+          <span className={`text-[length:var(--t-2xs)] font-semibold uppercase tracking-wider ${accountColor} shrink-0`}>
             {accountLabel}
           </span>
         </div>
-        <div className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-bold border ${style.bg}`}>
+        <div className={`shrink-0 px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold border ${style.bg}`}>
           <span className={style.text}>{style.label}</span>
         </div>
       </div>
 
       {/* Current + DTE */}
-      <div className="flex items-center justify-between text-[10px]">
+      <div className="flex items-center justify-between text-[length:var(--t-2xs)]">
         <div className="flex items-center gap-2 text-slate-500">
           <Clock size={10} />
           <span className="tabular-nums">{dte}d DTE</span>
@@ -69,14 +69,14 @@ function LegItem({ row }: { row: WheelNextLegRow }) {
       {/* Recommendation — the actionable line */}
       <div className="flex items-start gap-1.5 pt-1 border-t border-white/5">
         <ArrowRight size={11} className="text-indigo-400 mt-0.5 shrink-0" />
-        <p className="text-[11px] text-slate-200 leading-relaxed">
+        <p className="text-[length:var(--t-xs)] text-slate-200 leading-relaxed">
           {row.recommendation || "No recommendation"}
         </p>
       </div>
 
       {/* Next leg metrics (if staged) */}
       {nextStrike > 0 && (
-        <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500 pt-1.5 border-t border-white/5">
+        <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500 pt-1.5 border-t border-white/5">
           <span>Next: <span className="text-slate-300 tabular-nums">${nextStrike.toFixed(2)}{row.next_right}</span></span>
           {nextDelta > 0 && (
             <span>Δ <span className="text-slate-300 tabular-nums">{nextDelta.toFixed(2)}</span></span>
@@ -98,11 +98,11 @@ function LegItem({ row }: { row: WheelNextLegRow }) {
         <div className="pt-2 border-t border-white/5 space-y-2">
           <div className="flex items-start gap-1.5">
             <AlertCircle size={10} className="text-slate-500 mt-0.5 shrink-0" />
-            <p className="text-[10px] text-slate-400 leading-relaxed">
+            <p className="text-[length:var(--t-2xs)] text-slate-400 leading-relaxed">
               {row.reasoning || "No reasoning"}
             </p>
           </div>
-          <div className="flex items-center gap-2 text-[10px]">
+          <div className="flex items-center gap-2 text-[length:var(--t-2xs)]">
             <span className="text-slate-500">Confidence:</span>
             <div className="flex-1 h-1 rounded-full bg-white/5 overflow-hidden">
               <div
@@ -112,7 +112,7 @@ function LegItem({ row }: { row: WheelNextLegRow }) {
             </div>
             <span className="tabular-nums text-slate-300 font-semibold">{confidence}</span>
           </div>
-          <div className="text-[10px] text-slate-600">
+          <div className="text-[length:var(--t-2xs)] text-slate-600">
             Action: <span className="text-indigo-400 font-medium">{row.next_action}</span>
             {row.next_strategy && <> · Strategy: <span className="text-indigo-400 font-medium">{row.next_strategy}</span></>}
           </div>
@@ -128,7 +128,7 @@ export function WheelContinuationCard({ rows }: { rows: WheelNextLegRow[] }) {
       <Card>
         <div className="flex items-center gap-2 text-slate-500">
           <Repeat size={16} />
-          <span className="text-sm">No open options to continue</span>
+          <span className="text-[length:var(--t-sm)]">No open options to continue</span>
         </div>
       </Card>
     );
@@ -158,15 +158,15 @@ export function WheelContinuationCard({ rows }: { rows: WheelNextLegRow[] }) {
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Repeat size={14} className="text-indigo-400" />
-          <h2 className="text-sm font-medium text-slate-400">Wheel Continuation</h2>
+          <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Wheel Continuation</h2>
         </div>
         <div className="flex items-center gap-2">
           {urgent > 0 && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/20">
+            <span className="px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/20">
               {urgent} NEED ACTION
             </span>
           )}
-          <span className="text-[10px] text-slate-600">{rows.length} positions</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-600">{rows.length} positions</span>
         </div>
       </div>
 

@@ -48,7 +48,7 @@ export function PositionsTable({
   if (!positions.length) {
     return (
       <div className="glass rounded-2xl p-5">
-        <p className="text-sm text-slate-500">No positions data yet</p>
+        <p className="text-[length:var(--t-sm)] text-slate-500">No positions data yet</p>
       </div>
     );
   }
@@ -59,8 +59,8 @@ export function PositionsTable({
     <>
       <div className="glass rounded-2xl overflow-hidden">
         <div className="px-5 pt-4 pb-2 flex items-center justify-between">
-          <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">Positions</h3>
-          <span className="text-[10px] text-slate-600">{positions.length} holdings</span>
+          <h3 className="text-[length:var(--t-xs)] font-medium text-slate-500 uppercase tracking-wider">Positions</h3>
+          <span className="text-[length:var(--t-2xs)] text-slate-600">{positions.length} holdings</span>
         </div>
 
         <div className="divide-y divide-white/5">
@@ -80,16 +80,16 @@ export function PositionsTable({
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                     isUp ? "bg-emerald-500/8" : "bg-red-500/8"
                   }`}>
-                    <span className="text-xs font-bold text-slate-200">
+                    <span className="text-[length:var(--t-xs)] font-bold text-slate-200">
                       {pos.ticker.slice(0, 4)}
                     </span>
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-semibold text-slate-100">{pos.ticker}</span>
+                      <span className="text-[length:var(--t-sm)] font-semibold text-slate-100">{pos.ticker}</span>
                       <ExitStatusBadge plan={exitPlan} />
                     </div>
-                    <div className="text-xs text-slate-500">
+                    <div className="text-[length:var(--t-xs)] text-slate-500">
                       {Number(pos.qty).toFixed(0)} @ {fmt(pos.avg_cost, prefix)}
                     </div>
                   </div>
@@ -97,14 +97,14 @@ export function PositionsTable({
 
                 <div className="flex items-center gap-2 shrink-0 ml-3">
                   <div className="text-right">
-                    <div className="text-sm font-semibold text-slate-100 tabular-nums">
+                    <div className="text-[length:var(--t-sm)] font-semibold text-slate-100 tabular-nums">
                       {fmt(pos.mkt_val, prefix)}
                     </div>
                     <div className="flex items-center justify-end gap-2">
-                      <span className={`text-xs font-medium tabular-nums ${isUp ? "text-emerald-400" : "text-red-400"}`}>
+                      <span className={`text-[length:var(--t-xs)] font-medium tabular-nums ${isUp ? "text-emerald-400" : "text-red-400"}`}>
                         {isUp ? "+" : ""}{fmt(pos.upl, "")}
                       </span>
-                      <span className="text-[10px] text-slate-500 tabular-nums">
+                      <span className="text-[length:var(--t-2xs)] text-slate-500 tabular-nums">
                         {weight.text}
                       </span>
                     </div>

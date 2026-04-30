@@ -126,7 +126,7 @@ export function TabBar({
               {/* Label */}
               <span
                 style={{
-                  fontSize: "9px",
+                  fontSize: "var(--t-2xs)",
                   fontWeight: isActive ? 700 : 500,
                   letterSpacing: "0.04em",
                   color: isActive ? `rgb(var(--accent-rgb))` : "rgb(56 68 84)",

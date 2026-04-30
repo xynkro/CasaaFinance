@@ -73,27 +73,27 @@ function AlertItem({ alert }: { alert: OptionsDefenseRow }) {
         <Icon size={14} className={`${meta.text} shrink-0 mt-0.5`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className={`text-[10px] font-bold ${meta.text}`}>{meta.label}</span>
-            <span className={`text-[10px] font-semibold uppercase ${accountColor}`}>
+            <span className={`text-[length:var(--t-2xs)] font-bold ${meta.text}`}>{meta.label}</span>
+            <span className={`text-[length:var(--t-2xs)] font-semibold uppercase ${accountColor}`}>
               {accountLabel}
             </span>
             {alert.delta_info && (
-              <span className="px-1.5 py-0.5 rounded text-[9px] bg-white/5 text-slate-400 font-mono">
+              <span className="px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] bg-white/5 text-slate-400 font-mono">
                 {alert.delta_info}
               </span>
             )}
           </div>
-          <div className="text-sm font-semibold text-white mt-0.5">
+          <div className="text-[length:var(--t-sm)] font-semibold text-white mt-0.5">
             {alert.title}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+          <div className="text-[length:var(--t-xs)] text-slate-400 mt-1 leading-relaxed">
             {alert.description}
           </div>
         </div>
       </div>
 
       {/* Action */}
-      <div className="text-[11px] leading-relaxed pl-6">
+      <div className="text-[length:var(--t-xs)] leading-relaxed pl-6">
         <span className="text-slate-500">Action: </span>
         <span className={`font-medium ${meta.text}`}>{alert.action}</span>
       </div>
@@ -109,9 +109,9 @@ export function OptionsDefenseCard({ alerts }: { alerts: OptionsDefenseRow[] }) 
       <Card>
         <div className="flex items-center gap-2">
           <Shield size={14} className="text-emerald-400" />
-          <h2 className="text-sm font-medium text-slate-400">Daily Defense</h2>
+          <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Daily Defense</h2>
         </div>
-        <div className="mt-2 flex items-center gap-2 text-emerald-400 text-sm">
+        <div className="mt-2 flex items-center gap-2 text-emerald-400 text-[length:var(--t-sm)]">
           <Shield size={16} />
           <span>All positions nominal — no alerts today</span>
         </div>
@@ -138,28 +138,28 @@ export function OptionsDefenseCard({ alerts }: { alerts: OptionsDefenseRow[] }) 
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Shield size={14} className={urgent > 0 ? "text-red-400" : "text-indigo-400"} />
-          <h2 className="text-sm font-medium text-slate-400">Daily Defense</h2>
+          <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Daily Defense</h2>
         </div>
         <div className="flex items-center gap-1.5">
           {counts.CRITICAL > 0 && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
+            <span className="px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-red-500/20 text-red-400 border border-red-500/30">
               {counts.CRITICAL} CRIT
             </span>
           )}
           {counts.HIGH > 0 && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/30">
+            <span className="px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-orange-500/20 text-orange-400 border border-orange-500/30">
               {counts.HIGH} HIGH
             </span>
           )}
           {counts.MEDIUM > 0 && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+            <span className="px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
               {counts.MEDIUM} MED
             </span>
           )}
         </div>
       </div>
 
-      <p className="text-[10px] text-slate-600 mb-3 leading-relaxed">
+      <p className="text-[length:var(--t-2xs)] text-slate-600 mb-3 leading-relaxed">
         Updated {formatRelativeDate(alerts[0]?.date || "")} · day-over-day changes for each open option.
         Sorted by urgency.
       </p>
@@ -173,7 +173,7 @@ export function OptionsDefenseCard({ alerts }: { alerts: OptionsDefenseRow[] }) 
       {hiddenCount > 0 && (
         <button
           onClick={() => setShowAll(true)}
-          className="mt-3 w-full py-2 rounded-lg text-[10px] text-slate-500 hover:text-slate-300 border border-white/5 hover:border-white/10 transition-all"
+          className="mt-3 w-full py-2 rounded-lg text-[length:var(--t-2xs)] text-slate-500 hover:text-slate-300 border border-white/5 hover:border-white/10 transition-all"
         >
           Show {hiddenCount} more {hiddenCount === 1 ? "alert" : "alerts"}
         </button>

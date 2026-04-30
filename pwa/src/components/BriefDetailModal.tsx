@@ -31,14 +31,14 @@ function Section({
   return (
     <section className="pt-4 border-t border-white/5">
       <div className="flex items-center gap-2 mb-2.5">
-        <span className="text-base">{icon}</span>
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{title}</h3>
+        <span className="text-[length:var(--t-base)]">{icon}</span>
+        <h3 className="text-[length:var(--t-xs)] font-semibold uppercase tracking-wider text-slate-400">{title}</h3>
       </div>
-      {text && <p className="text-sm text-slate-200 leading-relaxed">{text}</p>}
+      {text && <p className="text-[length:var(--t-sm)] text-slate-200 leading-relaxed">{text}</p>}
       {items && items.length > 0 && (
         <ul className="space-y-2">
           {items.map((b, i) => (
-            <li key={i} className="flex gap-2.5 text-sm text-slate-200 leading-relaxed">
+            <li key={i} className="flex gap-2.5 text-[length:var(--t-sm)] text-slate-200 leading-relaxed">
               <span className="text-indigo-400/60 mt-1 shrink-0">•</span>
               <span>{b}</span>
             </li>
@@ -122,13 +122,13 @@ export function BriefDetailModal({
           aria-label="Back"
         >
           <ChevronLeft size={20} />
-          <span className="text-sm">Back</span>
+          <span className="text-[length:var(--t-sm)]">Back</span>
         </button>
         <div className="flex items-center gap-2">
-          <span className="text-lg">⚡</span>
+          <span className="text-[length:var(--t-lg)]">⚡</span>
           <div className="text-right">
-            <h2 className="text-sm font-bold text-white leading-tight">Daily Brief</h2>
-            <time className="text-[10px] text-slate-500 tabular-nums">{shortDate(row.date)}</time>
+            <h2 className="text-[length:var(--t-sm)] font-bold text-white leading-tight">Daily Brief</h2>
+            <time className="text-[length:var(--t-2xs)] text-slate-500 tabular-nums">{shortDate(row.date)}</time>
           </div>
         </div>
         <button
@@ -146,13 +146,13 @@ export function BriefDetailModal({
           {/* Sentiment + headline */}
           <div>
             <div className="flex items-center gap-2 mb-2">
-              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${chip.bg} ${chip.text}`}>
-                <span className="text-[10px]">{chip.emoji}</span>
+              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[length:var(--t-xs)] font-semibold ${chip.bg} ${chip.text}`}>
+                <span className="text-[length:var(--t-2xs)]">{chip.emoji}</span>
                 <span>{chip.label}</span>
               </div>
             </div>
             {row.headline && (
-              <p className="text-lg text-white font-semibold leading-snug">{row.headline}</p>
+              <p className="text-[length:var(--t-lg)] text-white font-semibold leading-snug">{row.headline}</p>
             )}
           </div>
 
@@ -160,10 +160,10 @@ export function BriefDetailModal({
           {row.verdict && (
             <div className="rounded-xl bg-indigo-500/10 border border-indigo-500/20 px-4 py-3">
               <div className="flex items-start gap-2.5">
-                <span className="text-base mt-0.5">🎯</span>
+                <span className="text-[length:var(--t-base)] mt-0.5">🎯</span>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wider font-semibold text-indigo-400 mb-1">Verdict</div>
-                  <p className="text-[14px] text-slate-100 leading-snug">{row.verdict}</p>
+                  <div className="text-[length:var(--t-2xs)] uppercase tracking-wider font-semibold text-indigo-400 mb-1">Verdict</div>
+                  <p className="text-[length:var(--t-sm)] text-slate-100 leading-snug">{row.verdict}</p>
                 </div>
               </div>
             </div>
@@ -173,12 +173,12 @@ export function BriefDetailModal({
           {bullets.length > 0 && (
             <div className="rounded-xl bg-white/[0.02] border border-white/5 px-4 py-3">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm">📌</span>
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Key Takeaways</h3>
+                <span className="text-[length:var(--t-sm)]">📌</span>
+                <h3 className="text-[length:var(--t-xs)] font-semibold uppercase tracking-wider text-slate-400">Key Takeaways</h3>
               </div>
               <ul className="space-y-2">
                 {bullets.map((b, i) => (
-                  <li key={i} className="flex gap-2.5 text-sm text-slate-200 leading-relaxed">
+                  <li key={i} className="flex gap-2.5 text-[length:var(--t-sm)] text-slate-200 leading-relaxed">
                     <span className="text-indigo-400/60 mt-0.5 shrink-0 font-semibold">{i + 1}.</span>
                     <span>{b}</span>
                   </li>
@@ -199,10 +199,10 @@ export function BriefDetailModal({
           {row.raw_md && (
             <section className="pt-4 border-t border-white/5">
               <div className="flex items-center gap-2 mb-2.5">
-                <span className="text-base">📄</span>
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Full Brief</h3>
+                <span className="text-[length:var(--t-base)]">📄</span>
+                <h3 className="text-[length:var(--t-xs)] font-semibold uppercase tracking-wider text-slate-400">Full Brief</h3>
               </div>
-              <pre className="text-[12.5px] text-slate-300 leading-relaxed whitespace-pre-wrap font-sans break-words">
+              <pre className="text-[length:var(--t-xs)] text-slate-300 leading-relaxed whitespace-pre-wrap font-sans break-words">
                 {row.raw_md}
               </pre>
             </section>

@@ -7,7 +7,7 @@ function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[10px] text-slate-500 font-semibold shrink-0">CONF</span>
+      <span className="text-[length:var(--t-2xs)] text-slate-500 font-semibold shrink-0">CONF</span>
       <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
         <div
           className="h-full"
@@ -17,7 +17,7 @@ function ConfidenceBar({ value }: { value: number }) {
           }}
         />
       </div>
-      <span className="text-xs font-bold tabular-nums text-slate-100 shrink-0">{pct}%</span>
+      <span className="text-[length:var(--t-xs)] font-bold tabular-nums text-slate-100 shrink-0">{pct}%</span>
     </div>
   );
 }
@@ -59,8 +59,8 @@ export function WsrLiteCard({
             <Activity size={16} style={{ color: "rgb(100 116 139)" }} />
           </div>
           <div>
-            <p className="text-sm font-medium text-slate-400">No mid-week check-in yet</p>
-            <p className="text-[11px] text-slate-600 mt-0.5 flex items-center gap-1">
+            <p className="text-[length:var(--t-sm)] font-medium text-slate-400">No mid-week check-in yet</p>
+            <p className="text-[length:var(--t-xs)] text-slate-600 mt-0.5 flex items-center gap-1">
               <Clock size={10} />
               Next pulse: {nextPulseLabel()}
             </p>
@@ -90,16 +90,16 @@ export function WsrLiteCard({
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <span className="text-base">⚡</span>
-            <h2 className="text-sm font-semibold text-slate-200">Mid-Week Pulse</h2>
-            <time className="text-xs text-slate-500 tabular-nums ml-1">{dateStr}</time>
+            <span className="text-[length:var(--t-base)]">⚡</span>
+            <h2 className="text-[length:var(--t-sm)] font-semibold text-slate-200">Mid-Week Pulse</h2>
+            <time className="text-[length:var(--t-xs)] text-slate-500 tabular-nums ml-1">{dateStr}</time>
             {!fresh && (
-              <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: "rgb(100 116 139)" }}>PREV</span>
+              <span className="text-[length:var(--t-2xs)] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.06)", color: "rgb(100 116 139)" }}>PREV</span>
             )}
           </div>
           {/* Regime badge */}
           <div
-            className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border"
+            className="inline-flex items-center px-2.5 py-1 rounded-full text-[length:var(--t-xs)] font-semibold border"
             style={
               regimeUnchanged
                 ? { background: "rgba(52,211,153,0.1)", color: "#34d399", border: "1px solid rgba(52,211,153,0.25)" }
@@ -114,17 +114,17 @@ export function WsrLiteCard({
         {triggers.length > 0 && (
           <div className="flex items-center gap-3 mb-3">
             {hitCount > 0 && (
-              <span className="text-[11px] font-semibold" style={{ color: "#f87171" }}>
+              <span className="text-[length:var(--t-xs)] font-semibold" style={{ color: "#f87171" }}>
                 {hitCount} HIT
               </span>
             )}
             {closeCount > 0 && (
-              <span className="text-[11px] font-semibold" style={{ color: "#fbbf24" }}>
+              <span className="text-[length:var(--t-xs)] font-semibold" style={{ color: "#fbbf24" }}>
                 {closeCount} CLOSE
               </span>
             )}
             {dormCount > 0 && (
-              <span className="text-[11px]" style={{ color: "rgb(100 116 139)" }}>
+              <span className="text-[length:var(--t-xs)]" style={{ color: "rgb(100 116 139)" }}>
                 {dormCount} dormant
               </span>
             )}
@@ -138,13 +138,13 @@ export function WsrLiteCard({
 
         {/* Bottom line excerpt */}
         {bottomLine.text && (
-          <p className="text-sm text-slate-100 leading-relaxed line-clamp-3">
+          <p className="text-[length:var(--t-sm)] text-slate-100 leading-relaxed line-clamp-3">
             {bottomLine.text}
           </p>
         )}
 
         {onOpen && (
-          <div className="flex items-center justify-center gap-1 pt-3 mt-3 border-t border-white/5 text-xs text-indigo-400 font-medium">
+          <div className="flex items-center justify-center gap-1 pt-3 mt-3 border-t border-white/5 text-[length:var(--t-xs)] text-indigo-400 font-medium">
             <span>Open full pulse</span>
             <ChevronRight size={13} />
           </div>

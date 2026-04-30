@@ -77,13 +77,13 @@ export function ArchiveViewer({
           aria-label="Back"
         >
           <ChevronLeft size={20} />
-          <span className="text-sm">Back</span>
+          <span className="text-[length:var(--t-sm)]">Back</span>
         </button>
         <div className="flex items-center gap-2 min-w-0 px-2">
-          <span className="text-lg shrink-0">📄</span>
+          <span className="text-[length:var(--t-lg)] shrink-0">📄</span>
           <div className="text-right min-w-0">
-            <h2 className="text-sm font-bold text-white leading-tight truncate max-w-[50vw]">{row.title}</h2>
-            <time className="text-[10px] text-slate-500 tabular-nums">{shortDate(row.date)}</time>
+            <h2 className="text-[length:var(--t-sm)] font-bold text-white leading-tight truncate max-w-[50vw]">{row.title}</h2>
+            <time className="text-[length:var(--t-2xs)] text-slate-500 tabular-nums">{shortDate(row.date)}</time>
           </div>
         </div>
         <a

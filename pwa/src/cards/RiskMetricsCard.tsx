@@ -133,14 +133,14 @@ function MetricCell({
 }) {
   return (
     <div className="glass rounded-xl p-3" title={tooltip}>
-      <div className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+      <div className="text-[length:var(--t-2xs)] text-slate-400 font-semibold uppercase tracking-wider">
         {label}
       </div>
-      <div className={`text-base font-bold tabular-nums mt-1 ${accent ?? "text-slate-100"}`}>
+      <div className={`text-[length:var(--t-base)] font-bold tabular-nums mt-1 ${accent ?? "text-slate-100"}`}>
         {value}
       </div>
       {subValue && (
-        <div className="text-[10px] text-slate-400 mt-0.5">{subValue}</div>
+        <div className="text-[length:var(--t-2xs)] text-slate-400 mt-0.5">{subValue}</div>
       )}
     </div>
   );
@@ -234,10 +234,10 @@ export function RiskMetricsCard({
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Scale size={14} style={{ color: "var(--accent)" }} />
-            <h2 className="text-sm font-semibold text-slate-100">Portfolio Risk Profile</h2>
+            <h2 className="text-[length:var(--t-sm)] font-semibold text-slate-100">Portfolio Risk Profile</h2>
           </div>
           {insufficient && (
-            <span className="text-[10px] text-amber-400 flex items-center gap-1">
+            <span className="text-[length:var(--t-2xs)] text-amber-400 flex items-center gap-1">
               <AlertTriangle size={10} />
               Need 5+ days data
             </span>
@@ -263,17 +263,17 @@ export function RiskMetricsCard({
             </svg>
             <div className="absolute inset-0 flex flex-col items-center justify-center">
               <div className={`text-2xl font-bold tabular-nums ${risk.color}`}>{risk.score}</div>
-              <div className="text-[9px] text-slate-400 font-semibold">/ 100</div>
+              <div className="text-[length:var(--t-2xs)] text-slate-400 font-semibold">/ 100</div>
             </div>
           </div>
 
           {/* Label + breakdown */}
           <div className="flex-1 min-w-0">
-            <div className={`text-base font-bold ${risk.color}`}>{risk.label}</div>
-            <p className="text-[11px] text-slate-300 leading-relaxed mt-1">
+            <div className={`text-[length:var(--t-base)] font-bold ${risk.color}`}>{risk.label}</div>
+            <p className="text-[length:var(--t-xs)] text-slate-300 leading-relaxed mt-1">
               Composite of volatility, max drawdown, and market beta. Updated daily.
             </p>
-            <div className="grid grid-cols-3 gap-1.5 mt-2 text-[10px]">
+            <div className="grid grid-cols-3 gap-1.5 mt-2 text-[length:var(--t-2xs)]">
               <div>
                 <div className="text-slate-400">σ (ann)</div>
                 <div className="text-slate-100 font-semibold tabular-nums">
@@ -301,7 +301,7 @@ export function RiskMetricsCard({
       <Card>
         <div className="flex items-center gap-2 mb-3">
           <Activity size={14} className="text-indigo-400" />
-          <h3 className="text-sm font-semibold text-slate-100">Performance</h3>
+          <h3 className="text-[length:var(--t-sm)] font-semibold text-slate-100">Performance</h3>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -335,10 +335,10 @@ export function RiskMetricsCard({
       <Card>
         <div className="flex items-center gap-2 mb-3">
           <TrendingDown size={14} className="text-red-400" />
-          <h3 className="text-sm font-semibold text-slate-100">Drawdown Analysis</h3>
+          <h3 className="text-[length:var(--t-sm)] font-semibold text-slate-100">Drawdown Analysis</h3>
         </div>
 
-        <div className="space-y-2 text-[11px]">
+        <div className="space-y-2 text-[length:var(--t-xs)]">
           <div className="flex justify-between">
             <span className="text-slate-400">Peak portfolio value</span>
             <span className="text-slate-100 tabular-nums font-semibold">${dd.peak.toLocaleString("en-US", { maximumFractionDigits: 0 })}</span>
@@ -358,7 +358,7 @@ export function RiskMetricsCard({
         {dd.pct > 0.10 && (
           <div className="mt-3 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-start gap-2">
             <AlertTriangle size={11} className="text-amber-400 mt-0.5 shrink-0" />
-            <p className="text-[10px] text-slate-200 leading-relaxed">
+            <p className="text-[length:var(--t-2xs)] text-slate-200 leading-relaxed">
               Drawdown exceeds 10%. Review concentration and consider reducing leveraged exposure.
             </p>
           </div>
@@ -369,9 +369,9 @@ export function RiskMetricsCard({
       <Card>
         <div className="flex items-center gap-2 mb-3">
           <TrendingUp size={14} className="text-emerald-400" />
-          <h3 className="text-sm font-semibold text-slate-100">Market Sensitivity</h3>
+          <h3 className="text-[length:var(--t-sm)] font-semibold text-slate-100">Market Sensitivity</h3>
         </div>
-        <div className="text-[11px] text-slate-300 leading-relaxed space-y-2">
+        <div className="text-[length:var(--t-xs)] text-slate-300 leading-relaxed space-y-2">
           <div className="flex justify-between">
             <span className="text-slate-400">If SPX +1%, portfolio expected</span>
             <span className="text-slate-100 tabular-nums font-semibold">

@@ -29,8 +29,8 @@ function ArchiveItem({ row, onOpen }: { row: ArchiveRow; onOpen: () => void }) {
         <FileText size={18} className="text-indigo-400" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-slate-200 truncate">{row.title}</div>
-        <div className="text-xs text-slate-500">{shortDate(row.date)}</div>
+        <div className="text-[length:var(--t-sm)] font-medium text-slate-200 truncate">{row.title}</div>
+        <div className="text-[length:var(--t-xs)] text-slate-500">{shortDate(row.date)}</div>
       </div>
       <ChevronRight size={14} className="text-slate-600 shrink-0" />
     </button>
@@ -46,17 +46,17 @@ function DailyBriefItem({ row, onOpen }: { row: DailyBriefRow; onOpen: () => voi
       className="w-full px-5 py-3.5 hover:bg-white/3 active:bg-white/5 transition-colors text-left"
     >
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-xs font-semibold text-slate-200 tabular-nums">{shortDate(row.date)}</span>
-        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ${chip.bg} ${chip.text}`}>
-          <span className="text-[9px]">{chip.emoji}</span>
+        <span className="text-[length:var(--t-xs)] font-semibold text-slate-200 tabular-nums">{shortDate(row.date)}</span>
+        <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[length:var(--t-2xs)] font-semibold ${chip.bg} ${chip.text}`}>
+          <span className="text-[length:var(--t-2xs)]">{chip.emoji}</span>
           <span>{chip.label}</span>
         </div>
       </div>
       {row.headline && (
-        <p className="text-[13px] text-slate-200 leading-snug mb-1 font-medium">{row.headline}</p>
+        <p className="text-[length:var(--t-sm)] text-slate-200 leading-snug mb-1 font-medium">{row.headline}</p>
       )}
       {row.verdict && (
-        <p className="text-xs text-slate-400 leading-snug">{row.verdict}</p>
+        <p className="text-[length:var(--t-xs)] text-slate-400 leading-snug">{row.verdict}</p>
       )}
     </button>
   );
@@ -70,8 +70,8 @@ function EmptyState() {
           <Archive size={20} className="text-slate-500" />
         </div>
         <div className="text-center">
-          <p className="text-sm font-medium text-slate-400">No reports yet</p>
-          <p className="text-xs text-slate-500 mt-0.5">WSR PDFs and daily briefs will appear here</p>
+          <p className="text-[length:var(--t-sm)] font-medium text-slate-400">No reports yet</p>
+          <p className="text-[length:var(--t-xs)] text-slate-500 mt-0.5">WSR PDFs and daily briefs will appear here</p>
         </div>
       </div>
     </Card>
@@ -99,9 +99,9 @@ export function ArchivePage({ archive, dailyHistory }: { archive: ArchiveRow[]; 
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileText size={12} className="text-indigo-400" />
-                <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">Weekly Strategy Reviews</h3>
+                <h3 className="text-[length:var(--t-xs)] font-medium text-slate-500 uppercase tracking-wider">Weekly Strategy Reviews</h3>
               </div>
-              <span className="text-xs text-slate-600">{archive.length}</span>
+              <span className="text-[length:var(--t-xs)] text-slate-600">{archive.length}</span>
             </div>
             <div className="glass rounded-2xl overflow-hidden divide-y divide-white/5">
               {archive.map((row, i) => (
@@ -119,9 +119,9 @@ export function ArchivePage({ archive, dailyHistory }: { archive: ArchiveRow[]; 
             <div className="flex items-center justify-between mt-2">
               <div className="flex items-center gap-2">
                 <Newspaper size={12} className="text-indigo-400" />
-                <h3 className="text-xs font-medium text-slate-500 uppercase tracking-wider">Daily Briefs</h3>
+                <h3 className="text-[length:var(--t-xs)] font-medium text-slate-500 uppercase tracking-wider">Daily Briefs</h3>
               </div>
-              <span className="text-xs text-slate-600">{dailyHistory.length}</span>
+              <span className="text-[length:var(--t-xs)] text-slate-600">{dailyHistory.length}</span>
             </div>
             <div className="glass rounded-2xl overflow-hidden divide-y divide-white/5">
               {dailyHistory.map((row, i) => (

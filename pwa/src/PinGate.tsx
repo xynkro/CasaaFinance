@@ -120,8 +120,8 @@ export function PinGate({ onSuccess }: { onSuccess: () => void }) {
         </div>
 
         <div className="text-center">
-          <h1 className="text-xl font-bold text-slate-100 mb-1">Casaa Finance</h1>
-          <p className="text-sm text-slate-400">Enter your PIN to continue</p>
+          <h1 className="text-[length:var(--t-xl)] font-bold text-slate-100 mb-1">Casaa Finance</h1>
+          <p className="text-[length:var(--t-sm)] text-slate-400">Enter your PIN to continue</p>
         </div>
 
         <div className="flex gap-2.5" onPaste={handlePaste}>
@@ -148,7 +148,7 @@ export function PinGate({ onSuccess }: { onSuccess: () => void }) {
         </div>
 
         {error && (
-          <p className="text-sm text-red-400 font-medium">Incorrect PIN</p>
+          <p className="text-[length:var(--t-sm)] text-red-400 font-medium">Incorrect PIN</p>
         )}
       </div>
 

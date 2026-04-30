@@ -12,6 +12,13 @@ const ACCENT_COLORS: { key: Settings["accentColor"]; hex: string; label: string 
   { key: "cyan",    hex: "#22d3ee", label: "Cyan" },
 ];
 
+const FONT_PRESETS: { px: number; label: string }[] = [
+  { px: 14, label: "Compact" },
+  { px: 16, label: "Comfortable" },
+  { px: 18, label: "Large" },
+  { px: 20, label: "Extra Large" },
+];
+
 function Toggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
     <button
@@ -55,7 +62,7 @@ function Slider({
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full h-1.5 rounded-full appearance-none bg-slate-600 accent-indigo-500 cursor-pointer"
       />
-      {label && <span className="text-xs text-slate-400 tabular-nums w-8 text-right shrink-0">{label}</span>}
+      {label && <span className="text-[length:var(--t-xs)] text-slate-400 tabular-nums w-8 text-right shrink-0">{label}</span>}
     </div>
   );
 }
@@ -78,8 +85,8 @@ function SettingRow({
           <Icon size={16} className="text-slate-400" />
         </div>
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-100">{label}</div>
-          {description && <div className="text-xs text-slate-400 mt-0.5">{description}</div>}
+          <div className="text-[length:var(--t-sm)] font-semibold text-slate-100">{label}</div>
+          {description && <div className="text-[length:var(--t-xs)] text-slate-400 mt-0.5">{description}</div>}
         </div>
       </div>
       <div className="shrink-0 ml-3">{children}</div>
@@ -108,8 +115,8 @@ function BuildChip() {
         className="glass flex items-center gap-2.5 px-3.5 py-2 rounded-full border border-white/10 hover:border-white/20 active:scale-95 transition-all"
         aria-label={`Copy build hash ${build}`}
       >
-        <span className="text-[10px] font-medium tracking-[0.12em] text-slate-400 uppercase">Build</span>
-        <span className="text-[12px] font-mono font-semibold text-slate-100 tabular-nums">{build}</span>
+        <span className="text-[length:var(--t-2xs)] font-medium tracking-[0.12em] text-slate-400 uppercase">Build</span>
+        <span className="text-[length:var(--t-xs)] font-mono font-semibold text-slate-100 tabular-nums">{build}</span>
         {copied ? (
           <Check size={12} className="text-emerald-400" />
         ) : (
@@ -133,7 +140,7 @@ export function SettingsPage({
     <div className="flex flex-col gap-4 px-4 pb-4">
       {/* Accent color */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-3">Accent Color</h3>
+        <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-3">Accent Color</h3>
         <div className="flex items-center gap-2 flex-wrap">
           {ACCENT_COLORS.map((c) => (
             <button
@@ -146,7 +153,7 @@ export function SettingsPage({
               }`}
             >
               <div className="w-4 h-4 rounded-full shadow-lg" style={{ background: c.hex, boxShadow: `0 0 10px ${c.hex}66` }} />
-              <span className="text-xs font-medium text-slate-200">{c.label}</span>
+              <span className="text-[length:var(--t-xs)] font-medium text-slate-200">{c.label}</span>
             </button>
           ))}
         </div>
@@ -154,7 +161,7 @@ export function SettingsPage({
 
       {/* Layout — safe area */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">Layout & Safe Area</h3>
+        <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-2">Layout & Safe Area</h3>
         <div className="divide-y divide-white/5">
           <SettingRow icon={Smartphone} label="Ignore iOS safe area" description="Use custom padding instead">
             <Toggle on={settings.ignoreSafeArea} onToggle={() => onUpdate({ ignoreSafeArea: !settings.ignoreSafeArea })} />
@@ -180,7 +187,7 @@ export function SettingsPage({
 
       {/* Appearance */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">Appearance</h3>
+        <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-2">Appearance</h3>
         <div className="divide-y divide-white/5">
           <SettingRow icon={Sun} label="Background darkness" description="Darken the background image">
             <Slider value={settings.bgDarkness} min={20} max={95} onChange={(v) => onUpdate({ bgDarkness: v })} label={`${settings.bgDarkness}%`} />
@@ -194,21 +201,41 @@ export function SettingsPage({
             <Slider value={settings.cardOpacity} min={10} max={100} onChange={(v) => onUpdate({ cardOpacity: v })} label={`${settings.cardOpacity}%`} />
           </SettingRow>
 
-          <SettingRow icon={Type} label="Font size" description="Base text size">
+          <SettingRow icon={Type} label="Font size" description="Scales the entire UI">
             <Slider value={settings.fontSize} min={12} max={22} onChange={(v) => onUpdate({ fontSize: v })} label={`${settings.fontSize}px`} />
           </SettingRow>
+          <div className="pb-3.5 -mt-1">
+            <div className="flex items-center gap-1.5 flex-wrap pl-11">
+              {FONT_PRESETS.map((p) => {
+                const active = settings.fontSize === p.px;
+                return (
+                  <button
+                    key={p.px}
+                    onClick={() => onUpdate({ fontSize: p.px })}
+                    className={`px-2.5 py-1 rounded-lg border transition-all text-[length:var(--t-2xs)] font-medium tabular-nums ${
+                      active
+                        ? "bg-white/10 border-white/25 text-slate-100"
+                        : "bg-white/3 border-white/5 text-slate-400 hover:border-white/15"
+                    }`}
+                  >
+                    {p.label} <span className="opacity-60">{p.px}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Display */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">Display</h3>
+        <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-2">Display</h3>
         <div className="divide-y divide-white/5">
           <SettingRow icon={DollarSign} label="Currency" description="How values are shown">
             <select
               value={settings.currency}
               onChange={(e) => onUpdate({ currency: e.target.value as Settings["currency"] })}
-              className="bg-slate-700/50 text-sm text-slate-200 rounded-lg px-3 py-1.5 border border-white/10 outline-none focus:border-indigo-500"
+              className="bg-slate-700/50 text-[length:var(--t-sm)] text-slate-200 rounded-lg px-3 py-1.5 border border-white/10 outline-none focus:border-indigo-500"
             >
               <option value="USD">USD only</option>
               <option value="SGD">SGD only</option>
@@ -228,7 +255,7 @@ export function SettingsPage({
             <select
               value={settings.defaultTab}
               onChange={(e) => onUpdate({ defaultTab: Number(e.target.value) })}
-              className="bg-slate-700/50 text-sm text-slate-200 rounded-lg px-3 py-1.5 border border-white/10 outline-none focus:border-indigo-500"
+              className="bg-slate-700/50 text-[length:var(--t-sm)] text-slate-200 rounded-lg px-3 py-1.5 border border-white/10 outline-none focus:border-indigo-500"
             >
               {TAB_NAMES.map((name, i) => (
                 <option key={name} value={i}>{name}</option>
@@ -240,7 +267,7 @@ export function SettingsPage({
 
       {/* Account */}
       <div className="glass rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-slate-300 uppercase tracking-wider mb-2">Account</h3>
+        <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-2">Account</h3>
         <button
           onClick={onLogout}
           className="flex items-center gap-3 w-full py-3 text-red-400 hover:text-red-300 transition-colors"
@@ -248,7 +275,7 @@ export function SettingsPage({
           <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center">
             <LogOut size={16} />
           </div>
-          <span className="text-sm font-medium">Lock app</span>
+          <span className="text-[length:var(--t-sm)] font-medium">Lock app</span>
         </button>
       </div>
 

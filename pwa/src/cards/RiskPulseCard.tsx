@@ -23,10 +23,10 @@ export function RiskPulseCard({ macro }: { macro: MacroRow | null }) {
     <Card>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <span className="text-base">🌡️</span>
-          <h2 className="text-sm font-semibold text-slate-200">Risk Pulse</h2>
+          <span className="text-[length:var(--t-base)]">🌡️</span>
+          <h2 className="text-[length:var(--t-sm)] font-semibold text-slate-200">Risk Pulse</h2>
         </div>
-        <span className={`text-xs font-semibold ${pulse.tone}`}>
+        <span className={`text-[length:var(--t-xs)] font-semibold ${pulse.tone}`}>
           {pulse.emoji} {pulse.label}
         </span>
       </div>
@@ -34,7 +34,7 @@ export function RiskPulseCard({ macro }: { macro: MacroRow | null }) {
       {/* VIX gauge */}
       <div className="mb-3">
         <div className="flex items-baseline justify-between mb-1.5">
-          <span className="text-[10px] text-slate-500 uppercase tracking-wider">VIX</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-500 uppercase tracking-wider">VIX</span>
           <span className="text-2xl font-bold text-white tabular-nums">{vix.toFixed(1)}</span>
         </div>
         <div className="relative h-1.5 rounded-full bg-slate-700/40 overflow-hidden">
@@ -46,7 +46,7 @@ export function RiskPulseCard({ macro }: { macro: MacroRow | null }) {
             style={{ left: `calc(${gaugePct}% - 5px)` }}
           />
         </div>
-        <div className="flex justify-between text-[9px] text-slate-600 mt-1">
+        <div className="flex justify-between text-[length:var(--t-2xs)] text-slate-600 mt-1">
           <span>10</span>
           <span>20</span>
           <span>30</span>
@@ -57,16 +57,16 @@ export function RiskPulseCard({ macro }: { macro: MacroRow | null }) {
       {/* Supporting macro */}
       <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/5">
         <div className="text-center">
-          <div className="text-[10px] text-slate-500 uppercase">10Y</div>
-          <div className="text-sm font-semibold text-slate-200 tabular-nums">{us10y.toFixed(2)}%</div>
+          <div className="text-[length:var(--t-2xs)] text-slate-500 uppercase">10Y</div>
+          <div className="text-[length:var(--t-sm)] font-semibold text-slate-200 tabular-nums">{us10y.toFixed(2)}%</div>
         </div>
         <div className="text-center">
-          <div className="text-[10px] text-slate-500 uppercase">DXY</div>
-          <div className="text-sm font-semibold text-slate-200 tabular-nums">{dxy.toFixed(1)}</div>
+          <div className="text-[length:var(--t-2xs)] text-slate-500 uppercase">DXY</div>
+          <div className="text-[length:var(--t-sm)] font-semibold text-slate-200 tabular-nums">{dxy.toFixed(1)}</div>
         </div>
         <div className="text-center">
-          <div className="text-[10px] text-slate-500 uppercase">SPX</div>
-          <div className="text-sm font-semibold text-slate-200 tabular-nums">
+          <div className="text-[length:var(--t-2xs)] text-slate-500 uppercase">SPX</div>
+          <div className="text-[length:var(--t-sm)] font-semibold text-slate-200 tabular-nums">
             {spx >= 1000 ? `${(spx / 1000).toFixed(2)}k` : spx.toFixed(0)}
           </div>
         </div>

@@ -32,7 +32,7 @@ function BuyScoreRing({ value }: { value: number }) {
           style={{ transition: "stroke-dashoffset 0.5s ease" }}
         />
       </svg>
-      <span className="absolute text-[9px] font-bold tabular-nums" style={{ color }}>
+      <span className="absolute text-[length:var(--t-2xs)] font-bold tabular-nums" style={{ color }}>
         {Math.round(value)}
       </span>
     </div>
@@ -64,14 +64,14 @@ function BuyItem({ row, onTap }: { row: TechnicalScoreRow; onTap: () => void }) 
           <BuyScoreRing value={buyScore} />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-sm font-bold text-white">{row.ticker}</span>
+              <span className="text-[length:var(--t-sm)] font-bold text-white">{row.ticker}</span>
               {catalyst && <Zap size={10} className="text-orange-400 shrink-0" />}
             </div>
-            <div className="text-[10px] text-slate-500">{trend} · {fmtPrice(close)}</div>
+            <div className="text-[length:var(--t-2xs)] text-slate-500">{trend} · {fmtPrice(close)}</div>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <span className={`text-[10px] font-bold ${
+          <span className={`text-[length:var(--t-2xs)] font-bold ${
             signal === "BUY" ? "text-emerald-400" :
             signal?.startsWith("SELL") ? "text-red-400" : "text-slate-400"
           }`}>
@@ -81,7 +81,7 @@ function BuyItem({ row, onTap }: { row: TechnicalScoreRow; onTap: () => void }) 
         </div>
       </div>
 
-      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
         <span>RSI <span className={`tabular-nums ${
           rsi > 70 ? "text-red-400" : rsi < 30 ? "text-amber-400" : "text-slate-300"
         }`}>{rsi.toFixed(0)}</span></span>
@@ -94,7 +94,7 @@ function BuyItem({ row, onTap }: { row: TechnicalScoreRow; onTap: () => void }) 
       </div>
 
       {row.top_drivers && (
-        <div className="text-[10px] text-slate-500 leading-relaxed">
+        <div className="text-[length:var(--t-2xs)] text-slate-500 leading-relaxed">
           {row.top_drivers.split("|").find((s) => s.trim().startsWith("BUY")) ?? row.top_drivers.split("|")[0]}
         </div>
       )}
@@ -122,7 +122,7 @@ export function BuyRecommendationsCard({
       <Card>
         <div className="flex items-center gap-2 text-slate-500">
           <TrendingUp size={16} />
-          <span className="text-sm">Buy ideas — no candidates scoring above {MIN_BUY_SCORE}</span>
+          <span className="text-[length:var(--t-sm)]">Buy ideas — no candidates scoring above {MIN_BUY_SCORE}</span>
         </div>
       </Card>
     );
@@ -134,12 +134,12 @@ export function BuyRecommendationsCard({
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <TrendingUp size={14} className="text-emerald-400" />
-            <h2 className="text-sm font-medium text-slate-400">Stock Buy Ideas</h2>
+            <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Stock Buy Ideas</h2>
           </div>
-          <span className="text-[10px] text-slate-600">{candidates.length} ranked by BUY score</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-600">{candidates.length} ranked by BUY score</span>
         </div>
 
-        <p className="text-[10px] text-slate-600 mb-3 leading-relaxed">
+        <p className="text-[length:var(--t-2xs)] text-slate-600 mb-3 leading-relaxed">
           From the daily technical scan: tickers where the environment favors stock buys.
           Tap for full analysis.
         </p>

@@ -62,7 +62,7 @@ export function StickyTabs({
                   boxShadow: isActive
                     ? `inset 0 1px 0 rgba(255,255,255,0.10), 0 1px 8px rgba(0,0,0,0.2), 0 0 0 0.5px rgba(var(--accent-rgb),0.18), 0 2px 14px rgba(var(--accent-rgb),0.10)`
                     : "none",
-                  fontSize: "12.5px",
+                  fontSize: "var(--t-xs)",
                   fontWeight: isActive ? 650 : 500,
                   letterSpacing: isActive ? "-0.01em" : "0",
                   transitionTimingFunction: "cubic-bezier(0.2, 0, 0, 1)",

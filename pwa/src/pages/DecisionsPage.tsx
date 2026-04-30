@@ -111,17 +111,17 @@ function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
     >
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[11px] font-semibold text-slate-200 tabular-nums">
+          <span className="text-[length:var(--t-xs)] font-semibold text-slate-200 tabular-nums">
             ${strike.toFixed(strike < 10 ? 1 : 0)}{decision.right}
           </span>
-          <span className="text-[9px] text-slate-600">exp {fmtExpiry(decision.expiry)}</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExpiry(decision.expiry)}</span>
         </div>
-        <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: "#818cf8" }}>
+        <span className="text-[length:var(--t-2xs)] font-semibold uppercase tracking-wider" style={{ color: "#818cf8" }}>
           {decision.strategy}
         </span>
       </div>
       <div
-        className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500"
+        className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500"
         style={{ marginBottom: 6 }}
       >
         <span>Premium <span className="text-slate-300 tabular-nums">{fmtMoney(decision.premium_per_share)}</span></span>
@@ -129,13 +129,13 @@ function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
         <span>Δ <span className="text-slate-300 tabular-nums">{isNaN(delta) ? "—" : delta.toFixed(2)}</span></span>
       </div>
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 text-[10px] text-slate-500">
+        <div className="flex items-center gap-3 text-[length:var(--t-2xs)] text-slate-500">
           <span>BE <span className="text-slate-300 tabular-nums">{fmtMoney(decision.breakeven)}</span></span>
           <span>IVR <span className="text-slate-300 tabular-nums">{isNaN(ivr) ? "—" : ivr.toFixed(0)}</span></span>
         </div>
         {decision.thesis_confidence && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-[10px] text-slate-500">Conf</span>
+            <span className="text-[length:var(--t-2xs)] text-slate-500">Conf</span>
             <div
               style={{
                 width: 40,
@@ -147,7 +147,7 @@ function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
             >
               <div style={{ height: "100%", width: `${confPct}%`, backgroundColor: confColor }} />
             </div>
-            <span className="text-[10px] font-semibold tabular-nums text-slate-300">
+            <span className="text-[length:var(--t-2xs)] font-semibold tabular-nums text-slate-300">
               {confPct.toFixed(0)}%
             </span>
           </div>
@@ -172,26 +172,26 @@ function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () =>
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2.5">
           <div className="w-10 h-10 rounded-xl bg-slate-700/50 flex items-center justify-center">
-            <span className="text-xs font-bold text-slate-200">
+            <span className="text-[length:var(--t-xs)] font-bold text-slate-200">
               {decision.ticker?.slice(0, 4)}
             </span>
           </div>
           <div>
-            <div className="text-sm font-semibold text-slate-100">{decision.ticker}</div>
-            <div className="text-[10px] text-slate-500 uppercase">{decision.account || "—"}</div>
+            <div className="text-[length:var(--t-sm)] font-semibold text-slate-100">{decision.ticker}</div>
+            <div className="text-[length:var(--t-2xs)] text-slate-500 uppercase">{decision.account || "—"}</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${status.bg}`}>
             <Icon size={12} className={status.text} />
-            <span className={`text-xs font-semibold ${status.text}`}>{status.label}</span>
+            <span className={`text-[length:var(--t-xs)] font-semibold ${status.text}`}>{status.label}</span>
           </div>
           <ChevronRight size={14} className="text-slate-600" />
         </div>
       </div>
 
       {/* Thesis */}
-      <p className="text-sm text-slate-300 leading-relaxed mb-3">{decision.thesis_1liner}</p>
+      <p className="text-[length:var(--t-sm)] text-slate-300 leading-relaxed mb-3">{decision.thesis_1liner}</p>
 
       {/* Options-spec sub-row (only for option strategies) */}
       {showOptionsSpec && <OptionsSpecRow decision={decision} />}
@@ -200,18 +200,18 @@ function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () =>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {decision.bucket && (
-            <span className="text-[10px] font-medium text-slate-500 uppercase bg-white/5 px-2 py-0.5 rounded">
+            <span className="text-[length:var(--t-2xs)] font-medium text-slate-500 uppercase bg-white/5 px-2 py-0.5 rounded">
               {decision.bucket}
             </span>
           )}
           {conv > 0 && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-slate-500">Conv</span>
+              <span className="text-[length:var(--t-2xs)] text-slate-500">Conv</span>
               <ConvictionDots level={conv} />
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3 text-xs tabular-nums">
+        <div className="flex items-center gap-3 text-[length:var(--t-xs)] tabular-nums">
           {decision.entry && (
             <span className="text-slate-500">
               Entry <span className="text-slate-300">${Number(decision.entry).toFixed(2)}</span>
@@ -236,8 +236,8 @@ function EmptyState() {
           <Target size={20} className="text-slate-500" />
         </div>
         <div className="text-center">
-          <p className="text-sm font-medium text-slate-400">No decisions yet</p>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-[length:var(--t-sm)] font-medium text-slate-400">No decisions yet</p>
+          <p className="text-[length:var(--t-xs)] text-slate-500 mt-0.5">
             Decisions from WSR will appear here
           </p>
         </div>
@@ -299,8 +299,8 @@ export function DecisionsPage({
                     key={status}
                     className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full ${cfg.bg} border ${cfg.border}`}
                   >
-                    <span className={`text-xs font-semibold ${cfg.text}`}>{count}</span>
-                    <span className={`text-[10px] ${cfg.text} opacity-70`}>{cfg.label}</span>
+                    <span className={`text-[length:var(--t-xs)] font-semibold ${cfg.text}`}>{count}</span>
+                    <span className={`text-[length:var(--t-2xs)] ${cfg.text} opacity-70`}>{cfg.label}</span>
                   </div>
                 );
               })}

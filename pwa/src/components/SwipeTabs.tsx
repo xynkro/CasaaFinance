@@ -140,7 +140,7 @@ export function SwipeTabs({
             <button
               key={t.label}
               onClick={() => setActive(i)}
-              className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold transition-all duration-200 relative"
+              className="flex-1 py-2 px-3 rounded-xl text-[length:var(--t-xs)] font-semibold transition-all duration-200 relative"
               style={{
                 background: isActive ? "rgba(255,255,255,0.09)" : "transparent",
                 color: isActive ? "#f1f5f9" : "rgb(100 116 139)",

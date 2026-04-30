@@ -132,10 +132,10 @@ function Dashboard() {
       <header className="app-header">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-baseline gap-2.5">
-            <h1 className="text-[18px] font-semibold tracking-[-0.02em] text-white leading-none">
+            <h1 className="text-[length:var(--t-lg)] font-semibold tracking-[-0.02em] text-white leading-none">
               {TAB_TITLES[tab]}
             </h1>
-            <span className="text-[11px] text-slate-500 font-medium">Casaa Finance</span>
+            <span className="text-[length:var(--t-xs)] text-slate-500 font-medium">Casaa Finance</span>
             <span className="text-[8px] text-slate-700 font-mono">b{import.meta.env.VITE_BUILD ?? "dev"}</span>
           </div>
           {tab !== SETTINGS_TAB && (
@@ -170,7 +170,7 @@ function Dashboard() {
       <main ref={scrollRef} className="app-content">
         <PullToRefresh onRefresh={load} scrollRef={scrollRef}>
           {data?.error && (
-            <div className="mx-4 mb-3 rounded-xl p-3 text-sm text-red-300 fade-up"
+            <div className="mx-4 mb-3 rounded-xl p-3 text-[length:var(--t-sm)] text-red-300 fade-up"
                  style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)" }}>
               {data.error}
             </div>

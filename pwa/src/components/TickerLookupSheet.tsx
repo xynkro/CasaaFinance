@@ -19,7 +19,7 @@ function ScorePill({ signal }: { signal: string }) {
   const Icon = signal === "BUY" ? TrendingUp : signal.startsWith("SELL") ? TrendingDown : Minus;
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg"
+      className="inline-flex items-center gap-1 text-[length:var(--t-2xs)] font-bold px-2 py-0.5 rounded-lg"
       style={{ background: `${color}18`, color }}
     >
       <Icon size={9} />
@@ -92,7 +92,7 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
 
         <div className="px-4 pt-3 pb-2">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[17px] font-bold text-white">Analyse a Ticker</h2>
+            <h2 className="text-[length:var(--t-lg)] font-bold text-white">Analyse a Ticker</h2>
             <button
               onClick={onClose}
               className="w-7 h-7 rounded-full flex items-center justify-center"
@@ -119,7 +119,7 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
               onChange={(e) => setQuery(e.target.value.toUpperCase())}
               onKeyDown={handleKey}
               placeholder="TSLA, NVDA, AAPL…"
-              className="flex-1 bg-transparent text-[17px] font-bold text-white outline-none placeholder:text-slate-700 tracking-wide"
+              className="flex-1 bg-transparent text-[length:var(--t-lg)] font-bold text-white outline-none placeholder:text-slate-700 tracking-wide"
               autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
@@ -150,13 +150,13 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
                     className="w-full flex items-center gap-3 px-4 py-3 active:bg-white/5 text-left transition-colors"
                     style={{ borderTop: i > 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
                   >
-                    <span className="text-lg leading-none">{emoji}</span>
+                    <span className="text-[length:var(--t-lg)] leading-none">{emoji}</span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-white">{t.ticker}</span>
+                        <span className="text-[length:var(--t-sm)] font-bold text-white">{t.ticker}</span>
                         <ScorePill signal={signal} />
                       </div>
-                      <div className="text-[11px] text-slate-500 mt-0.5">
+                      <div className="text-[length:var(--t-xs)] text-slate-500 mt-0.5">
                         RSI {rsi}
                         {macd && <span className={macd.startsWith("↑") ? " text-emerald-500" : " text-red-400"}> · {macd}</span>}
                         {t.trend && <span> · {t.trend}</span>}
@@ -173,7 +173,7 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
           <button
             onClick={handleAnalyze}
             disabled={!upper}
-            className="w-full py-4 rounded-2xl text-[15px] font-bold text-white transition-all active:scale-[0.98] disabled:opacity-30"
+            className="w-full py-4 rounded-2xl text-[length:var(--t-sm)] font-bold text-white transition-all active:scale-[0.98] disabled:opacity-30"
             style={{
               background: upper
                 ? `linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb),0.7))`
@@ -186,7 +186,7 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
           </button>
 
           {!upper && (
-            <p className="text-center text-[11px] text-slate-600 mt-2.5 leading-relaxed">
+            <p className="text-center text-[length:var(--t-xs)] text-slate-600 mt-2.5 leading-relaxed">
               Shows chart, RSI, MACD, Bollinger Bands and more.{"\n"}
               In-scan tickers also show Casaa scores.
             </p>

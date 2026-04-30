@@ -54,7 +54,7 @@ const WHEEL_LEG_LABEL: Record<string, string> = {
 function MoneynessChip({ value }: { value: string }) {
   const style = MONEYNESS_STYLE[value] ?? "bg-slate-500/15 text-slate-400 border-slate-500/20";
   return (
-    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${style}`}>
+    <span className={`px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold border ${style}`}>
       {value || "?"}
     </span>
   );
@@ -64,7 +64,7 @@ function RiskBadge({ risk }: { risk: string }) {
   const cfg = RISK_STYLE[risk] ?? RISK_STYLE.LOW;
   const Icon = cfg.icon;
   return (
-    <div className={`flex items-center gap-1 text-[10px] font-semibold ${cfg.bg}`}>
+    <div className={`flex items-center gap-1 text-[length:var(--t-2xs)] font-semibold ${cfg.bg}`}>
       <Icon size={10} />
       {risk}
     </div>
@@ -77,7 +77,7 @@ function TrendIndicator({ trend, momentum }: { trend: string; momentum: string }
   const Icon = mom >= 0 ? TrendingUp : TrendingDown;
   if (!trend || trend === "?") return null;
   return (
-    <div className={`flex items-center gap-1 text-[10px] ${color}`}>
+    <div className={`flex items-center gap-1 text-[length:var(--t-2xs)] ${color}`}>
       <Icon size={10} />
       <span className="font-medium">{mom >= 0 ? "+" : ""}{mom.toFixed(1)}%</span>
       <span className="text-slate-600">5d</span>
@@ -107,7 +107,7 @@ function ConfidenceGauge({ value }: { value: number }) {
           style={{ transition: "stroke-dashoffset 0.5s ease" }}
         />
       </svg>
-      <span className="absolute text-[10px] font-bold tabular-nums" style={{ color }}>
+      <span className="absolute text-[length:var(--t-2xs)] font-bold tabular-nums" style={{ color }}>
         {value}
       </span>
     </div>
@@ -159,18 +159,18 @@ function OptionItem({
       {/* Header: ticker + strike + moneyness + confidence */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-bold text-white">{opt.ticker}</span>
-          <span className="text-[10px] font-semibold text-slate-500 shrink-0">
+          <span className="text-[length:var(--t-sm)] font-bold text-white">{opt.ticker}</span>
+          <span className="text-[length:var(--t-2xs)] font-semibold text-slate-500 shrink-0">
             {fmtStrike(opt.strike)} {right}
           </span>
           <MoneynessChip value={opt.moneyness} />
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex flex-col items-end leading-tight">
-            <span className={`text-[10px] font-mono tabular-nums ${dte <= 7 && dte >= 0 ? "text-amber-400 font-bold" : "text-slate-500"}`}>
+            <span className={`text-[length:var(--t-2xs)] font-mono tabular-nums ${dte <= 7 && dte >= 0 ? "text-amber-400 font-bold" : "text-slate-500"}`}>
               {dteLabel}
             </span>
-            <span className="text-[9px] text-slate-600">exp {fmtExp(opt.expiry)}</span>
+            <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExp(opt.expiry)}</span>
           </div>
           <ConfidenceGauge value={confidence} />
         </div>
@@ -179,9 +179,9 @@ function OptionItem({
       {/* Wheel leg + shares + risk/trend */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-medium text-indigo-400">{wheelLeg}</span>
+          <span className="text-[length:var(--t-2xs)] font-medium text-indigo-400">{wheelLeg}</span>
           {stockQty > 0 && (
-            <span className="text-[10px] text-slate-600">
+            <span className="text-[length:var(--t-2xs)] text-slate-600">
               {stockQty} @ {fmtPrice(stockAvg)}
             </span>
           )}
@@ -193,7 +193,7 @@ function OptionItem({
       </div>
 
       {/* Stats row */}
-      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
+      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
         <span>Stock: <span className="text-slate-300 tabular-nums">{fmtPrice(underlying)}</span></span>
         {strike > 0 && (
           <span>
@@ -212,7 +212,7 @@ function OptionItem({
 
       {/* Sell calls above indicator */}
       {adjCost > 0 && opt.wheel_leg === "CC" && (
-        <div className="flex items-center gap-1.5 text-[10px]">
+        <div className="flex items-center gap-1.5 text-[length:var(--t-2xs)]">
           <Shield size={10} className="text-cyan-400" />
           <span className="text-slate-500">Sell calls above</span>
           <span className="text-cyan-400 font-semibold tabular-nums">{fmtPrice(adjCost)}</span>
@@ -226,7 +226,7 @@ function OptionItem({
 
       {/* Exit plan summary */}
       {exitPlan && (
-        <div className="flex items-center gap-1.5 text-[10px] pt-1.5 border-t border-white/5">
+        <div className="flex items-center gap-1.5 text-[length:var(--t-2xs)] pt-1.5 border-t border-white/5">
           <Shield size={10} className="text-indigo-400" />
           <span className="text-slate-500">Captured:</span>
           <span className={`tabular-nums font-semibold ${
@@ -245,7 +245,7 @@ function OptionItem({
         <div className="pt-2.5 border-t border-white/5 space-y-2">
           <div className="flex items-start gap-1.5">
             <Info size={10} className="text-slate-500 mt-0.5 shrink-0" />
-            <p className="text-[10px] text-slate-400 leading-relaxed">
+            <p className="text-[length:var(--t-2xs)] text-slate-400 leading-relaxed">
               {opt.confidence_reasoning || "No reasoning available"}
             </p>
           </div>
@@ -253,8 +253,8 @@ function OptionItem({
           {/* Strategy scores for this ticker */}
           {techScore && (
             <div className="pt-1.5 border-t border-white/5">
-              <div className="text-[10px] text-slate-600 mb-1">Strategy scores</div>
-              <div className="grid grid-cols-5 gap-1.5 text-[10px]">
+              <div className="text-[length:var(--t-2xs)] text-slate-600 mb-1">Strategy scores</div>
+              <div className="grid grid-cols-5 gap-1.5 text-[length:var(--t-2xs)]">
                 {[
                   { label: "BUY", val: Number(techScore.score_buy) },
                   { label: "CSP", val: Number(techScore.score_csp) },
@@ -271,12 +271,12 @@ function OptionItem({
                 ))}
               </div>
               {techScore.top_drivers && (
-                <div className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">
+                <div className="text-[length:var(--t-2xs)] text-slate-500 mt-1.5 leading-relaxed">
                   {techScore.top_drivers}
                 </div>
               )}
               {techScore.earnings_date && Number(techScore.earnings_days_away) >= 0 && (
-                <div className={`flex items-center gap-1 text-[10px] mt-1.5 ${
+                <div className={`flex items-center gap-1 text-[length:var(--t-2xs)] mt-1.5 ${
                   Number(techScore.earnings_days_away) <= 7 ? "text-red-400" :
                   Number(techScore.earnings_days_away) <= 14 ? "text-amber-400" : "text-slate-400"
                 }`}>
@@ -287,7 +287,7 @@ function OptionItem({
                 </div>
               )}
               {techScore.catalyst_flag === "TRUE" && !techScore.earnings_date && (
-                <div className="flex items-center gap-1 text-[10px] text-orange-400 mt-1.5">
+                <div className="flex items-center gap-1 text-[length:var(--t-2xs)] text-orange-400 mt-1.5">
                   <Zap size={10} />
                   <span className="font-semibold">Catalyst detected — elevated vol regime</span>
                 </div>
@@ -296,7 +296,7 @@ function OptionItem({
           )}
 
           {/* Indicator table */}
-          <div className="grid grid-cols-4 gap-1.5 text-[10px] pt-1.5 border-t border-white/5">
+          <div className="grid grid-cols-4 gap-1.5 text-[length:var(--t-2xs)] pt-1.5 border-t border-white/5">
             <div>
               <div className="text-slate-600">Vol (σ)</div>
               <div className="tabular-nums text-slate-300">{vol > 0 ? `${vol.toFixed(0)}%` : "—"}</div>
@@ -370,7 +370,7 @@ export function WheelCard({
       <Card>
         <div className="flex items-center gap-2 text-slate-500">
           <CircleDot size={16} />
-          <span className="text-sm">Options / Wheel -- no positions</span>
+          <span className="text-[length:var(--t-sm)]">Options / Wheel -- no positions</span>
         </div>
       </Card>
     );
@@ -391,27 +391,27 @@ export function WheelCard({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <CircleDot size={14} className="text-indigo-400" />
-          <h2 className="text-sm font-medium text-slate-400">Options & Wheel</h2>
+          <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Options & Wheel</h2>
         </div>
         <div className="flex items-center gap-2">
           {highRisk > 0 && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/15 text-red-400 border border-red-500/20">
+            <span className="px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-red-500/15 text-red-400 border border-red-500/20">
               {highRisk} HIGH
             </span>
           )}
           {medRisk > 0 && (
-            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/20">
+            <span className="px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/20">
               {medRisk} MED
             </span>
           )}
-          <span className="text-[10px] text-slate-600">{options.length} positions</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-600">{options.length} positions</span>
         </div>
       </div>
 
       <div className="space-y-3">
         {Object.entries(byAccount).map(([acct, opts]) => (
           <div key={acct}>
-            <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 ${
+            <div className={`text-[length:var(--t-2xs)] font-semibold uppercase tracking-wider mb-1.5 ${
               acct === "caspar" ? "text-blue-400" : "text-pink-400"
             }`}>
               {acct === "caspar" ? "Caspar" : "Sarah"}

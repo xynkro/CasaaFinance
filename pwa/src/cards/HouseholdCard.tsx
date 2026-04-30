@@ -24,7 +24,7 @@ export function HouseholdCard({
       <Card>
         <div className="flex items-center gap-2 text-slate-500">
           <Users size={16} />
-          <span className="text-sm">Household — waiting for both portfolios + FX rate</span>
+          <span className="text-[length:var(--t-sm)]">Household — waiting for both portfolios + FX rate</span>
         </div>
       </Card>
     );
@@ -43,9 +43,9 @@ export function HouseholdCard({
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
           <Users size={14} className="text-indigo-400" />
-          <h2 className="text-sm font-medium text-slate-400">Household</h2>
+          <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Household</h2>
         </div>
-        <span className="text-xs text-slate-500 tabular-nums">
+        <span className="text-[length:var(--t-xs)] text-slate-500 tabular-nums">
           USD/SGD {usdSgd.toFixed(4)}
         </span>
       </div>
@@ -64,18 +64,18 @@ export function HouseholdCard({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-blue-500/70" />
-            <span className="text-sm text-slate-300">Caspar</span>
+            <span className="text-[length:var(--t-sm)] text-slate-300">Caspar</span>
           </div>
-          <span className="text-sm text-white font-medium tabular-nums">{fmtUsd(casparUsd)}</span>
+          <span className="text-[length:var(--t-sm)] text-white font-medium tabular-nums">{fmtUsd(casparUsd)}</span>
         </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="w-2.5 h-2.5 rounded-full bg-violet-500/70" />
-            <span className="text-sm text-slate-300">Sarah</span>
+            <span className="text-[length:var(--t-sm)] text-slate-300">Sarah</span>
           </div>
           <div className="text-right">
-            <span className="text-sm text-white font-medium tabular-nums">{fmtUsd(sarahUsd)}</span>
-            <span className="text-xs text-slate-500 ml-1.5">({fmtSgd(sarahSgd)})</span>
+            <span className="text-[length:var(--t-sm)] text-white font-medium tabular-nums">{fmtUsd(sarahUsd)}</span>
+            <span className="text-[length:var(--t-xs)] text-slate-500 ml-1.5">({fmtSgd(sarahSgd)})</span>
           </div>
         </div>
       </div>

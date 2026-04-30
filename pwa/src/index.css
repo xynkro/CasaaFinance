@@ -18,6 +18,19 @@
   /* Typography */
   --base-font: 16px;
 
+  /* Typescale — all derived from --base-font so the SettingsPage font slider
+     scales the entire UI. Tailwind arbitrary classes throughout the app
+     reference these via `text-[length:var(--t-XXX)]`. The numeric comments
+     reflect the rendered px at the default 16px base. */
+  --t-tiny: calc(var(--base-font) * 0.5625); /* 9px  — rare, smaller than 2xs */
+  --t-2xs:  calc(var(--base-font) * 0.625);  /* 10px — dominant secondary tier */
+  --t-xs:   calc(var(--base-font) * 0.75);   /* 12px */
+  --t-sm:   calc(var(--base-font) * 0.875);  /* 14px */
+  --t-base: var(--base-font);                /* 16px */
+  --t-lg:   calc(var(--base-font) * 1.125);  /* 18px */
+  --t-xl:   calc(var(--base-font) * 1.4);    /* ~22px */
+  --t-hero: calc(var(--base-font) * 1.75);   /* 28px */
+
   /* Theme-controlled */
   --bg-darkness: 0.7;
   --bg-blur: 0px;
