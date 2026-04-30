@@ -196,10 +196,14 @@ not yet in zone), `filled` (already executed), `killed` (thesis broken),
 `expired` (DTE elapsed without action).
 
 **Strategy values:** `BUY_DIP` (share entry on pullback), `TRIM` (share
-exit), `CSP`, `CC`, `PMCC`, `LONG_CALL`, `LONG_PUT`. Use empty string for
-`right` and 0 for `strike` / `expiry` / premium / delta / yield / breakeven
-/ iv_rank when it's a share entry. Always populate ALL fields — use 0 / ""
-for inapplicable ones, never omit a key.
+exit), `CSP`, `CC`, `PMCC`, `LONG_CALL`, `LONG_PUT`. For share entries:
+use `""` (empty string) for `right` and `expiry`, and 0 for `strike` /
+premium / delta / yield / breakeven / iv_rank. Always populate ALL
+fields — use 0 / "" for inapplicable ones, never omit a key.
+
+**Empty week:** if you have zero actionable entries this week, SKIP §6c
+entirely (do not invoke push_decisions.py with an empty `decisions[]`
+array — the script will error and the run reports a false negative).
 
 **🚨 CC ELIGIBILITY RULE (non-negotiable):**
 

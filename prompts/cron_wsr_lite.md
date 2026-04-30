@@ -205,8 +205,13 @@ $80P` in the same week without collision.
 you're refreshing for mid-week.
 
 **Strategy values:** `BUY_DIP`, `TRIM`, `CSP`, `CC`, `PMCC`, `LONG_CALL`,
-`LONG_PUT`. Use empty string for `right` and 0 for option-spec fields when
-emitting a share entry. Always populate ALL fields — never omit a key.
+`LONG_PUT`. For share entries: use `""` (empty string) for `right` and
+`expiry`, and 0 for `strike` / premium / delta / yield / breakeven /
+iv_rank. Always populate ALL fields — never omit a key.
+
+**Empty week:** if you have zero actionable entries (no held options,
+no new ideas), SKIP §5c entirely (do not invoke push_decisions.py with
+an empty `decisions[]` array — the script will error).
 
 The legacy `option_recommendations` sheet is no longer written. The PWA
 Options › Ideas tab will go stale during the parity-check window and is
