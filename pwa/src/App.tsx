@@ -113,6 +113,9 @@ function Dashboard() {
             decisions={data?.decisions ?? []}
             technicalScores={data?.technicalScores ?? []}
             technicalScoresHistory={data?.technicalScoresHistory ?? []}
+            optionsDefense={data?.optionsDefense ?? []}
+            wheelNextLeg={data?.wheelNextLeg ?? []}
+            exitPlans={data?.exitPlans ?? []}
           />
         );
       case 4:

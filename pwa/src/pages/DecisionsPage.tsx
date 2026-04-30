@@ -1,16 +1,48 @@
 import { useState } from "react";
-import type { DecisionRow, TechnicalScoreRow } from "../data";
+import type {
+  DecisionRow,
+  TechnicalScoreRow,
+  OptionsDefenseRow,
+  WheelNextLegRow,
+  ExitPlanRow,
+} from "../data";
 import { Card } from "../cards/Card";
 import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
+import { ActionQueueCard } from "../cards/ActionQueueCard";
 import { StockDetail } from "../components/StockDetail";
-import { Target, Clock, CheckCircle, XCircle, AlertTriangle, ChevronRight } from "lucide-react";
+import {
+  Target,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  ChevronRight,
+  Copy,
+  Check,
+  ExternalLink,
+} from "lucide-react";
 
 const OPTIONS_STRATEGIES = ["CSP", "CC", "PMCC", "LONG_CALL", "LONG_PUT"];
+const SHARE_STRATEGIES = ["BUY_DIP", "TRIM", ""];
 
 function fmtMoney(v: string | number | undefined): string {
   if (v === undefined || v === "") return "—";
   const n = Number(v);
   if (isNaN(n)) return "—";
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Mantissa-aware money formatter for sub-cent option premiums.
+ * Below $0.10 we render 4 decimals so $0.0095 doesn't get rounded to $0.01.
+ */
+function fmtMoneyMantissa(v: string | number | undefined): string {
+  if (v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (isNaN(n)) return "—";
+  if (n > 0 && n < 0.1) {
+    return `$${n.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
+  }
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
@@ -95,9 +127,15 @@ function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
   const conf = Number(decision.thesis_confidence) || 0;
   const confPct = Math.max(0, Math.min(1, conf)) * 100;
   const confColor = confPct >= 70 ? "#34d399" : confPct >= 50 ? "#818cf8" : "#fbbf24";
-  const yld = Number(decision.annual_yield_pct);
+  const yldRaw = decision.annual_yield_pct;
+  const yldNum = Number(yldRaw);
+  // Suppress yield row when value is zero/empty/NaN (brain emits 0 for filled positions).
+  const showYield = yldRaw !== undefined && yldRaw !== "" && !isNaN(yldNum) && yldNum !== 0;
   const delta = Number(decision.delta);
-  const ivr = Number(decision.iv_rank);
+  const ivrRaw = decision.iv_rank;
+  const ivrNum = Number(ivrRaw);
+  // Suppress IVR (render "—") when value is zero/empty/NaN.
+  const showIvr = ivrRaw !== undefined && ivrRaw !== "" && !isNaN(ivrNum) && ivrNum !== 0;
 
   return (
     <div
@@ -124,14 +162,16 @@ function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
         className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500"
         style={{ marginBottom: 6 }}
       >
-        <span>Premium <span className="text-slate-300 tabular-nums">{fmtMoney(decision.premium_per_share)}</span></span>
-        <span>Yield <span style={{ color: "#34d399" }} className="tabular-nums font-semibold">{fmtPct(yld)}</span></span>
+        <span>Premium <span className="text-slate-300 tabular-nums">{fmtMoneyMantissa(decision.premium_per_share)}</span></span>
+        {showYield && (
+          <span>Yield <span style={{ color: "#34d399" }} className="tabular-nums font-semibold">{fmtPct(yldNum)}</span></span>
+        )}
         <span>Δ <span className="text-slate-300 tabular-nums">{isNaN(delta) ? "—" : delta.toFixed(2)}</span></span>
       </div>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 text-[length:var(--t-2xs)] text-slate-500">
           <span>BE <span className="text-slate-300 tabular-nums">{fmtMoney(decision.breakeven)}</span></span>
-          <span>IVR <span className="text-slate-300 tabular-nums">{isNaN(ivr) ? "—" : ivr.toFixed(0)}</span></span>
+          <span>IVR <span className="text-slate-300 tabular-nums">{showIvr ? ivrNum.toFixed(0) : "—"}</span></span>
         </div>
         {decision.thesis_confidence && (
           <div className="flex items-center gap-1.5 shrink-0">
@@ -157,16 +197,92 @@ function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
   );
 }
 
+function CardActions({ ticker }: { ticker: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!ticker) return;
+    try {
+      await navigator.clipboard.writeText(ticker);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API unavailable on http or older iOS — silently ignore.
+    }
+  };
+
+  const handleOpenIbkr = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!ticker) return;
+    const url = `https://www.interactivebrokers.com/en/index.php?f=2222&exch=NYSE&symbol=${encodeURIComponent(ticker)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  // Stop pointer/touch events from bubbling so the parent card's tap doesn't fire.
+  const stopAll = (e: React.SyntheticEvent) => e.stopPropagation();
+
+  const baseBtn =
+    "flex items-center gap-1 px-2 py-1 rounded-md border border-white/5 bg-white/3 hover:bg-white/5 active:bg-white/7 transition-colors text-[length:var(--t-2xs)]";
+
+  return (
+    <div
+      className="flex items-center gap-1.5 shrink-0"
+      onPointerDown={stopAll}
+      onMouseDown={stopAll}
+      onTouchStart={stopAll}
+    >
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label={`Copy ticker ${ticker}`}
+        className={baseBtn}
+      >
+        {copied ? (
+          <>
+            <Check size={11} className="text-emerald-400" />
+            <span className="text-emerald-400 font-medium">Copied</span>
+          </>
+        ) : (
+          <>
+            <Copy size={11} className="text-slate-500" />
+            <span className="text-slate-400 font-medium">Copy</span>
+          </>
+        )}
+      </button>
+      <button
+        type="button"
+        onClick={handleOpenIbkr}
+        aria-label={`Open ${ticker} in IBKR`}
+        className={baseBtn}
+      >
+        <ExternalLink size={11} className="text-slate-500" />
+        <span className="text-slate-400 font-medium">IBKR</span>
+      </button>
+    </div>
+  );
+}
+
 function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () => void }) {
   const status = STATUS_CONFIG[decision.status?.toLowerCase()] ?? DEFAULT_STATUS;
   const Icon = status.icon;
   const conv = Math.round(Number(decision.conv) || 0);
   const showOptionsSpec = !!decision.strategy && OPTIONS_STRATEGIES.includes(decision.strategy);
 
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onTap();
+    }
+  };
+
   return (
-    <button
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onTap}
-      className={`w-full text-left glass rounded-2xl p-4 border ${status.border} active:bg-white/3 transition-colors`}
+      onKeyDown={onKey}
+      className={`w-full text-left glass rounded-2xl p-4 border ${status.border} active:bg-white/3 transition-colors cursor-pointer`}
     >
       {/* Header: ticker + status */}
       <div className="flex items-center justify-between mb-3">
@@ -196,9 +312,9 @@ function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () =>
       {/* Options-spec sub-row (only for option strategies) */}
       {showOptionsSpec && <OptionsSpecRow decision={decision} />}
 
-      {/* Bucket + metrics row */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      {/* Bucket + metrics row + actions */}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-3 min-w-0">
           {decision.bucket && (
             <span className="text-[length:var(--t-2xs)] font-medium text-slate-500 uppercase bg-white/5 px-2 py-0.5 rounded">
               {decision.bucket}
@@ -224,7 +340,12 @@ function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () =>
           )}
         </div>
       </div>
-    </button>
+
+      {/* Action strip */}
+      <div className="flex items-center justify-end mt-2.5 pt-2.5 border-t border-white/5">
+        <CardActions ticker={decision.ticker} />
+      </div>
+    </div>
   );
 }
 
@@ -246,14 +367,43 @@ function EmptyState() {
   );
 }
 
+function SectionHeader({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center justify-between px-1">
+      <span className="text-[length:var(--t-2xs)] font-semibold uppercase tracking-wider text-slate-500">
+        {label}
+      </span>
+      <span className="text-[length:var(--t-2xs)] text-slate-600 tabular-nums">{count}</span>
+    </div>
+  );
+}
+
+// Sort key: pending → watching → filled → killed/expired → unknown
+const STATUS_SORT_RANK: Record<string, number> = {
+  pending: 0,
+  watching: 1,
+  filled: 2,
+  killed: 3,
+  expired: 3,
+};
+function statusSortKey(status: string | undefined): number {
+  return STATUS_SORT_RANK[(status ?? "").toLowerCase()] ?? 4;
+}
+
 export function DecisionsPage({
   decisions,
   technicalScores,
   technicalScoresHistory,
+  optionsDefense,
+  wheelNextLeg,
+  exitPlans,
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
   technicalScoresHistory?: TechnicalScoreRow[];
+  optionsDefense?: OptionsDefenseRow[];
+  wheelNextLeg?: WheelNextLegRow[];
+  exitPlans?: ExitPlanRow[];
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const techByTicker = new Map<string, TechnicalScoreRow>();
@@ -262,25 +412,50 @@ export function DecisionsPage({
   // If we have no WSR decisions, still show BuyRecommendationsCard if we have scores
   const showBuyRecs = (technicalScores?.length ?? 0) > 0;
 
-  // Group by status: pending/watching first, then filled, then killed/expired
-  const order: Record<string, number> = { pending: 0, watching: 1, filled: 2, killed: 3, expired: 4 };
-  const sorted = [...decisions].sort(
-    (a, b) => (order[a.status?.toLowerCase()] ?? 5) - (order[b.status?.toLowerCase()] ?? 5),
+  // Split decisions by strategy family
+  const activeOptions = decisions
+    .filter((d) => OPTIONS_STRATEGIES.includes(d.strategy ?? ""))
+    .sort((a, b) => statusSortKey(a.status) - statusSortKey(b.status));
+
+  const shareDecisions = decisions
+    .filter((d) => SHARE_STRATEGIES.includes(d.strategy ?? ""))
+    .sort((a, b) => statusSortKey(a.status) - statusSortKey(b.status));
+
+  // Catch-all bucket for any unrecognised strategies — append to share section.
+  const unrecognised = decisions.filter(
+    (d) => !OPTIONS_STRATEGIES.includes(d.strategy ?? "") && !SHARE_STRATEGIES.includes(d.strategy ?? ""),
+  );
+  const shareDecisionsAll = [...shareDecisions, ...unrecognised].sort(
+    (a, b) => statusSortKey(a.status) - statusSortKey(b.status),
   );
 
-  // Count by status
+  // Count by status for the summary pills (whole page).
   const counts: Record<string, number> = {};
   for (const d of decisions) {
     const s = d.status?.toLowerCase() || "unknown";
     counts[s] = (counts[s] || 0) + 1;
   }
 
+  let fadeIdx = 1;
+  const nextFade = () => `fade-up fade-up-${Math.min(fadeIdx++, 4)}`;
+
   return (
     <>
       <div className="px-4 pb-4 flex flex-col gap-4">
+        {/* Action Queue — only renders when non-empty */}
+        <div className={nextFade()}>
+          <ActionQueueCard
+            optionsDefense={optionsDefense ?? []}
+            wheelNextLeg={wheelNextLeg ?? []}
+            exitPlans={exitPlans ?? []}
+            technicalScores={technicalScores}
+            technicalScoresHistory={technicalScoresHistory}
+          />
+        </div>
+
         {/* Buy recommendations from daily technical scan */}
         {showBuyRecs && (
-          <div className="fade-up fade-up-1">
+          <div className={nextFade()}>
             <BuyRecommendationsCard
               technicalScores={technicalScores ?? []}
               technicalScoresHistory={technicalScoresHistory}
@@ -306,12 +481,29 @@ export function DecisionsPage({
               })}
             </div>
 
-            {/* Decision cards */}
-            {sorted.map((d, i) => (
-              <div key={`${d.ticker}-${d.date}-${i}`} className={`fade-up fade-up-${Math.min(i + 2, 4)}`}>
-                <DecisionCard decision={d} onTap={() => setSelected(d)} />
+            {/* Active Options section */}
+            {activeOptions.length > 0 && (
+              <div className="flex flex-col gap-2.5">
+                <SectionHeader label="Active Options" count={activeOptions.length} />
+                {activeOptions.map((d, i) => (
+                  <div key={`opt-${d.ticker}-${d.date}-${i}`}>
+                    <DecisionCard decision={d} onTap={() => setSelected(d)} />
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+
+            {/* Share Decisions section */}
+            {shareDecisionsAll.length > 0 && (
+              <div className="flex flex-col gap-2.5">
+                <SectionHeader label="Share Decisions" count={shareDecisionsAll.length} />
+                {shareDecisionsAll.map((d, i) => (
+                  <div key={`share-${d.ticker}-${d.date}-${i}`}>
+                    <DecisionCard decision={d} onTap={() => setSelected(d)} />
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         ) : !showBuyRecs && (
           <EmptyState />
