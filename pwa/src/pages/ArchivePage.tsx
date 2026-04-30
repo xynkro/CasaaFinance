@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { ArchiveRow, DailyBriefRow } from "../data";
 import { Card } from "../cards/Card";
 import { FileText, ChevronRight, Archive, Newspaper } from "lucide-react";
 import { SENTIMENT } from "../lib/emojis";
 import { ArchiveViewer } from "../components/ArchiveViewer";
-import { BriefDetailModal } from "../components/BriefDetailModal";
+
+// Lazy: shared with HomePage so the chunk is reused. Modal renders only
+// when a brief row is selected.
+const BriefDetailModal = lazy(() =>
+  import("../components/BriefDetailModal").then((m) => ({ default: m.BriefDetailModal })),
+);
 
 function shortDate(d: string): string {
   const s = d.slice(0, 10);
@@ -133,7 +138,9 @@ export function ArchivePage({ archive, dailyHistory }: { archive: ArchiveRow[]; 
         <ArchiveViewer row={viewingArchive} onClose={() => setViewingArchive(null)} />
       )}
       {viewingBrief && (
-        <BriefDetailModal row={viewingBrief} onClose={() => setViewingBrief(null)} />
+        <Suspense fallback={null}>
+          <BriefDetailModal row={viewingBrief} onClose={() => setViewingBrief(null)} />
+        </Suspense>
       )}
     </>
   );

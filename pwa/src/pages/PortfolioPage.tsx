@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import type {
   SnapshotRow,
   PositionRow,
@@ -5,11 +6,29 @@ import type {
   ExitPlanRow,
   MacroRow,
 } from "../data";
+import { Card } from "../cards/Card";
 import { PnlCard } from "../cards/PnlCard";
 import { PositionsTable } from "../components/PositionsTable";
 import { SwipeTabs } from "../components/SwipeTabs";
 import { RiskMetricsCard } from "../cards/RiskMetricsCard";
-import { HistoryPage } from "./HistoryPage";
+
+// Lazy: pulls in recharts (~150 KB) only when the History tab is opened.
+const HistoryPage = lazy(() =>
+  import("./HistoryPage").then((m) => ({ default: m.HistoryPage })),
+);
+
+function HistorySkeleton() {
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-4">
+        <div className="shimmer h-3.5 w-20 rounded" />
+        <div className="shimmer h-3 w-16 rounded" />
+      </div>
+      <div className="shimmer h-48 w-full rounded-xl mb-4" />
+      <div className="shimmer h-48 w-full rounded-xl" />
+    </Card>
+  );
+}
 
 export function PortfolioPage({
   casparSnapshot,
@@ -46,11 +65,13 @@ export function PortfolioPage({
         />
       </div>
       <div className="fade-up fade-up-2">
-        <HistoryPage
-          casparHistory={casparHistory}
-          sarahHistory={sarahHistory}
-          macroHistory={macroHistory}
-        />
+        <Suspense fallback={<HistorySkeleton />}>
+          <HistoryPage
+            casparHistory={casparHistory}
+            sarahHistory={sarahHistory}
+            macroHistory={macroHistory}
+          />
+        </Suspense>
       </div>
     </div>
   );

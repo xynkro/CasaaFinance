@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { DashboardData } from "../data";
 import { DailyBriefCard } from "../cards/DailyBriefCard";
 import { RiskPulseCard } from "../cards/RiskPulseCard";
@@ -7,12 +7,22 @@ import { SectorMixCard } from "../cards/SectorMixCard";
 import { WsrSummaryCard } from "../cards/WsrSummaryCard";
 import { WsrLiteCard } from "../cards/WsrLiteCard";
 import { MacroStrip } from "../components/MacroStrip";
-import { BriefDetailModal } from "../components/BriefDetailModal";
-import { WsrDetailModal } from "../components/WsrDetailModal";
-import { WsrLiteDetailModal } from "../components/WsrLiteDetailModal";
 import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
 import { Activity } from "lucide-react";
 import { isWsrLiteFresh } from "../lib/wsrLiteParse";
+
+// Lazy: WsrDetailModal pulls in `marked` (~30 KB). All three modals are
+// only mounted when their open-state is true, so a tiny Suspense fallback
+// (the modal entry animation masks the flash).
+const BriefDetailModal = lazy(() =>
+  import("../components/BriefDetailModal").then((m) => ({ default: m.BriefDetailModal })),
+);
+const WsrDetailModal = lazy(() =>
+  import("../components/WsrDetailModal").then((m) => ({ default: m.WsrDetailModal })),
+);
+const WsrLiteDetailModal = lazy(() =>
+  import("../components/WsrLiteDetailModal").then((m) => ({ default: m.WsrLiteDetailModal })),
+);
 
 type HomeSubTab = "daily" | "lite" | "wsr";
 
@@ -107,13 +117,19 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
       </div>
 
       {briefOpen && daily && (
-        <BriefDetailModal row={daily} onClose={() => setBriefOpen(false)} />
+        <Suspense fallback={null}>
+          <BriefDetailModal row={daily} onClose={() => setBriefOpen(false)} />
+        </Suspense>
       )}
       {wsrOpen && wsr && (
-        <WsrDetailModal wsr={wsr} onClose={() => setWsrOpen(false)} />
+        <Suspense fallback={null}>
+          <WsrDetailModal wsr={wsr} onClose={() => setWsrOpen(false)} />
+        </Suspense>
       )}
       {liteOpen && wsrLite && (
-        <WsrLiteDetailModal wsrLite={wsrLite} onClose={() => setLiteOpen(false)} />
+        <Suspense fallback={null}>
+          <WsrLiteDetailModal wsrLite={wsrLite} onClose={() => setLiteOpen(false)} />
+        </Suspense>
       )}
     </>
   );
