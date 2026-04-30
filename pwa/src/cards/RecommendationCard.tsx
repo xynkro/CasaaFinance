@@ -74,7 +74,10 @@ function RecItem({
       tabIndex={0}
       data-rec-key={recKey}
       style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
-      className="block w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:scale-[0.98] active:brightness-110 transition-all duration-150 border border-white/8 cursor-pointer relative isolate"
+      // No active:scale (was shifting click target on iOS).
+      // No transition-all (was making the touched card move during tap).
+      // Just background brighten on tap for tactile feedback.
+      className="block w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:bg-white/[0.06] border border-white/8 cursor-pointer relative isolate"
     >
       {/* Header: action + ticker + strike + status */}
       <div className="flex items-center justify-between gap-3">
@@ -195,12 +198,13 @@ export function RecommendationCard({
         Manual entries from weekly ad-hoc scans. Prices + deltas are stale — verify against Daily Scan above before execution.
       </p>
 
-      {/* Event delegation: a SINGLE click handler at the container level
-          listens for any tap inside, finds the nearest [data-rec-key]
-          ancestor, dispatches by that key. Removes any per-button closure
-          binding from the equation entirely. */}
+      {/* Event delegation: SINGLE click handler at container level finds
+          the nearest [data-rec-key] ancestor and dispatches its key.
+          No empty space between cards — each card's hit area extends
+          edge-to-edge against its neighbours so iOS can't snap a tap to
+          the wrong row. Visual separation comes from a 1px border + a
+          subtle bg gap created by THIS card's padding-bottom. */}
       <div
-        className="space-y-2.5"
         onClick={(e) => {
           const target = (e.target as HTMLElement).closest("[data-rec-key]");
           if (!target) return;
@@ -208,14 +212,16 @@ export function RecommendationCard({
           if (k && onSelectKey) onSelectKey(k);
         }}
       >
-        {sorted.map((r) => {
+        {sorted.map((r, i) => {
           const key = recKey(r);
           return (
-            <RecItem
+            <div
               key={key}
-              rec={r}
-              recKey={key}
-            />
+              data-rec-key={key}
+              style={{ paddingTop: i === 0 ? 0 : 10 }}
+            >
+              <RecItem rec={r} recKey={key} />
+            </div>
           );
         })}
       </div>
