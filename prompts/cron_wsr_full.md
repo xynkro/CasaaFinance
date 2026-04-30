@@ -88,11 +88,17 @@ Critical sections:
 
 **For Caspar / For Sarah:** Per-account snapshot, performance, options scan, action plan, watch triggers.
 
-### 6. Format and push (THREE writes, not one)
+### 6. Format and push (TWO writes — markdown + unified decision queue)
 
-The WSR Full now writes to **THREE** places so the structured PWA tabs
-(Decisions, Strategy Notes) get brain content, not stale legacy or
-rule-filter math.
+The WSR Full writes to **TWO** places: the `wsr_summary` sheet (markdown for
+the Home Weekly card) and the `decision_queue` sheet (the unified weekly
+action queue the PWA Decisions tab reads). Both share-entry ideas (BUY_DIP /
+TRIM) AND option-entry ideas (CSP / CC / PMCC / LONG_CALL / LONG_PUT) live in
+the same `decision_queue` JSON now — the brain emits one queue, not two.
+
+The legacy `option_recommendations` sheet (Strategy Notes) is no longer
+written by the brain; the PWA Options › Ideas tab will go stale during the
+parity-check window and is removed in a follow-up phase.
 
 **6a — Sonnet expands JSON to markdown:**
 
@@ -113,24 +119,63 @@ python3 scripts/push_brief.py --json-file /tmp/wsr_full_payload.json
 rm /tmp/wsr_full_payload.json
 ```
 
-**6c — push structured Decision Queue rows to decision_queue sheet:**
+**6c — push the unified decision_queue (share + option entries together):**
 
-For EACH entry in your `decision_queue_top5` synthesis, plus any other
-named entries you discussed (e.g. "MDT BUY ON PULLBACK"), build:
+Build ONE JSON containing every actionable idea for the week — both share
+entries (BUY_DIP / TRIM) AND option entries (CSP / CC / PMCC / LONG_CALL /
+LONG_PUT). Each entry carries the strategic 1-liner (`thesis_1liner`) AND
+the multi-sentence brain `thesis`. Option entries also carry strike /
+expiry / premium / delta / yield / breakeven / cash / IV rank.
 
 ```json
 {
   "date": "<target_iso>",
   "decisions": [
     {
-      "ticker":         "MDT",
-      "account":        "sarah",
-      "bucket":         "quality",
-      "thesis_1liner":  "Wide-moat medical, dividend aristocrat, at SMA50 support. Entry $84 → target $96 (15% upside, 8% to stop).",
-      "conv":           4,
-      "entry":          84.00,
-      "target":         96.00,
-      "status":         "pending"
+      "ticker":            "MDT",
+      "account":           "sarah",
+      "bucket":            "quality",
+      "thesis_1liner":     "Wide-moat medical at SMA50 support. Entry $84 → target $96 (15% upside, 8% to stop).",
+      "conv":              4,
+      "entry":             84.00,
+      "target":            96.00,
+      "status":            "pending",
+      "strategy":          "BUY_DIP",
+      "right":             "",
+      "strike":            0,
+      "expiry":            "",
+      "premium_per_share": 0,
+      "delta":             0,
+      "annual_yield_pct":  0,
+      "breakeven":         0,
+      "cash_required":     8400,
+      "iv_rank":           0,
+      "thesis_confidence": 0.70,
+      "thesis":            "<2-4 sentence brain thesis: WHY this entry, WHY now (catalysts/levels), WHAT cancels (stop levels), WHAT to watch (news/data)>",
+      "source":            "wsr_full"
+    },
+    {
+      "ticker":            "AAPL",
+      "account":           "sarah",
+      "bucket":            "blue_chip",
+      "thesis_1liner":     "AAPL CSP $250P 35DTE — collect premium in low-IV regime.",
+      "conv":              4,
+      "entry":             250.00,
+      "target":            245.50,
+      "status":            "pending",
+      "strategy":          "CSP",
+      "right":             "P",
+      "strike":            250.00,
+      "expiry":            "20260619",
+      "premium_per_share": 4.50,
+      "delta":             0.20,
+      "annual_yield_pct":  14.0,
+      "breakeven":         245.50,
+      "cash_required":     25000,
+      "iv_rank":           28,
+      "thesis_confidence": 0.65,
+      "thesis":            "<brain thesis>",
+      "source":            "wsr_full"
     }
   ]
 }
@@ -142,66 +187,19 @@ python3 scripts/push_decisions.py --json-file /tmp/wsr_decisions.json
 rm /tmp/wsr_decisions.json
 ```
 
-**status** values: `"pending"` (live entry), `"watching"` (price not yet
-in zone), `"filled"` (already executed), `"killed"` (thesis broken).
+**Upsert key:** `(date, account, ticker, strategy, strike)`. This means you
+CAN emit BOTH a `BUY_DIP MDT` row AND a `CSP MDT $80P` row in the same week
+without one clobbering the other — strategy + strike differentiate them.
 
-**6d — push structured Strategy Notes to option_recommendations sheet:**
+**Status values:** `pending` (live entry, ready to act), `watching` (price
+not yet in zone), `filled` (already executed), `killed` (thesis broken),
+`expired` (DTE elapsed without action).
 
-For each "Actionable Entry" + each open option position with brain
-judgement, build:
-
-```json
-{
-  "date": "<target_iso>",
-  "source": "wsr_full",
-  "recommendations": [
-    {
-      "ticker": "MDT",
-      "account": "sarah",
-      "strategy": "BUY_DIP",
-      "right": "",
-      "strike": 84.00,
-      "expiry": "",
-      "premium_per_share": 0,
-      "delta": 0,
-      "annual_yield_pct": 0,
-      "breakeven": 84.00,
-      "cash_required": 8400,
-      "iv_rank": 0,
-      "thesis_confidence": 0.70,
-      "thesis": "<2-4 sentence brain thesis — WHY this entry, WHY now, WHAT cancels it, WHAT to watch>",
-      "status": "proposed"
-    },
-    {
-      "ticker": "AAPL",
-      "account": "sarah",
-      "strategy": "CSP",
-      "right": "P",
-      "strike": 250.00,
-      "expiry": "20260619",
-      "premium_per_share": 4.50,
-      "delta": 0.20,
-      "annual_yield_pct": 14.0,
-      "breakeven": 245.50,
-      "cash_required": 25000,
-      "iv_rank": 28,
-      "thesis_confidence": 0.65,
-      "thesis": "<brain thesis>",
-      "status": "proposed"
-    }
-  ]
-}
-```
-
-Save to `/tmp/wsr_recs.json` and run:
-```bash
-python3 scripts/push_recommendations.py --json-file /tmp/wsr_recs.json
-rm /tmp/wsr_recs.json
-```
-
-**Strategy values:** `BUY_DIP` (share entry), `CSP`, `CC`, `PMCC`,
-`LONG_CALL`, `LONG_PUT`. Use empty string for `right` when it's a share
-entry (no option contract).
+**Strategy values:** `BUY_DIP` (share entry on pullback), `TRIM` (share
+exit), `CSP`, `CC`, `PMCC`, `LONG_CALL`, `LONG_PUT`. Use empty string for
+`right` and 0 for `strike` / `expiry` / premium / delta / yield / breakeven
+/ iv_rank when it's a share entry. Always populate ALL fields — use 0 / ""
+for inapplicable ones, never omit a key.
 
 **🚨 CC ELIGIBILITY RULE (non-negotiable):**
 
@@ -226,10 +224,11 @@ If you find yourself drafting a CC on SCHD / SPY / VOO / QQQ / VTI /
 AAPL / MSFT etc., STOP and revise. Suggest CSP instead, OR no options
 trade and accumulation only.
 
-**Thesis content rule:** the thesis field is what the user sees when
-they tap a Strategy Notes card. It MUST be brain synthesis, not
-rule-filter math. Include: WHY the trade, WHY now (catalysts/levels),
-WHAT cancels the thesis (stop levels), WHAT to watch (news/data).
+**Thesis content rule:** the `thesis` field is what the user sees when
+they tap a Decisions card. It MUST be brain synthesis, not rule-filter
+math. Include: WHY the trade, WHY now (catalysts/levels), WHAT cancels
+the thesis (stop levels), WHAT to watch (news/data). The `thesis_1liner`
+is the glanceable summary; `thesis` is the deep version.
 
 ### 7. Generate watch-trigger list for the coming week
 

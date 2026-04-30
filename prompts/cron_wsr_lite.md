@@ -124,27 +124,66 @@ python3 scripts/push_brief.py --json-file /tmp/wsr_lite_payload.json
 rm /tmp/wsr_lite_payload.json
 ```
 
-**5c — refresh decision_queue with current state:**
+**5c — refresh the unified decision_queue with mid-week reality:**
 
-The Mid-Week Pulse should refresh the Decision Queue status (some entries
-may have moved from `watching` to `pending` if price hit the zone, or
-from `pending` to `filled` if the user executed, or `killed` if thesis
-broke). Re-write the top 5 entries — same structure as WSR Full prompt's
-section 6c.
+The Mid-Week Pulse should refresh both the share-entry queue (status
+transitions: `watching` → `pending` if price hit the zone, `pending` →
+`filled` if user executed, anything → `killed` if thesis broke) AND the
+open options book (each held CSP / CC / PMCC reported as a `filled`
+decision row with the thesis updated to current proximity / IV / DTE).
+
+Build ONE JSON. Both share AND option entries — same unified shape as
+WSR Full §6c, but with `"source": "wsr_lite"`.
 
 ```json
 {
   "date": "<today_iso>",
   "decisions": [
     {
-      "ticker":         "MDT",
-      "account":        "sarah",
-      "bucket":         "quality",
-      "thesis_1liner":  "Now $86, 2.4% above entry — 'CLOSE' but not yet ACTIONABLE. Watch for pullback to $84.",
-      "conv":           4,
-      "entry":          84.00,
-      "target":         96.00,
-      "status":         "watching"
+      "ticker":            "MDT",
+      "account":           "sarah",
+      "bucket":            "quality",
+      "thesis_1liner":     "Now $86, 2.4% above entry — CLOSE but not yet ACTIONABLE. Watch for pullback to $84.",
+      "conv":              4,
+      "entry":             84.00,
+      "target":            96.00,
+      "status":            "watching",
+      "strategy":          "BUY_DIP",
+      "right":             "",
+      "strike":            0,
+      "expiry":            "",
+      "premium_per_share": 0,
+      "delta":             0,
+      "annual_yield_pct":  0,
+      "breakeven":         0,
+      "cash_required":     8400,
+      "iv_rank":           0,
+      "thesis_confidence": 0.70,
+      "thesis":            "<2-4 sentence brain thesis updated for mid-week price action>",
+      "source":            "wsr_lite"
+    },
+    {
+      "ticker":            "AAPL",
+      "account":           "sarah",
+      "bucket":            "blue_chip",
+      "thesis_1liner":     "AAPL $250P 19% OTM (was 17% Mon), safe to expiry — collect full $4.50 premium.",
+      "conv":              4,
+      "entry":             250.00,
+      "target":            245.50,
+      "status":            "filled",
+      "strategy":          "CSP",
+      "right":             "P",
+      "strike":            250.00,
+      "expiry":            "20260619",
+      "premium_per_share": 4.50,
+      "delta":             0.18,
+      "annual_yield_pct":  14.0,
+      "breakeven":         245.50,
+      "cash_required":     25000,
+      "iv_rank":           26,
+      "thesis_confidence": 0.70,
+      "thesis":            "<mid-week reality — proximity, IV change, DTE remaining, what to do at expiry>",
+      "source":            "wsr_lite"
     }
   ]
 }
@@ -156,20 +195,22 @@ python3 scripts/push_decisions.py --json-file /tmp/wsr_lite_decisions.json
 rm /tmp/wsr_lite_decisions.json
 ```
 
-**5d — refresh option_recommendations with current actionability:**
+**Upsert key:** `(date, account, ticker, strategy, strike)`. The lite run
+re-emits the same week's entries with refreshed thesis — re-running
+overwrites by design. You CAN emit BOTH a `BUY_DIP MDT` AND a `CSP MDT
+$80P` in the same week without collision.
 
-For options book entries (CSP/CC currently held) update their thesis
-based on this week's price action. Same structure as WSR Full prompt's
-section 6d, but use `"source": "wsr_lite"`.
+**Status values:** `pending` / `watching` / `filled` / `killed` /
+`expired`. Use `filled` for currently-held option positions whose thesis
+you're refreshing for mid-week.
 
-```bash
-python3 scripts/push_recommendations.py --json-file /tmp/wsr_lite_recs.json
-rm /tmp/wsr_lite_recs.json
-```
+**Strategy values:** `BUY_DIP`, `TRIM`, `CSP`, `CC`, `PMCC`, `LONG_CALL`,
+`LONG_PUT`. Use empty string for `right` and 0 for option-spec fields when
+emitting a share entry. Always populate ALL fields — never omit a key.
 
-The thesis should reflect mid-week reality — e.g. "AAPL $225P now 19%
-OTM (was 17% Monday), safe to expiry — collect full $137 premium" — not
-generic rule-filter math.
+The legacy `option_recommendations` sheet is no longer written. The PWA
+Options › Ideas tab will go stale during the parity-check window and is
+removed in a follow-up phase.
 
 **🚨 CC ELIGIBILITY RULE (non-negotiable):**
 
@@ -180,6 +221,11 @@ Wheeling SCHD specifically is a thesis violation — interrupting the
 plan. See `cc_eligible_buckets` in the trading rules dict.
 
 CSP on those names IS appropriate — paid to maybe acquire the compounder.
+
+**Thesis content rule:** the `thesis` field is what the user sees when
+they tap a Decisions card. It MUST be brain synthesis, not rule-filter
+math. The `thesis_1liner` is the glanceable summary; `thesis` is the
+deep version.
 
 ## Cost discipline
 
