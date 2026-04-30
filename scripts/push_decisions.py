@@ -14,23 +14,43 @@ Input JSON shape (stdin or --json-file):
       "date": "2026-04-29",
       "decisions": [
         {
-          "ticker":         "SCHD",
-          "account":        "caspar",
-          "bucket":         "quality",
-          "thesis_1liner":  "CC income unlock at 100 shares — accumulating",
-          "conv":           5,
-          "entry":          30.40,
-          "target":         33.00,
-          "status":         "pending"
+          "ticker":            "SCHD",
+          "account":           "caspar",
+          "bucket":            "quality",
+          "thesis_1liner":     "CC income unlock at 100 shares — accumulating",
+          "conv":              5,
+          "entry":             30.40,
+          "target":            33.00,
+          "status":            "pending",
+          // --- optional options-spec fields (default "" / 0 for share entries) ---
+          "strategy":          "BUY_DIP",   // or "" / "CSP" / "CC" / "PMCC" / ...
+          "right":             "",          // "" / "C" / "P"
+          "strike":            0,
+          "expiry":            "",          // "YYYYMMDD" for options
+          "premium_per_share": 0,
+          "delta":             0,
+          "annual_yield_pct":  0,
+          "breakeven":         0,
+          "cash_required":     0,
+          "iv_rank":           0,
+          "thesis_confidence": 0.70,
+          "thesis":            "<long-form brain thesis>",
+          "source":            "wsr_full"   // "" / "wsr_full" / "wsr_lite" / "manual"
         },
         ...
       ]
     }
 
 Behaviour:
-  - Idempotent upsert by (date, account, ticker) — re-running with same
-    date+account+ticker replaces the prior row.
+  - Idempotent upsert by (date, account, ticker, strategy, strike) — same
+    compound key as push_recommendations.py. Lets the brain emit BUY_DIP MDT
+    AND a hypothetical CSP MDT in the same week without one clobbering the
+    other. For legacy share-only rows (strategy="", strike=0) the key
+    collapses naturally to (date, account, ticker, "", "0.00").
   - Different dates accumulate (history preserved).
+  - Backward-compat: legacy rows in the sheet with only 9 columns are
+    pad-read to the new 22-col HEADERS — gspread returns shorter lists
+    for short rows, so we defensively index past length.
 
 Usage:
   cat decisions.json | python scripts/push_decisions.py
@@ -81,6 +101,7 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
 
     # Build new rows from JSON
     new_rows: list[list[str]] = []
+    new_keys: set[tuple] = set()
     for d in decisions:
         try:
             row = S.DecisionRow(
@@ -93,21 +114,45 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
                 entry=float(d.get("entry", 0)),
                 target=float(d.get("target", 0)),
                 status=d.get("status", "pending"),
+                # Optional options-spec fields — default "" / 0 for share entries.
+                strategy=(d.get("strategy", "") or "").strip().upper(),
+                right=(d.get("right", "") or "").strip().upper(),
+                strike=float(d.get("strike", 0) or 0),
+                expiry=(d.get("expiry", "") or "").strip(),
+                premium_per_share=float(d.get("premium_per_share", 0) or 0),
+                delta=float(d.get("delta", 0) or 0),
+                annual_yield_pct=float(d.get("annual_yield_pct", 0) or 0),
+                breakeven=float(d.get("breakeven", 0) or 0),
+                cash_required=float(d.get("cash_required", 0) or 0),
+                iv_rank=float(d.get("iv_rank", 0) or 0),
+                thesis_confidence=float(d.get("thesis_confidence", 0) or 0),
+                thesis=(d.get("thesis", "") or "").strip(),
+                source=(d.get("source", "") or "").strip(),
             )
             if not row.ticker:
                 continue
             new_rows.append(row.to_row())
-            logger.info(f"  + {row.account:7} {row.ticker:6} {row.bucket:12} conv={row.conv} entry=${row.entry:.2f} → ${row.target:.2f}")
+            key = (date, row.account, row.ticker, row.strategy, f"{row.strike:.2f}")
+            new_keys.add(key)
+            logger.info(
+                f"  + {row.account:7} {row.ticker:6} {row.bucket:12} {row.strategy:9} "
+                f"conv={row.conv} entry=${row.entry:.2f} → ${row.target:.2f}"
+            )
         except Exception as e:
             logger.warning(f"  skip malformed entry: {e} ({d})")
 
     if not new_rows:
         return {"ok": False, "error": "no valid decision rows after parsing"}
 
-    # Upsert: drop existing rows where (date_prefix, account, ticker) matches
+    # Upsert: drop existing rows where (date_prefix, account, ticker, strategy, strike) matches.
+    # Legacy 9-col rows have no strategy/strike columns — they pad-read to "" / "0.00",
+    # which means a legacy share-only row collapses to the same key as a new BUY_DIP entry
+    # ONLY if the new entry also leaves strategy="" — share entries from the new brain
+    # carry strategy="BUY_DIP" so they don't collide with legacy share rows.
     existing = ws.get_all_values()
     keep_rows = [existing[0]] if existing else [list(S.DecisionRow.HEADERS)]
-    new_keys = {(date, r[1], r[2]) for r in new_rows}  # (date, account, ticker)
+    # Schema: date(0), account(1), ticker(2), bucket(3), thesis_1liner(4), conv(5),
+    # entry(6), target(7), status(8), strategy(9), right(10), strike(11), ...
     dropped = 0
     for r in (existing[1:] if existing else []):
         if not r:
@@ -116,7 +161,12 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
         row_date = r[0][:10]
         row_account = r[1] if len(r) > 1 else ""
         row_ticker = r[2] if len(r) > 2 else ""
-        if (row_date, row_account, row_ticker) in new_keys:
+        row_strategy = r[9] if len(r) > 9 else ""
+        try:
+            row_strike = f"{float(r[11]):.2f}" if len(r) > 11 and r[11] not in ("", None) else "0.00"
+        except (ValueError, TypeError):
+            row_strike = "0.00"
+        if (row_date, row_account, row_ticker, row_strategy, row_strike) in new_keys:
             dropped += 1
             continue
         keep_rows.append(r)

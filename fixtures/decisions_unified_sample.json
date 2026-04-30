@@ -1,0 +1,51 @@
+{
+  "date": "2026-04-30",
+  "decisions": [
+    {
+      "ticker": "MDT",
+      "account": "sarah",
+      "bucket": "quality",
+      "thesis_1liner": "Wide-moat medical at SMA50 support. Entry $84 -> target $96.",
+      "conv": 4,
+      "entry": 84.00,
+      "target": 96.00,
+      "status": "pending",
+      "strategy": "BUY_DIP",
+      "right": "",
+      "strike": 0,
+      "expiry": "",
+      "premium_per_share": 0,
+      "delta": 0,
+      "annual_yield_pct": 0,
+      "breakeven": 0,
+      "cash_required": 8400,
+      "iv_rank": 0,
+      "thesis_confidence": 0.70,
+      "thesis": "Dividend aristocrat with Hugo robotic-surgery catalyst. SMA50 support holding through last week's macro chop. Q4 earnings late May. Stop on close < $80 (8% downside). Targets $96 in 6-9 months on multiple expansion + Hugo FDA news.",
+      "source": "wsr_full"
+    },
+    {
+      "ticker": "AAPL",
+      "account": "sarah",
+      "bucket": "blue_chip",
+      "thesis_1liner": "AAPL CSP $250P 35DTE — collect premium in low-IV regime.",
+      "conv": 4,
+      "entry": 250.00,
+      "target": 245.50,
+      "status": "pending",
+      "strategy": "CSP",
+      "right": "P",
+      "strike": 250.00,
+      "expiry": "20260619",
+      "premium_per_share": 4.50,
+      "delta": 0.20,
+      "annual_yield_pct": 14.0,
+      "breakeven": 245.50,
+      "cash_required": 25000,
+      "iv_rank": 28,
+      "thesis_confidence": 0.65,
+      "thesis": "AAPL premium-collection at 250P 35DTE. Delta 0.20 implies ~80% probability of expiring worthless. Breakeven $245.50 is 4% below current. If assigned, cost basis $245.50 fits long-term thesis. Roll if breached.",
+      "source": "wsr_full"
+    }
+  ]
+}

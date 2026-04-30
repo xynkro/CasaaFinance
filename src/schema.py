@@ -88,23 +88,60 @@ class PositionRow:
 @dataclass
 class DecisionRow:
     TAB_NAME = "decision_queue"
-    HEADERS = ["date", "account", "ticker", "bucket", "thesis_1liner", "conv", "entry", "target", "status"]
+    HEADERS = [
+        "date", "account", "ticker", "bucket", "thesis_1liner", "conv", "entry", "target", "status",
+        # Unified options-spec extension (Phase A of decisions-ideas-merge).
+        # All fields below are optional — share entries default to "" / 0.
+        "strategy",            # "" | "BUY_DIP" | "TRIM" | "CSP" | "CC" | "PMCC" | "LONG_CALL" | "LONG_PUT"
+        "right",               # "" | "C" | "P"
+        "strike",              # 0 for share entries
+        "expiry",              # "" | "YYYYMMDD"
+        "premium_per_share",   # 0 for shares
+        "delta",               # 0 for shares
+        "annual_yield_pct",    # 0 for shares
+        "breakeven",           # 0 if not applicable
+        "cash_required",       # 0 if not applicable
+        "iv_rank",             # 0 if not applicable (0-100 scale)
+        "thesis_confidence",   # 0.0 - 1.0 (brain analytic signal, separate from gut-feel `conv`)
+        "thesis",              # full multi-sentence brain thesis (separate from thesis_1liner)
+        "source",              # "" | "wsr_full" | "wsr_lite" | "manual"
+    ]
 
     date: str
     account: str          # "caspar" | "sarah"
     ticker: str
     bucket: str           # e.g. "BUY NOW" | "WATCH" | "CSP" | "PMCC" | "WHEEL"
     thesis_1liner: str
-    conv: float           # 0.0 – 1.0
+    conv: float           # 1-5 gut-feel conviction (kept distinct from thesis_confidence)
     entry: float
     target: float
-    status: str           # "pending" | "filled" | "killed"
+    status: str           # "pending" | "watching" | "filled" | "killed" | "expired"
+    # --- options-spec extension (all optional, default to "" / 0 for share entries) ---
+    strategy: str = ""
+    right: str = ""
+    strike: float = 0.0
+    expiry: str = ""
+    premium_per_share: float = 0.0
+    delta: float = 0.0
+    annual_yield_pct: float = 0.0
+    breakeven: float = 0.0
+    cash_required: float = 0.0
+    iv_rank: float = 0.0
+    thesis_confidence: float = 0.0
+    thesis: str = ""
+    source: str = ""
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
         return [
             d, self.account, self.ticker, self.bucket, self.thesis_1liner,
             _num(self.conv, 2), _num(self.entry, 4), _num(self.target, 4), self.status,
+            self.strategy, self.right,
+            _num(self.strike, 2), self.expiry,
+            _num(self.premium_per_share, 4), _num(self.delta, 4),
+            _num(self.annual_yield_pct, 2), _num(self.breakeven, 2),
+            _num(self.cash_required, 2), _num(self.iv_rank, 0),
+            _num(self.thesis_confidence, 2), self.thesis, self.source,
         ]
 
 
