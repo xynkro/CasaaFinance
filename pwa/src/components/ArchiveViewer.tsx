@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
 import type { ArchiveRow } from "../data";
 import { X, ChevronLeft, ExternalLink } from "lucide-react";
+import { useSwipeToDismiss } from "../lib/useSwipeToDismiss";
 
 function shortDate(d: string): string {
   const s = d.slice(0, 10);
@@ -16,58 +16,16 @@ export function ArchiveViewer({
   row: ArchiveRow;
   onClose: () => void;
 }) {
-  const touchRef = useRef<{ startX: number; startY: number; moving: boolean }>({
-    startX: 0, startY: 0, moving: false,
-  });
-  const [dragX, setDragX] = useState(0);
-
-  const SWIPE_THRESHOLD = 80;
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchRef.current = {
-      startX: e.touches[0].clientX,
-      startY: e.touches[0].clientY,
-      moving: false,
-    };
-  };
-
-  const onTouchMove = (e: React.TouchEvent) => {
-    const dx = e.touches[0].clientX - touchRef.current.startX;
-    const dy = e.touches[0].clientY - touchRef.current.startY;
-    if (!touchRef.current.moving) {
-      if (Math.abs(dy) > Math.abs(dx)) return;
-      if (Math.abs(dx) < 10) return;
-      if (dx <= 0) return;
-      touchRef.current.moving = true;
-    }
-    if (touchRef.current.moving && dx > 0) {
-      setDragX(dx);
-    }
-  };
-
-  const onTouchEnd = () => {
-    if (touchRef.current.moving && dragX > SWIPE_THRESHOLD) {
-      onClose();
-    } else {
-      setDragX(0);
-    }
-    touchRef.current.moving = false;
-  };
+  const { panelStyle, backdropStyle, handlers } = useSwipeToDismiss({ onDismiss: onClose });
 
   const previewUrl = `https://drive.google.com/file/d/${row.drive_file_id}/preview`;
   const externalUrl = row.drive_url || `https://drive.google.com/file/d/${row.drive_file_id}/view`;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-[#050a18] transition-transform"
-      style={{
-        transform: `translateX(${dragX}px)`,
-        transitionDuration: touchRef.current.moving ? "0ms" : "250ms",
-        opacity: 1 - Math.min(dragX / 400, 0.3),
-      }}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
+      className="fixed inset-0 z-50 flex flex-col bg-[#050a18]"
+      style={{ ...panelStyle, ...backdropStyle }}
+      {...handlers}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-3 pt-safe-top border-b border-white/6">

@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X, ChevronLeft, Target, AlertTriangle, Moon } from "lucide-react";
 import type { WsrSummaryRow } from "../data";
 import { parseWsrLite } from "../lib/wsrLiteParse";
 import type { TriggerRow, TrafficLightRow, DecisionQueueRow, CatalystDay } from "../lib/wsrLiteParse";
+import { useSwipeToDismiss } from "../lib/useSwipeToDismiss";
 
 // ── Trigger Audit ─────────────────────────────────────────────────────────────
 
@@ -256,26 +256,11 @@ export function WsrLiteDetailModal({
   wsrLite: WsrSummaryRow;
   onClose: () => void;
 }) {
-  const touchRef = useRef<{ startX: number; startY: number; moving: boolean }>({ startX: 0, startY: 0, moving: false });
-  const [dragX, setDragX] = useState(0);
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchRef.current = { startX: e.touches[0].clientX, startY: e.touches[0].clientY, moving: false };
-  };
-  const onTouchMove = (e: React.TouchEvent) => {
-    const dx = e.touches[0].clientX - touchRef.current.startX;
-    const dy = e.touches[0].clientY - touchRef.current.startY;
-    if (!touchRef.current.moving) {
-      if (Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < 10 || dx <= 0) return;
-      touchRef.current.moving = true;
-    }
-    if (dx > 0) setDragX(dx);
-  };
-  const onTouchEnd = () => {
-    if (touchRef.current.moving && dragX > 80) onClose();
-    else setDragX(0);
-    touchRef.current.moving = false;
-  };
+  // opacityCoeff 0.25 preserves WsrLite's softer fade (matches StockDetail).
+  const { panelStyle, backdropStyle, handlers } = useSwipeToDismiss({
+    onDismiss: onClose,
+    opacityCoeff: 0.25,
+  });
 
   const parsed = parseWsrLite(wsrLite.raw_md ?? "");
   const dateStr = wsrLite.date.slice(0, 10);
@@ -289,13 +274,10 @@ export function WsrLiteDetailModal({
       className="fixed inset-0 z-50 flex flex-col"
       style={{
         background: "#07090f",
-        transform: `translateX(${dragX}px)`,
-        transition: touchRef.current.moving ? "none" : "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
-        opacity: 1 - Math.min(dragX / 400, 0.25),
+        ...panelStyle,
+        ...backdropStyle,
       }}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
+      {...handlers}
     >
       {/* Header */}
       <div

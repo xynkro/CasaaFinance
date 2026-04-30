@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { PositionRow, DecisionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
 import { X, TrendingUp, TrendingDown, ChevronLeft, Zap, Activity, BarChart2 } from "lucide-react";
 import { sectorFor } from "../lib/emojis";
+import { useSwipeToDismiss } from "../lib/useSwipeToDismiss";
 import { ExitPlanPanel } from "./ExitPlanPanel";
 
 function fmt(v: string | number, prefix = "$"): string {
@@ -332,8 +333,12 @@ export function StockDetail({
   const ticker = tickerProp ?? position?.ticker ?? decision?.ticker ?? "";
   const chartRef = useRef<HTMLDivElement>(null);
   const taRef    = useRef<HTMLDivElement>(null);
-  const touchRef = useRef<{ startX: number; startY: number; moving: boolean }>({ startX: 0, startY: 0, moving: false });
-  const [dragX, setDragX] = useState(0);
+
+  // Swipe-right-to-close — opacityCoeff 0.25 preserves StockDetail's softer fade.
+  const { panelStyle, backdropStyle, handlers } = useSwipeToDismiss({
+    onDismiss: onClose,
+    opacityCoeff: 0.25,
+  });
 
   const prefix = currency === "SGD" ? "S$" : "$";
   const upl    = position ? Number(position.upl) : 0;
@@ -341,25 +346,6 @@ export function StockDetail({
   const avgCost = position ? Number(position.avg_cost) : 0;
   const uplPct  = avgCost > 0 ? ((Number(position?.last) - avgCost) / avgCost) * 100 : 0;
   const { sector, emoji } = sectorFor(ticker);
-
-  // Swipe-right-to-close
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchRef.current = { startX: e.touches[0].clientX, startY: e.touches[0].clientY, moving: false };
-  };
-  const onTouchMove = (e: React.TouchEvent) => {
-    const dx = e.touches[0].clientX - touchRef.current.startX;
-    const dy = e.touches[0].clientY - touchRef.current.startY;
-    if (!touchRef.current.moving) {
-      if (Math.abs(dy) > Math.abs(dx) || Math.abs(dx) < 10 || dx <= 0) return;
-      touchRef.current.moving = true;
-    }
-    if (dx > 0) setDragX(dx);
-  };
-  const onTouchEnd = () => {
-    if (touchRef.current.moving && dragX > 80) onClose();
-    else setDragX(0);
-    touchRef.current.moving = false;
-  };
 
   // TradingView widgets
   useEffect(() => {
@@ -398,13 +384,10 @@ export function StockDetail({
       className="fixed inset-0 z-50 flex flex-col"
       style={{
         background: "#07090f",
-        transform: `translateX(${dragX}px)`,
-        transition: touchRef.current.moving ? "none" : "transform 0.25s cubic-bezier(0.4,0,0.2,1)",
-        opacity: 1 - Math.min(dragX / 400, 0.25),
+        ...panelStyle,
+        ...backdropStyle,
       }}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
+      {...handlers}
     >
       {/* ── Header ── */}
       <div
