@@ -7,6 +7,21 @@ export function recKey(r: OptionRecommendationRow): string {
   return `${r.date}|${r.source}|${r.strategy}|${r.ticker}|${r.strike}|${r.right}|${r.account}`;
 }
 
+const STRATEGY_LABEL: Record<string, string> = {
+  CSP: "Cash-Secured Put",
+  CC: "Covered Call",
+  LONG_CALL: "Long Call",
+  LONG_PUT: "Long Put",
+  PMCC: "Poor Man's Covered Call",
+};
+
+const STATUS_STYLE: Record<string, { bg: string; fg: string; border: string }> = {
+  proposed: { bg: "rgba(99,102,241,0.15)",  fg: "#818cf8", border: "rgba(99,102,241,0.20)"  },
+  executed: { bg: "rgba(16,185,129,0.15)",  fg: "#34d399", border: "rgba(16,185,129,0.20)"  },
+  skipped:  { bg: "rgba(100,116,139,0.15)", fg: "#94a3b8", border: "rgba(100,116,139,0.20)" },
+  expired:  { bg: "rgba(245,158,11,0.15)",  fg: "#fbbf24", border: "rgba(245,158,11,0.20)"  },
+};
+
 function fmt(v: string | number, prefix = "$"): string {
   const n = Number(v);
   if (isNaN(n)) return "—";
@@ -19,101 +34,129 @@ function fmtPct(v: string | number): string {
   return `${n.toFixed(1)}%`;
 }
 
-const STRATEGY_LABEL: Record<string, string> = {
-  CSP: "Cash-Secured Put",
-  CC: "Covered Call",
-  LONG_CALL: "Long Call",
-  LONG_PUT: "Long Put",
-  PMCC: "Poor Man's Covered Call",
-};
-
-const STATUS_STYLE: Record<string, string> = {
-  proposed: "bg-indigo-500/15 text-indigo-400 border-indigo-500/20",
-  executed: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
-  skipped: "bg-slate-500/15 text-slate-400 border-slate-500/20",
-  expired: "bg-amber-500/15 text-amber-400 border-amber-500/20",
-};
-
-function ThesisConfidenceBar({ value }: { value: number }) {
-  const pct = Math.max(0, Math.min(1, value)) * 100;
-  const color = pct >= 70 ? "bg-emerald-400" : pct >= 50 ? "bg-indigo-400" : "bg-amber-400";
-  return (
-    <div className="flex items-center gap-1.5 shrink-0">
-      <div className="w-10 h-1 rounded-full bg-white/5 overflow-hidden">
-        <div className={`h-full ${color} transition-all`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-[10px] font-semibold tabular-nums text-slate-300">{(value * 100).toFixed(0)}%</span>
-    </div>
-  );
-}
-
-function RecItem({
+/**
+ * Strategy-Notes row (rebuild v3, 2026-04-30).
+ *
+ * Why this looks different from other cards:
+ *
+ * The previous design wrapped each row in `.glass`. That class has a global
+ * rule `.glass:active { transform: scale(0.983); }` which shrinks the card
+ * toward its centre on touch. iOS dispatches the click to whatever element
+ * is under the finger AT TOUCHEND — by then the card has shrunk by ~2px,
+ * the upper portion of card N has receded, and the finger lands on card N-1.
+ *
+ * That explains the diagnostic "press above middle of card N → opens N-1,
+ * press below middle → opens N, first card just flashes". Removing
+ * `active:scale-[0.98]` Tailwind classes wasn't enough because the CSS
+ * `.glass:active` rule was still firing on every tap.
+ *
+ * Fix: don't use `.glass` on the row buttons. Plain inline-styled buttons,
+ * no transform, no event delegation, real <button>, direct onClick.
+ */
+function RecRow({
   rec,
-  recKey,
+  onTap,
+  marginTop,
 }: {
   rec: OptionRecommendationRow;
-  recKey: string;
+  onTap: () => void;
+  marginTop: number;
 }) {
   const strategy = STRATEGY_LABEL[rec.strategy] ?? rec.strategy;
   const status = rec.status?.toLowerCase() || "proposed";
-  const statusStyle = STATUS_STYLE[status] ?? STATUS_STYLE.proposed;
+  const sStyle = STATUS_STYLE[status] ?? STATUS_STYLE.proposed;
   const accountLabel = rec.account === "caspar" ? "Caspar" : "Sarah";
-  const accountColor = rec.account === "caspar" ? "text-blue-400" : "text-pink-400";
+  const accountColor = rec.account === "caspar" ? "#60a5fa" : "#f472b6";
   const strike = Number(rec.strike);
   const yld = Number(rec.annual_yield_pct);
 
-  // Format expiry — could be "May24" or "20260524"
   let expiryDisplay = rec.expiry;
   if (rec.expiry.length === 8 && /^\d+$/.test(rec.expiry)) {
     expiryDisplay = `${rec.expiry.slice(4, 6)}/${rec.expiry.slice(6, 8)}`;
   }
 
+  const conf = Number(rec.thesis_confidence) || 0;
+  const confPct = Math.max(0, Math.min(1, conf)) * 100;
+  const confColor = confPct >= 70 ? "#34d399" : confPct >= 50 ? "#818cf8" : "#fbbf24";
+
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      data-rec-key={recKey}
-      style={{ touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
-      // No active:scale (was shifting click target on iOS).
-      // No transition-all (was making the touched card move during tap).
-      // Just background brighten on tap for tactile feedback.
-      className="block w-full text-left glass rounded-xl p-3.5 space-y-2.5 active:bg-white/[0.06] border border-white/8 cursor-pointer relative isolate"
+    <button
+      type="button"
+      onClick={onTap}
+      style={{
+        // Mobile-touch hygiene
+        touchAction: "manipulation",
+        WebkitTapHighlightColor: "transparent",
+        // Reset native button defaults
+        WebkitAppearance: "none",
+        appearance: "none",
+        font: "inherit",
+        color: "inherit",
+        cursor: "pointer",
+        // Layout
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: 14,
+        margin: 0,
+        marginTop,
+        // Surface — explicit, NOT .glass (no active-scale anywhere)
+        backgroundColor: "rgba(255,255,255,0.028)",
+        border: "1px solid rgba(255,255,255,0.085)",
+        borderRadius: 12,
+        // No transform/transition — keeps hit area static during touch
+      }}
     >
-      {/* Header: action + ticker + strike + status */}
-      <div className="flex items-center justify-between gap-3">
+      {/* Header: ticker + strike + status */}
+      <div className="flex items-center justify-between gap-3" style={{ marginBottom: 8 }}>
         <div className="flex items-center gap-2 min-w-0">
-          <TrendingUp size={12} className="text-emerald-400 shrink-0" />
+          <TrendingUp size={12} style={{ color: "#34d399", flexShrink: 0 }} />
           <span className="text-sm font-bold text-white">{rec.ticker}</span>
           <span className="text-[10px] font-semibold text-slate-500 shrink-0">
             ${strike.toFixed(strike < 10 ? 1 : 0)}{rec.right}
           </span>
           <span className="text-[9px] text-slate-600">exp {expiryDisplay}</span>
         </div>
-        <div className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-bold border ${statusStyle}`}>
+        <div
+          className="shrink-0 text-[10px] font-bold"
+          style={{
+            backgroundColor: sStyle.bg,
+            color: sStyle.fg,
+            border: `1px solid ${sStyle.border}`,
+            padding: "2px 8px",
+            borderRadius: 4,
+          }}
+        >
           {status.toUpperCase()}
         </div>
       </div>
 
       {/* Strategy + account */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-medium text-indigo-400">{strategy}</span>
-          <span className={`text-[10px] font-semibold uppercase tracking-wider ${accountColor}`}>
+          <span className="text-[10px] font-medium" style={{ color: "#818cf8" }}>{strategy}</span>
+          <span
+            className="text-[10px] font-semibold uppercase tracking-wider"
+            style={{ color: accountColor }}
+          >
             {accountLabel}
           </span>
         </div>
-        <ChevronRight size={12} className="text-slate-600" />
+        <ChevronRight size={12} style={{ color: "#475569" }} />
       </div>
 
       {/* Key metrics */}
-      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500">
+      <div
+        className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500"
+        style={{ marginBottom: 8 }}
+      >
         <span>Premium: <span className="text-slate-300 tabular-nums">{fmt(rec.premium_per_share)}</span></span>
-        <span>Yield: <span className="text-emerald-400 tabular-nums font-semibold">{fmtPct(yld)}</span></span>
+        <span>Yield: <span style={{ color: "#34d399" }} className="tabular-nums font-semibold">{fmtPct(yld)}</span></span>
         <span>Cash: <span className="text-slate-300 tabular-nums">{fmt(rec.cash_required)}</span></span>
         <span>Δ: <span className="text-slate-300 tabular-nums">{Number(rec.delta).toFixed(2)}</span></span>
       </div>
 
-      {/* Breakeven + IV + confidence */}
+      {/* Footer: BE + IVR + confidence */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4 text-[10px] text-slate-500">
           <span>BE: <span className="text-slate-300 tabular-nums">{fmt(rec.breakeven)}</span></span>
@@ -121,11 +164,25 @@ function RecItem({
         </div>
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-slate-500">Conf</span>
-          <ThesisConfidenceBar value={Number(rec.thesis_confidence) || 0} />
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div
+              style={{
+                width: 40,
+                height: 4,
+                borderRadius: 2,
+                backgroundColor: "rgba(255,255,255,0.05)",
+                overflow: "hidden",
+              }}
+            >
+              <div style={{ height: "100%", width: `${confPct}%`, backgroundColor: confColor }} />
+            </div>
+            <span className="text-[10px] font-semibold tabular-nums text-slate-300">
+              {(conf * 100).toFixed(0)}%
+            </span>
+          </div>
         </div>
       </div>
-
-    </div>
+    </button>
   );
 }
 
@@ -151,21 +208,17 @@ export function RecommendationCard({
     );
   }
 
-  // Sort: brain-derived (wsr_full / wsr_lite source) first since they have real
-  // synthesis. Then "proposed" / "NEW" status (live ideas). Then by date desc
-  // (latest first). Then by confidence + yield.
+  // Sort: brain-derived first, then proposed/new, then by date desc, then conf+yield.
   const sortPriority: Record<string, number> = {
     proposed: 0, new: 0, executed: 1, expired: 2, skipped: 3,
   };
   const isBrain = (r: OptionRecommendationRow) =>
     r.source === "wsr_full" || r.source === "wsr_lite";
   const sorted = [...recommendations].sort((a, b) => {
-    // Brain output first
     if (isBrain(a) !== isBrain(b)) return isBrain(a) ? -1 : 1;
     const sa = sortPriority[(a.status ?? "").toLowerCase()] ?? 4;
     const sb = sortPriority[(b.status ?? "").toLowerCase()] ?? 4;
     if (sa !== sb) return sa - sb;
-    // Latest-dated entries first
     const da = (a.date ?? "").slice(0, 10);
     const db = (b.date ?? "").slice(0, 10);
     if (da !== db) return da > db ? -1 : 1;
@@ -198,33 +251,17 @@ export function RecommendationCard({
         Manual entries from weekly ad-hoc scans. Prices + deltas are stale — verify against Daily Scan above before execution.
       </p>
 
-      {/* Event delegation: SINGLE click handler at container level finds
-          the nearest [data-rec-key] ancestor and dispatches its key.
-          No empty space between cards — each card's hit area extends
-          edge-to-edge against its neighbours so iOS can't snap a tap to
-          the wrong row. Visual separation comes from a 1px border + a
-          subtle bg gap created by THIS card's padding-bottom. */}
-      <div
-        onClick={(e) => {
-          const target = (e.target as HTMLElement).closest("[data-rec-key]");
-          if (!target) return;
-          const k = (target as HTMLElement).dataset.recKey;
-          if (k && onSelectKey) onSelectKey(k);
-        }}
-      >
-        {sorted.map((r, i) => {
-          const key = recKey(r);
-          return (
-            <div
-              key={key}
-              data-rec-key={key}
-              style={{ paddingTop: i === 0 ? 0 : 10 }}
-            >
-              <RecItem rec={r} recKey={key} />
-            </div>
-          );
-        })}
-      </div>
+      {/* Plain list — each row is a real <button> with its own onClick.
+          No event delegation. No .glass (which has :active scale that
+          shifts hit areas mid-touch). Visual gap is button margin-top. */}
+      {sorted.map((r, i) => (
+        <RecRow
+          key={recKey(r)}
+          rec={r}
+          marginTop={i === 0 ? 0 : 8}
+          onTap={() => onSelectKey?.(recKey(r))}
+        />
+      ))}
     </Card>
   );
 }
