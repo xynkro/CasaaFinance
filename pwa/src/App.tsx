@@ -9,13 +9,13 @@ import { HomePage } from "./pages/HomePage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { OptionsPage } from "./pages/OptionsPage";
 import { DecisionsPage } from "./pages/DecisionsPage";
-import { ArchivePage } from "./pages/ArchivePage";
+import { ReviewPage } from "./pages/ReviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { StockDetail } from "./components/StockDetail";
 import { TickerLookupSheet } from "./components/TickerLookupSheet";
 import { RefreshCw, Search } from "lucide-react";
 
-const TAB_TITLES = ["Home", "Portfolio", "Options", "Decisions", "Archive", "Settings"];
+const TAB_TITLES = ["Home", "Portfolio", "Options", "Decisions", "Review", "Settings"];
 const SETTINGS_TAB = 5;
 
 function Dashboard() {
@@ -83,9 +83,6 @@ function Dashboard() {
             casparPositions={data?.casparPositions ?? []}
             sarahSnapshot={data?.sarah ?? null}
             sarahPositions={data?.sarahPositions ?? []}
-            casparHistory={data?.casparHistory ?? []}
-            sarahHistory={data?.sarahHistory ?? []}
-            macroHistory={data?.macroHistory ?? []}
             technicalScores={data?.technicalScores ?? []}
             technicalScoresHistory={data?.technicalScoresHistory ?? []}
             exitPlans={data?.exitPlans ?? []}
@@ -119,7 +116,16 @@ function Dashboard() {
           />
         );
       case 4:
-        return <ArchivePage archive={data?.archive ?? []} dailyHistory={data?.dailyHistory ?? []} />;
+        return (
+          <ReviewPage
+            decisionsAll={data?.decisionsAll ?? []}
+            casparHistory={data?.casparHistory ?? []}
+            sarahHistory={data?.sarahHistory ?? []}
+            macroHistory={data?.macroHistory ?? []}
+            archive={data?.archive ?? []}
+            dailyHistory={data?.dailyHistory ?? []}
+          />
+        );
       case 5:
         return <SettingsPage settings={settings} onUpdate={updateSettings} onLogout={handleLogout} />;
       default:

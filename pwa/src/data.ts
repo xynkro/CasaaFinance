@@ -340,7 +340,8 @@ export interface DashboardData {
   optionsDefense: OptionsDefenseRow[];
   wsrSummary: WsrSummaryRow | null;
   wsrLite: WsrSummaryRow | null;       // latest WSR Lite (Wed/Fri), source = "wsr_lite"
-  decisions: DecisionRow[];
+  decisions: DecisionRow[];            // latest day's decisions (active queue)
+  decisionsAll: DecisionRow[];         // full history (sorted by date asc) — used by Review › Closed Decisions
   macro: MacroRow | null;
   // History (all rows, sorted by date ascending)
   casparHistory: SnapshotRow[];
@@ -431,6 +432,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
         return lite.length ? lite[lite.length - 1] : null;
       })(),
       decisions: latestGroup(decisions),
+      decisionsAll: sortByDate(decisions),
       macro: latest(macroRows),
       casparHistory: dedup(casparRows),
       sarahHistory: dedup(sarahRows),
@@ -444,7 +446,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       casparPositions: [], sarahPositions: [], options: [],
       technicalScores: [], technicalScoresHistory: [],
       wheelNextLeg: [], scanResults: [], optionRecommendations: [], exitPlans: [], optionsDefense: [],
-      wsrSummary: null, wsrLite: null, decisions: [],
+      wsrSummary: null, wsrLite: null, decisions: [], decisionsAll: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [], error: String(e),
     };

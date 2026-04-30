@@ -1,12 +1,12 @@
 import { useRef, useEffect, useState } from "react";
-import { Home, Briefcase, CircleDot, Target, Archive, Settings } from "lucide-react";
+import { Home, Briefcase, CircleDot, Target, LineChart, Settings } from "lucide-react";
 
 const TABS = [
   { icon: Home,       label: "Home"      },
   { icon: Briefcase,  label: "Portfolio" },
   { icon: CircleDot,  label: "Options"   },
   { icon: Target,     label: "Decisions" },
-  { icon: Archive,    label: "Archive"   },
+  { icon: LineChart,  label: "Review"    },
   { icon: Settings,   label: "Settings"  },
 ] as const;
 

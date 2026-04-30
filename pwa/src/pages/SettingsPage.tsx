@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Settings } from "../settings";
 import { LogOut, DollarSign, LayoutGrid, ListChecks, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check } from "lucide-react";
 
-const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Archive", "Settings"];
+const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Review", "Settings"];
 
 const ACCENT_COLORS: { key: Settings["accentColor"]; hex: string; label: string }[] = [
   { key: "bloomberg",      hex: "#ff8c00", label: "Bloomberg" },
