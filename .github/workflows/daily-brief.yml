@@ -40,6 +40,10 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Opus model + tool allowlist — without these the agent runs on
+          # Sonnet 4.6 and gets permission_denials, writing zero rows.
+          # Verified via wsr-lite run 25148391455.
+          claude_args: "--verbose --model claude-opus-4-7 --allowed-tools Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch,Task,TodoWrite"
           prompt: |
             Read prompts/cron_daily_brief.md and execute the workflow it describes.
 
