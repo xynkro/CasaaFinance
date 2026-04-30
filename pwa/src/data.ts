@@ -14,7 +14,6 @@ const GIDS: Record<string, string> = {
   positions_sarah: "444641294",
   decision_queue: "1744723757",
   options: "326503132",
-  option_recommendations: "129728101",
   technical_scores: "657341624",
   wheel_next_leg: "805863395",
   scan_results: "1133435061",
@@ -269,26 +268,6 @@ export interface WheelNextLegRow {
   confidence: string;
 }
 
-export interface OptionRecommendationRow {
-  date: string;
-  source: string;
-  account: string;
-  ticker: string;
-  strategy: string;              // "CSP" | "CC" | "LONG_CALL" | "LONG_PUT" | "PMCC"
-  right: string;
-  strike: string;
-  expiry: string;
-  premium_per_share: string;
-  delta: string;
-  annual_yield_pct: string;
-  breakeven: string;
-  cash_required: string;
-  iv_rank: string;
-  thesis_confidence: string;     // 0.0 - 1.0
-  thesis: string;
-  status: string;                // "proposed" | "executed" | "skipped" | "expired"
-}
-
 export interface DecisionRow {
   date: string;
   account: string;
@@ -331,7 +310,6 @@ export interface DashboardData {
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
   options: OptionRow[];
-  optionRecommendations: OptionRecommendationRow[];
   technicalScores: TechnicalScoreRow[];
   technicalScoresHistory: TechnicalScoreRow[];  // full history for sparklines
   wheelNextLeg: WheelNextLegRow[];
@@ -377,7 +355,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, optionRecs, techRows, wheelRows, scanRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, scanRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
@@ -385,7 +363,6 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<PositionRow>("positions_caspar").catch(() => [] as PositionRow[]),
         fetchTab<PositionRow>("positions_sarah").catch(() => [] as PositionRow[]),
         fetchTab<OptionRow>("options").catch(() => [] as OptionRow[]),
-        fetchTab<OptionRecommendationRow>("option_recommendations").catch(() => [] as OptionRecommendationRow[]),
         fetchTab<TechnicalScoreRow>("technical_scores").catch(() => [] as TechnicalScoreRow[]),
         fetchTab<WheelNextLegRow>("wheel_next_leg").catch(() => [] as WheelNextLegRow[]),
         fetchTab<ScanResultRow>("scan_results").catch(() => [] as ScanResultRow[]),
@@ -406,7 +383,6 @@ export async function fetchDashboard(): Promise<DashboardData> {
       casparPositions: latestGroup(casparPos),
       sarahPositions: latestGroup(sarahPos),
       options: latestGroup(optionRows),
-      optionRecommendations: optionRecs,
       technicalScores: latestGroup(techRows),
       technicalScoresHistory: sortByDate(techRows),
       wheelNextLeg: latestGroup(wheelRows),
@@ -432,7 +408,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
   } catch (e) {
     return {
       dailyHistory: [], daily: null, caspar: null, sarah: null,
-      casparPositions: [], sarahPositions: [], options: [], optionRecommendations: [],
+      casparPositions: [], sarahPositions: [], options: [],
       technicalScores: [], technicalScoresHistory: [],
       wheelNextLeg: [], scanResults: [], exitPlans: [], optionsDefense: [],
       wsrSummary: null, wsrLite: null, decisions: [],

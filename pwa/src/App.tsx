@@ -96,7 +96,6 @@ function Dashboard() {
         return (
           <OptionsPage
             options={data?.options ?? []}
-            recommendations={data?.optionRecommendations ?? []}
             technicalScores={data?.technicalScores ?? []}
             wheelNextLeg={data?.wheelNextLeg ?? []}
             scanResults={data?.scanResults ?? []}
