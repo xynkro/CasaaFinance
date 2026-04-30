@@ -14,7 +14,7 @@ export interface Settings {
   safeAreaTop: number;       // 0-60px, manual top padding
   safeAreaBottom: number;    // 0-60px, manual bottom padding
   tabBarHeight: number;      // 48-80px
-  accentColor: "indigo" | "emerald" | "amber" | "pink" | "cyan";  // NEW — accent hue
+  accentColor: "bloomberg" | "terminal_green" | "indigo" | "emerald" | "amber" | "pink" | "cyan";  // NEW — accent hue
 }
 
 const DEFAULTS: Settings = {
@@ -30,7 +30,7 @@ const DEFAULTS: Settings = {
   safeAreaTop: 8,
   safeAreaBottom: 8,
   tabBarHeight: 60,
-  accentColor: "indigo",
+  accentColor: "bloomberg",
 };
 
 const KEY = "casaa_settings_v2";
@@ -50,11 +50,13 @@ function save(s: Settings) {
 }
 
 const ACCENT_MAP = {
-  indigo: { rgb: "129,140,248", hex: "#818cf8", bright: "#a5b4fc" },
-  emerald: { rgb: "52,211,153", hex: "#34d399", bright: "#6ee7b7" },
-  amber: { rgb: "251,191,36", hex: "#fbbf24", bright: "#fcd34d" },
-  pink: { rgb: "244,114,182", hex: "#f472b6", bright: "#f9a8d4" },
-  cyan: { rgb: "34,211,238", hex: "#22d3ee", bright: "#67e8f9" },
+  bloomberg:      { rgb: "255,140,0",   hex: "#ff8c00", bright: "#ffa733" },
+  terminal_green: { rgb: "39,213,127",  hex: "#27d57f", bright: "#5ce29c" },
+  indigo:         { rgb: "129,140,248", hex: "#818cf8", bright: "#a5b4fc" },
+  emerald:        { rgb: "52,211,153",  hex: "#34d399", bright: "#6ee7b7" },
+  amber:          { rgb: "251,191,36",  hex: "#fbbf24", bright: "#fcd34d" },
+  pink:           { rgb: "244,114,182", hex: "#f472b6", bright: "#f9a8d4" },
+  cyan:           { rgb: "34,211,238",  hex: "#22d3ee", bright: "#67e8f9" },
 };
 
 /** Apply settings as CSS custom properties on :root */
@@ -75,7 +77,7 @@ export function applyTheme(s: Settings) {
   root.style.setProperty("--tabbar-h", `calc(var(--safe-bottom) + ${s.tabBarHeight}px)`);
   root.style.setProperty("--header-h", `calc(var(--safe-top) + 52px)`);
   // Accent color
-  const accent = ACCENT_MAP[s.accentColor] ?? ACCENT_MAP.indigo;
+  const accent = ACCENT_MAP[s.accentColor] ?? ACCENT_MAP.bloomberg;
   root.style.setProperty("--accent-rgb", accent.rgb);
   root.style.setProperty("--accent", accent.hex);
   root.style.setProperty("--accent-bright", accent.bright);

@@ -36,11 +36,17 @@
   --bg-blur: 0px;
   --card-opacity: 0.5;
 
-  /* Accent (indigo-400 by default; overridden by settings.ts) */
-  --accent-rgb: 129, 140, 248;
-  --accent: #818cf8;
-  --accent-bright: #a5b4fc;
-  --accent-dim: rgba(129, 140, 248, 0.15);
+  /* Accent (Bloomberg amber by default — the trader's-instrument hue;
+     overridden by settings.ts via the user's accent picker) */
+  --accent-rgb: 255, 140, 0;
+  --accent: #ff8c00;
+  --accent-bright: #ffa733;
+  --accent-dim: rgba(255, 140, 0, 0.15);
+
+  /* Font stacks */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", "SF Mono", ui-monospace, SFMono-Regular,
+               Menlo, Consolas, monospace;
 
   /* Semantic colours */
   --c-positive: #34d399;
@@ -65,7 +71,7 @@ body {
   margin: 0;
   background: #07090f;
   color: #e2e8f0;
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: var(--base-font);
   font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
   -webkit-font-smoothing: antialiased;
@@ -74,6 +80,24 @@ body {
   overflow: hidden;
   position: fixed;
   inset: 0;
+}
+
+/* Scanline texture — subtle phosphor-CRT homage layered above the bg
+   atmosphere. Sits below cards (z=10) but above the .bg-layer (z=0),
+   so it's perceptible without becoming chrome. ~1.5% opacity. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0,
+    transparent 2px,
+    rgba(255, 140, 0, 0.012) 2px,
+    rgba(255, 140, 0, 0.012) 3px
+  );
 }
 
 /* ─── App shell ──────────────────────────────────────────────────────────── */
@@ -295,6 +319,16 @@ body {
 .tabnum {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
+}
+
+/* Mono+tabular face for prices, P&L, and tabular columns —
+   the "trader's instrument" font. Inter remains the prose face;
+   numbers in hero displays and tables get this treatment. */
+.font-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  letter-spacing: -0.01em;
 }
 
 /* Forced legible greys */

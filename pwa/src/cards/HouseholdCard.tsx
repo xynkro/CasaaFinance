@@ -45,12 +45,12 @@ export function HouseholdCard({
           <Users size={14} className="text-indigo-400" />
           <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Household</h2>
         </div>
-        <span className="text-[length:var(--t-xs)] text-slate-500 tabular-nums">
+        <span className="text-[length:var(--t-xs)] text-slate-500 font-tabular">
           USD/SGD {usdSgd.toFixed(4)}
         </span>
       </div>
 
-      <div className="text-3xl font-bold text-white tracking-tight tabular-nums mb-4">
+      <div className="text-3xl font-bold text-white tracking-tight font-tabular mb-4">
         {fmtUsd(totalUsd)}
       </div>
 
@@ -66,7 +66,7 @@ export function HouseholdCard({
             <div className="w-2.5 h-2.5 rounded-full bg-blue-500/70" />
             <span className="text-[length:var(--t-sm)] text-slate-300">Caspar</span>
           </div>
-          <span className="text-[length:var(--t-sm)] text-white font-medium tabular-nums">{fmtUsd(casparUsd)}</span>
+          <span className="text-[length:var(--t-sm)] text-white font-medium font-tabular">{fmtUsd(casparUsd)}</span>
         </div>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -74,8 +74,8 @@ export function HouseholdCard({
             <span className="text-[length:var(--t-sm)] text-slate-300">Sarah</span>
           </div>
           <div className="text-right">
-            <span className="text-[length:var(--t-sm)] text-white font-medium tabular-nums">{fmtUsd(sarahUsd)}</span>
-            <span className="text-[length:var(--t-xs)] text-slate-500 ml-1.5">({fmtSgd(sarahSgd)})</span>
+            <span className="text-[length:var(--t-sm)] text-white font-medium font-tabular">{fmtUsd(sarahUsd)}</span>
+            <span className="text-[length:var(--t-xs)] text-slate-500 ml-1.5 font-tabular">({fmtSgd(sarahSgd)})</span>
           </div>
         </div>
       </div>

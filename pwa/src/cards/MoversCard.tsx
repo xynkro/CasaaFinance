@@ -34,20 +34,20 @@ function Row({ m, rank }: { m: Mover; rank: number }) {
   return (
     <div className="flex items-center gap-3 py-2.5">
       {/* Rank */}
-      <span className="text-[length:var(--t-2xs)] text-slate-600 tabular-nums w-3 shrink-0">{rank}</span>
+      <span className="text-[length:var(--t-2xs)] text-slate-600 font-tabular w-3 shrink-0">{rank}</span>
       {/* Sector emoji */}
       <span className="text-[length:var(--t-base)] shrink-0 w-6 text-center">{m.emoji}</span>
-      {/* Ticker */}
-      <span className="text-[length:var(--t-sm)] font-semibold text-slate-100 tabular-nums flex-1 min-w-0 truncate">
+      {/* Ticker — sans (it's a label, not a number) */}
+      <span className="text-[length:var(--t-sm)] font-semibold text-slate-100 flex-1 min-w-0 truncate">
         {m.ticker}
       </span>
       {/* UPL amount — subtle */}
-      <span className={`text-[length:var(--t-xs)] tabular-nums shrink-0 ${isUp ? "text-emerald-400/60" : "text-red-400/60"}`}>
+      <span className={`text-[length:var(--t-xs)] font-tabular shrink-0 ${isUp ? "text-emerald-400/60" : "text-red-400/60"}`}>
         {isUp ? "+" : "−"}{prefix}{Math.abs(m.upl).toLocaleString("en-US", { maximumFractionDigits: 0 })}
       </span>
       {/* Percent chip */}
       <span
-        className={`inline-flex items-center gap-0.5 text-[length:var(--t-xs)] font-semibold tabular-nums px-2 py-0.5 rounded shrink-0 ${
+        className={`inline-flex items-center gap-0.5 text-[length:var(--t-xs)] font-semibold font-tabular px-2 py-0.5 rounded shrink-0 ${
           isUp ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"
         }`}
       >

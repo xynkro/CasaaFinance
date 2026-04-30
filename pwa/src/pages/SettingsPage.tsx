@@ -5,11 +5,13 @@ import { LogOut, DollarSign, LayoutGrid, ListChecks, Home, Sun, Type, Layers, Dr
 const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Archive", "Settings"];
 
 const ACCENT_COLORS: { key: Settings["accentColor"]; hex: string; label: string }[] = [
-  { key: "indigo",  hex: "#818cf8", label: "Indigo" },
-  { key: "emerald", hex: "#34d399", label: "Emerald" },
-  { key: "amber",   hex: "#fbbf24", label: "Amber" },
-  { key: "pink",    hex: "#f472b6", label: "Pink" },
-  { key: "cyan",    hex: "#22d3ee", label: "Cyan" },
+  { key: "bloomberg",      hex: "#ff8c00", label: "Bloomberg" },
+  { key: "terminal_green", hex: "#27d57f", label: "Terminal" },
+  { key: "indigo",         hex: "#818cf8", label: "Indigo" },
+  { key: "emerald",        hex: "#34d399", label: "Emerald" },
+  { key: "amber",          hex: "#fbbf24", label: "Amber" },
+  { key: "pink",           hex: "#f472b6", label: "Pink" },
+  { key: "cyan",           hex: "#22d3ee", label: "Cyan" },
 ];
 
 const FONT_PRESETS: { px: number; label: string }[] = [

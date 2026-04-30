@@ -51,7 +51,7 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
     >
       <div className="label-caps mb-1">{label}</div>
       <div
-        className="text-[length:var(--t-sm)] font-semibold tabular-nums"
+        className="text-[length:var(--t-sm)] font-semibold font-tabular"
         style={{ color: accent ? "inherit" : "rgb(226 232 240)" }}
       >
         {value}
@@ -106,14 +106,14 @@ export function PnlCard({
           />
           <span className="text-[length:var(--t-sm)] font-semibold text-slate-300">{label}</span>
         </div>
-        <time className="text-[length:var(--t-xs)] tabular-nums" style={{ color: "rgb(100 116 139)" }}>
+        <time className="text-[length:var(--t-xs)] font-tabular" style={{ color: "rgb(100 116 139)" }}>
           {(snapshot.date ?? "").slice(0, 10)}
         </time>
       </div>
 
       {/* Big NLV number */}
       <div className="mb-1">
-        <span className="text-[length:var(--t-hero)] font-bold tracking-[-0.03em] text-white tabular-nums leading-none">
+        <span className="text-[length:var(--t-hero)] font-bold tracking-[-0.03em] text-white font-tabular leading-none">
           {fmt(snapshot.net_liq, prefix)}
         </span>
       </div>
@@ -121,7 +121,7 @@ export function PnlCard({
       {/* P&L badge */}
       <div className="flex items-center gap-2 mb-4">
         <span
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[length:var(--t-xs)] font-semibold tabular-nums"
+          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[length:var(--t-xs)] font-semibold font-tabular"
           style={{
             background: `${pnlColor}18`,
             color: pnlColor,
@@ -130,7 +130,7 @@ export function PnlCard({
           <Icon size={11} />
           {uplPct.text}
         </span>
-        <span className="text-[length:var(--t-xs)] tabular-nums" style={{ color: "rgb(100 116 139)" }}>
+        <span className="text-[length:var(--t-xs)] font-tabular" style={{ color: "rgb(100 116 139)" }}>
           UPL {fmt(snapshot.upl, prefix)}
         </span>
       </div>
