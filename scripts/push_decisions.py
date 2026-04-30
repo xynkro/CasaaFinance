@@ -80,6 +80,28 @@ def _setup_logging() -> logging.Logger:
     return logger
 
 
+def _decision_key(
+    date_prefix: str,
+    account: str,
+    ticker: str,
+    strategy: str,
+    strike,
+) -> tuple:
+    """Build the compound upsert key for decision_queue rows.
+
+    Single source of truth for the (date, account, ticker, strategy, strike)
+    tuple used both when ingesting new rows from JSON (strike is float|int)
+    and when scanning existing sheet rows (strike is the raw string cell).
+    Strike is normalized to a 2-decimal string so "0", "0.0", "0.00", and 0.0
+    all collapse to the same key.
+    """
+    try:
+        strike_str = f"{float(strike):.2f}" if strike not in ("", None) else "0.00"
+    except (TypeError, ValueError):
+        strike_str = "0.00"
+    return (date_prefix, account, ticker, strategy, strike_str)
+
+
 def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
     logger = _setup_logging()
 
@@ -110,7 +132,7 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
                 ticker=d.get("ticker", "").strip().upper(),
                 bucket=d.get("bucket", ""),
                 thesis_1liner=d.get("thesis_1liner", "").strip(),
-                conv=int(d.get("conv", 3)),
+                conv=round(float(d.get("conv", 3) or 3)),
                 entry=float(d.get("entry", 0)),
                 target=float(d.get("target", 0)),
                 status=d.get("status", "pending"),
@@ -132,8 +154,7 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
             if not row.ticker:
                 continue
             new_rows.append(row.to_row())
-            key = (date, row.account, row.ticker, row.strategy, f"{row.strike:.2f}")
-            new_keys.add(key)
+            new_keys.add(_decision_key(date, row.account, row.ticker, row.strategy, row.strike))
             logger.info(
                 f"  + {row.account:7} {row.ticker:6} {row.bucket:12} {row.strategy:9} "
                 f"conv={row.conv} entry=${row.entry:.2f} → ${row.target:.2f}"
@@ -162,11 +183,8 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
         row_account = r[1] if len(r) > 1 else ""
         row_ticker = r[2] if len(r) > 2 else ""
         row_strategy = r[9] if len(r) > 9 else ""
-        try:
-            row_strike = f"{float(r[11]):.2f}" if len(r) > 11 and r[11] not in ("", None) else "0.00"
-        except (ValueError, TypeError):
-            row_strike = "0.00"
-        if (row_date, row_account, row_ticker, row_strategy, row_strike) in new_keys:
+        row_strike_raw = r[11] if len(r) > 11 else ""
+        if _decision_key(row_date, row_account, row_ticker, row_strategy, row_strike_raw) in new_keys:
             dropped += 1
             continue
         keep_rows.append(r)

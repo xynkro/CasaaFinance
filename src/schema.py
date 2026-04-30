@@ -135,7 +135,7 @@ class DecisionRow:
         d = _ts_suffix(self.date) if audit else self.date
         return [
             d, self.account, self.ticker, self.bucket, self.thesis_1liner,
-            _num(self.conv, 2), _num(self.entry, 4), _num(self.target, 4), self.status,
+            _num(self.conv, 0), _num(self.entry, 4), _num(self.target, 4), self.status,
             self.strategy, self.right,
             _num(self.strike, 2), self.expiry,
             _num(self.premium_per_share, 4), _num(self.delta, 4),
@@ -826,6 +826,12 @@ def decisions_from_ledger(ledger: dict, date: str) -> List[DecisionRow]:
     """
     WSR ledger may carry 'decisions' directly OR we parse from md.
     Prefer ledger.decisions if present (cleaner contract).
+
+    Mirrors the parsing in scripts/push_decisions.py so both write paths
+    produce key-consistent rows under the (date, account, ticker, strategy,
+    strike) compound upsert key. Legacy ledgers that only carry the original
+    9 fields still produce well-formed rows (just with empty strategy / 0
+    strike / etc.).
     """
     out = []
     for d in (ledger.get("decisions") or []):
@@ -835,9 +841,23 @@ def decisions_from_ledger(ledger: dict, date: str) -> List[DecisionRow]:
             ticker=str(d.get("ticker", "")),
             bucket=str(d.get("bucket", "")),
             thesis_1liner=str(d.get("thesis_1liner", d.get("thesis", "")))[:500],
-            conv=float(d.get("conv", 0.0)),
+            conv=round(float(d.get("conv", 3) or 3)),
             entry=float(d.get("entry", 0.0)),
             target=float(d.get("target", 0.0)),
             status=str(d.get("status", "pending")),
+            # Optional options-spec fields — default "" / 0 for share entries.
+            strategy=(str(d.get("strategy", "") or "")).strip().upper(),
+            right=(str(d.get("right", "") or "")).strip().upper(),
+            strike=float(d.get("strike", 0) or 0),
+            expiry=(str(d.get("expiry", "") or "")).strip(),
+            premium_per_share=float(d.get("premium_per_share", 0) or 0),
+            delta=float(d.get("delta", 0) or 0),
+            annual_yield_pct=float(d.get("annual_yield_pct", 0) or 0),
+            breakeven=float(d.get("breakeven", 0) or 0),
+            cash_required=float(d.get("cash_required", 0) or 0),
+            iv_rank=float(d.get("iv_rank", 0) or 0),
+            thesis_confidence=float(d.get("thesis_confidence", 0) or 0),
+            thesis=(str(d.get("thesis", "") or "")).strip(),
+            source=(str(d.get("source", "") or "")).strip(),
         ))
     return out
