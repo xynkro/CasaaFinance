@@ -504,7 +504,7 @@ export function StockDetail({
                 <span className="label-caps">Thesis</span>
                 {decision.thesis_confidence && (
                   <span className="text-[11px] text-slate-500 tabular-nums">
-                    Confidence <span className="text-slate-300 font-semibold">{Math.round((Number(decision.thesis_confidence) || 0) * 100)}%</span>
+                    Confidence <span className="text-slate-300 font-semibold">{Math.max(0, Math.min(100, Math.round((Number(decision.thesis_confidence) || 0) * 100)))}%</span>
                   </span>
                 )}
               </div>
