@@ -1,5 +1,6 @@
+import { useState } from "react";
 import type { Settings } from "../settings";
-import { LogOut, DollarSign, LayoutGrid, ListChecks, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine } from "lucide-react";
+import { LogOut, DollarSign, LayoutGrid, ListChecks, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check } from "lucide-react";
 
 const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Archive", "Settings"];
 
@@ -82,6 +83,39 @@ function SettingRow({
         </div>
       </div>
       <div className="shrink-0 ml-3">{children}</div>
+    </div>
+  );
+}
+
+function BuildChip() {
+  const build = (import.meta.env.VITE_BUILD as string | undefined) || "dev";
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(build);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1400);
+    } catch {
+      // Clipboard API can be unavailable on http or older iOS — silently ignore.
+    }
+  };
+
+  return (
+    <div className="flex justify-center mt-2">
+      <button
+        onClick={handleCopy}
+        className="glass flex items-center gap-2.5 px-3.5 py-2 rounded-full border border-white/10 hover:border-white/20 active:scale-95 transition-all"
+        aria-label={`Copy build hash ${build}`}
+      >
+        <span className="text-[10px] font-medium tracking-[0.12em] text-slate-400 uppercase">Build</span>
+        <span className="text-[12px] font-mono font-semibold text-slate-100 tabular-nums">{build}</span>
+        {copied ? (
+          <Check size={12} className="text-emerald-400" />
+        ) : (
+          <Copy size={12} className="text-slate-500" />
+        )}
+      </button>
     </div>
   );
 }
@@ -218,9 +252,7 @@ export function SettingsPage({
         </button>
       </div>
 
-      <p className="text-center text-[10px] text-slate-600 mt-2">
-        Casaa Finance v1.1
-      </p>
+      <BuildChip />
     </div>
   );
 }
