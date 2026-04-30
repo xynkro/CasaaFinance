@@ -5,6 +5,30 @@ import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
 import { StockDetail } from "../components/StockDetail";
 import { Target, Clock, CheckCircle, XCircle, AlertTriangle, ChevronRight } from "lucide-react";
 
+const OPTIONS_STRATEGIES = ["CSP", "CC", "PMCC", "LONG_CALL", "LONG_PUT"];
+
+function fmtMoney(v: string | number | undefined): string {
+  if (v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (isNaN(n)) return "—";
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtPct(v: string | number | undefined): string {
+  if (v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (isNaN(n)) return "—";
+  return `${n.toFixed(1)}%`;
+}
+
+function fmtExpiry(expiry: string | undefined): string {
+  if (!expiry) return "—";
+  if (expiry.length === 8 && /^\d+$/.test(expiry)) {
+    return `${expiry.slice(4, 6)}/${expiry.slice(6, 8)}`;
+  }
+  return expiry;
+}
+
 const STATUS_CONFIG: Record<string, {
   icon: typeof Target;
   bg: string;
@@ -66,10 +90,78 @@ function ConvictionDots({ level }: { level: number }) {
   );
 }
 
+function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
+  const strike = Number(decision.strike) || 0;
+  const conf = Number(decision.thesis_confidence) || 0;
+  const confPct = Math.max(0, Math.min(1, conf)) * 100;
+  const confColor = confPct >= 70 ? "#34d399" : confPct >= 50 ? "#818cf8" : "#fbbf24";
+  const yld = Number(decision.annual_yield_pct);
+  const delta = Number(decision.delta);
+  const ivr = Number(decision.iv_rank);
+
+  return (
+    <div
+      style={{
+        backgroundColor: "rgba(255,255,255,0.028)",
+        border: "1px solid rgba(255,255,255,0.085)",
+        borderRadius: 10,
+        padding: "8px 10px",
+        marginBottom: 12,
+      }}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[11px] font-semibold text-slate-200 tabular-nums">
+            ${strike.toFixed(strike < 10 ? 1 : 0)}{decision.right}
+          </span>
+          <span className="text-[9px] text-slate-600">exp {fmtExpiry(decision.expiry)}</span>
+        </div>
+        <span className="text-[9px] font-semibold uppercase tracking-wider" style={{ color: "#818cf8" }}>
+          {decision.strategy}
+        </span>
+      </div>
+      <div
+        className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500"
+        style={{ marginBottom: 6 }}
+      >
+        <span>Premium <span className="text-slate-300 tabular-nums">{fmtMoney(decision.premium_per_share)}</span></span>
+        <span>Yield <span style={{ color: "#34d399" }} className="tabular-nums font-semibold">{fmtPct(yld)}</span></span>
+        <span>Δ <span className="text-slate-300 tabular-nums">{isNaN(delta) ? "—" : delta.toFixed(2)}</span></span>
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 text-[10px] text-slate-500">
+          <span>BE <span className="text-slate-300 tabular-nums">{fmtMoney(decision.breakeven)}</span></span>
+          <span>IVR <span className="text-slate-300 tabular-nums">{isNaN(ivr) ? "—" : ivr.toFixed(0)}</span></span>
+        </div>
+        {decision.thesis_confidence && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="text-[10px] text-slate-500">Conf</span>
+            <div
+              style={{
+                width: 40,
+                height: 4,
+                borderRadius: 2,
+                backgroundColor: "rgba(255,255,255,0.05)",
+                overflow: "hidden",
+              }}
+            >
+              <div style={{ height: "100%", width: `${confPct}%`, backgroundColor: confColor }} />
+            </div>
+            <span className="text-[10px] font-semibold tabular-nums text-slate-300">
+              {confPct.toFixed(0)}%
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () => void }) {
   const status = STATUS_CONFIG[decision.status?.toLowerCase()] ?? DEFAULT_STATUS;
   const Icon = status.icon;
   const conv = Math.round(Number(decision.conv) || 0);
+  const showOptionsSpec = !!decision.strategy && OPTIONS_STRATEGIES.includes(decision.strategy);
 
   return (
     <button
@@ -100,6 +192,9 @@ function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () =>
 
       {/* Thesis */}
       <p className="text-sm text-slate-300 leading-relaxed mb-3">{decision.thesis_1liner}</p>
+
+      {/* Options-spec sub-row (only for option strategies) */}
+      {showOptionsSpec && <OptionsSpecRow decision={decision} />}
 
       {/* Bucket + metrics row */}
       <div className="flex items-center justify-between">

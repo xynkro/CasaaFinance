@@ -498,6 +498,19 @@ export function StockDetail({
               </span>
             )}
           </div>
+          {decision.thesis && decision.thesis.trim() !== "" && (
+            <div className="mt-4 pt-4" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="label-caps">Thesis</span>
+                {decision.thesis_confidence && (
+                  <span className="text-[11px] text-slate-500 tabular-nums">
+                    Confidence <span className="text-slate-300 font-semibold">{Math.round((Number(decision.thesis_confidence) || 0) * 100)}%</span>
+                  </span>
+                )}
+              </div>
+              <p className="text-[13px] text-slate-400 leading-relaxed">{decision.thesis}</p>
+            </div>
+          )}
         </div>
       )}
 

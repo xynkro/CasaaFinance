@@ -299,6 +299,19 @@ export interface DecisionRow {
   entry: string;
   target: string;
   status: string;
+  strategy?: string;
+  right?: string;
+  strike?: string;
+  expiry?: string;
+  premium_per_share?: string;
+  delta?: string;
+  annual_yield_pct?: string;
+  breakeven?: string;
+  cash_required?: string;
+  iv_rank?: string;
+  thesis_confidence?: string;
+  thesis?: string;
+  source?: string;
 }
 
 export interface ArchiveRow {
