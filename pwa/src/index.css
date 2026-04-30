@@ -251,13 +251,13 @@ body {
   z-index: 0;
 }
 
-/* Press states */
-.glass:active,
-.glass-bright:active,
-.glass-accent:active {
-  transform: scale(0.983);
-  transition-duration: 0.09s;
-}
+/* No press state on glass containers.
+   `:active` propagates from any pressed descendant up the ancestor chain,
+   so a global `.glass:active { transform: scale(...) }` made the outer
+   Card jump every time the user tapped a button or long-pressed text
+   inside it, AND shifted hit areas mid-touch (causing the off-by-one
+   tap bug on Strategy Notes). Specific pressable buttons opt into their
+   own active feedback via Tailwind `active:scale-*` or bg tint. */
 
 /* ─── Typography utilities ───────────────────────────────────────────────── */
 
