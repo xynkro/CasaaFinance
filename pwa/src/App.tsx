@@ -99,6 +99,7 @@ function Dashboard() {
             technicalScores={data?.technicalScores ?? []}
             wheelNextLeg={data?.wheelNextLeg ?? []}
             scanResults={data?.scanResults ?? []}
+            optionRecommendations={data?.optionRecommendations ?? []}
             exitPlans={data?.exitPlans ?? []}
             optionsDefense={data?.optionsDefense ?? []}
             casparPositions={data?.casparPositions ?? []}

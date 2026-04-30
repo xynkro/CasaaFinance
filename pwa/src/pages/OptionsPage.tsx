@@ -5,6 +5,7 @@ import type {
   TechnicalScoreRow,
   WheelNextLegRow,
   ScanResultRow,
+  OptionRecommendationRow,
   ExitPlanRow,
   OptionsDefenseRow,
 } from "../data";
@@ -23,6 +24,7 @@ export function OptionsPage({
   technicalScores,
   wheelNextLeg,
   scanResults,
+  optionRecommendations,
   exitPlans,
   optionsDefense,
   casparPositions,
@@ -33,6 +35,7 @@ export function OptionsPage({
   technicalScores: TechnicalScoreRow[];
   wheelNextLeg: WheelNextLegRow[];
   scanResults: ScanResultRow[];
+  optionRecommendations: OptionRecommendationRow[];
   exitPlans: ExitPlanRow[];
   optionsDefense: OptionsDefenseRow[];
   casparPositions: PositionRow[];
@@ -99,7 +102,7 @@ export function OptionsPage({
 
       {sub === "scan" && (
         <div className="fade-up fade-up-1 mt-3">
-          <ScanCard candidates={scanResults} />
+          <ScanCard candidates={scanResults} broadCandidates={optionRecommendations} />
         </div>
       )}
     </div>

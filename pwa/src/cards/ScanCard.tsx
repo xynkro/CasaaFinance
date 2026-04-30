@@ -1,4 +1,4 @@
-import type { ScanResultRow } from "../data";
+import type { ScanResultRow, OptionRecommendationRow } from "../data";
 import { Card } from "./Card";
 import { Radar, Zap, TrendingUp, TrendingDown } from "lucide-react";
 import { useState } from "react";
@@ -10,8 +10,15 @@ function fmtPrice(v: string | number, prefix = "$"): string {
 }
 
 function fmtExp(exp: string): string {
-  if (!exp || exp.length !== 8) return exp;
-  return `${exp.slice(4, 6)}/${exp.slice(6, 8)}`;
+  // scan_results uses "YYYYMMDD"; option_recommendations uses "YYYY-MM-DD"
+  if (!exp) return "—";
+  if (exp.length === 8 && !exp.includes("-")) {
+    return `${exp.slice(4, 6)}/${exp.slice(6, 8)}`;
+  }
+  if (exp.length >= 10 && exp[4] === "-" && exp[7] === "-") {
+    return `${exp.slice(5, 7)}/${exp.slice(8, 10)}`;
+  }
+  return exp;
 }
 
 function CompositeGauge({ value }: { value: number }) {
@@ -147,20 +154,115 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
   );
 }
 
-export function ScanCard({ candidates }: { candidates: ScanResultRow[] }) {
-  const [tab, setTab] = useState<"CSP" | "CC">("CSP");
+/** Slimmer card variant for option_recommendations (market_scan source).
+ * Schema is partial: no composite_score, technical_score, iv_rank-context, dte, bid/ask.
+ * Fields rendered: ticker, strike, right, expiry, premium, delta, yield, cash,
+ * breakeven, iv_rank, thesis_confidence, thesis. */
+function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
+  const [expanded, setExpanded] = useState(false);
+  const strike = Number(cand.strike);
+  const delta = Number(cand.delta);
+  const prem = Number(cand.premium_per_share);
+  const yld = Number(cand.annual_yield_pct);
+  const cash = Number(cand.cash_required);
+  const ivRank = Number(cand.iv_rank);
+  const conf = Number(cand.thesis_confidence);
+  const isCall = cand.right === "C";
+  const isPut = cand.right === "P";
+  const hasRight = isCall || isPut;
 
-  if (!candidates.length) {
-    return (
-      <Card>
-        <div className="flex items-center gap-2 text-slate-500">
-          <Radar size={16} />
-          <span className="text-sm">Scanner — no candidates (market closed?)</span>
+  // Confidence is 0-1, scale to 0-100 for the gauge
+  const confPct = isNaN(conf) ? 0 : conf * 100;
+
+  return (
+    <button
+      type="button"
+      onClick={() => setExpanded((e) => !e)}
+      className="w-full text-left glass rounded-xl p-3 active:bg-white/3 transition-colors space-y-2"
+    >
+      {/* Top row: ticker + strategy + strike + confidence ring */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {hasRight && (isCall ? (
+            <TrendingDown size={11} className="text-amber-400 shrink-0" />
+          ) : (
+            <TrendingUp size={11} className="text-emerald-400 shrink-0" />
+          ))}
+          <span className="text-sm font-bold text-white">{cand.ticker}</span>
+          <span className="text-[9px] font-semibold uppercase tracking-wide text-indigo-300">
+            {cand.strategy}
+          </span>
+          {hasRight && !isNaN(strike) && (
+            <span className="text-[10px] font-semibold text-slate-500">
+              ${strike.toFixed(strike < 10 ? 1 : 0)}{cand.right}
+            </span>
+          )}
+          {cand.expiry && (
+            <span className="text-[9px] text-slate-600">exp {fmtExp(cand.expiry)}</span>
+          )}
         </div>
-      </Card>
-    );
-  }
+        {!isNaN(conf) && conf > 0 && <CompositeGauge value={confPct} />}
+      </div>
 
+      {/* Key metrics */}
+      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[10px] text-slate-500">
+        <span>Δ <span className="text-slate-300 tabular-nums">{isNaN(delta) ? "—" : delta.toFixed(2)}</span></span>
+        <span>Prem <span className="text-slate-300 tabular-nums">{isNaN(prem) ? "—" : fmtPrice(prem)}</span></span>
+        <span>Yield <span className="text-emerald-400 tabular-nums font-semibold">{isNaN(yld) ? "—" : `${yld.toFixed(0)}%`}</span></span>
+        <span>Cash <span className="text-slate-300 tabular-nums">{isNaN(cash) ? "—" : fmtPrice(cash)}</span></span>
+      </div>
+
+      {expanded && (
+        <div className="pt-2 border-t border-white/5 space-y-2 text-[10px]">
+          <div className="grid grid-cols-3 gap-1.5">
+            <div>
+              <div className="text-slate-600">BE</div>
+              <div className="tabular-nums text-slate-300">{cand.breakeven ? fmtPrice(cand.breakeven) : "—"}</div>
+            </div>
+            <div>
+              <div className="text-slate-600">IVR</div>
+              <div className={`tabular-nums font-semibold ${
+                ivRank >= 60 ? "text-emerald-400" : ivRank >= 40 ? "text-amber-400" : "text-slate-400"
+              }`}>
+                {isNaN(ivRank) ? "—" : ivRank.toFixed(0)}
+              </div>
+            </div>
+            <div>
+              <div className="text-slate-600">Conf</div>
+              <div className="tabular-nums text-slate-300">{isNaN(conf) ? "—" : `${(conf * 100).toFixed(0)}%`}</div>
+            </div>
+          </div>
+          {cand.thesis && (
+            <div className="text-[10px] text-slate-400 leading-relaxed">
+              {cand.thesis}
+            </div>
+          )}
+          <div className="text-[9px] text-slate-600">
+            <span className="uppercase">{cand.account || "—"}</span>
+            {cand.status && <span> · {cand.status}</span>}
+          </div>
+        </div>
+      )}
+    </button>
+  );
+}
+
+type Source = "my-tickers" | "broad";
+type StratTab = "CSP" | "CC";
+
+export function ScanCard({
+  candidates,
+  broadCandidates,
+}: {
+  candidates: ScanResultRow[];
+  broadCandidates?: OptionRecommendationRow[];
+}) {
+  const [source, setSource] = useState<Source>("my-tickers");
+  const [tab, setTab] = useState<StratTab>("CSP");
+
+  const broad = broadCandidates ?? [];
+
+  // ----- "My Tickers" lists (unchanged behavior) -----
   const cspList = candidates
     .filter((c) => c.strategy === "CSP")
     .sort((a, b) => Number(b.composite_score) - Number(a.composite_score))
@@ -170,7 +272,25 @@ export function ScanCard({ candidates }: { candidates: ScanResultRow[] }) {
     .sort((a, b) => Number(b.composite_score) - Number(a.composite_score))
     .slice(0, 8);
 
-  const active = tab === "CSP" ? cspList : ccList;
+  // ----- "Broad" lists -----
+  // market_scan produces multiple strategies; we still split by CSP/CC for the
+  // strategy pill but show all broad candidates that match the active strategy.
+  // Sort by thesis_confidence desc, then yield.
+  const broadSort = (a: OptionRecommendationRow, b: OptionRecommendationRow) => {
+    const cd = Number(b.thesis_confidence) - Number(a.thesis_confidence);
+    if (!isNaN(cd) && cd !== 0) return cd;
+    return Number(b.annual_yield_pct) - Number(a.annual_yield_pct);
+  };
+  const broadCsp = broad.filter((c) => c.strategy === "CSP").sort(broadSort).slice(0, 12);
+  const broadCc = broad.filter((c) => c.strategy === "CC").sort(broadSort).slice(0, 12);
+
+  const myActive = tab === "CSP" ? cspList : ccList;
+  const broadActive = tab === "CSP" ? broadCsp : broadCc;
+
+  const onMyTickers = source === "my-tickers";
+  const empty =
+    (onMyTickers && !candidates.length) ||
+    (!onMyTickers && !broad.length);
 
   return (
     <Card>
@@ -188,7 +308,7 @@ export function ScanCard({ candidates }: { candidates: ScanResultRow[] }) {
                 : "text-slate-500 hover:text-slate-300 border border-transparent"
             }`}
           >
-            CSP ({cspList.length})
+            CSP ({onMyTickers ? cspList.length : broadCsp.length})
           </button>
           <button
             onClick={() => setTab("CC")}
@@ -198,20 +318,63 @@ export function ScanCard({ candidates }: { candidates: ScanResultRow[] }) {
                 : "text-slate-500 hover:text-slate-300 border border-transparent"
             }`}
           >
-            CC ({ccList.length})
+            CC ({onMyTickers ? ccList.length : broadCc.length})
           </button>
         </div>
       </div>
 
-      <p className="text-[10px] text-slate-600 mb-3 leading-relaxed">
-        Ranked by composite = 40% technical score + 25% yield + 20% IV rank + 10% cash eff + 5% liquidity.
-      </p>
-
-      <div className="space-y-2">
-        {active.map((c, i) => (
-          <CandidateItem key={`${c.ticker}-${c.strike}-${c.right}-${i}`} cand={c} />
-        ))}
+      {/* Source pill row */}
+      <div className="flex items-center gap-1 mb-3">
+        <button
+          onClick={() => setSource("my-tickers")}
+          className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+            onMyTickers
+              ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+              : "text-slate-500 hover:text-slate-300 border border-transparent"
+          }`}
+        >
+          My Tickers ({candidates.length})
+        </button>
+        <button
+          onClick={() => setSource("broad")}
+          className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+            !onMyTickers
+              ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30"
+              : "text-slate-500 hover:text-slate-300 border border-transparent"
+          }`}
+        >
+          Broad ({broad.length})
+        </button>
       </div>
+
+      {empty ? (
+        <div className="flex items-center gap-2 text-slate-500">
+          <Radar size={16} />
+          <span className="text-sm">
+            {onMyTickers
+              ? "No candidates in My Tickers (market closed?)"
+              : "No Broad candidates yet"}
+          </span>
+        </div>
+      ) : (
+        <>
+          <p className="text-[10px] text-slate-600 mb-3 leading-relaxed">
+            {onMyTickers
+              ? "My Tickers — composite = 40% technical + 25% yield + 20% IV rank + 10% cash eff + 5% liquidity."
+              : "Broad — LunarCrush trending + WSB + quality watchlist (sorted by thesis confidence)."}
+          </p>
+
+          <div className="space-y-2">
+            {onMyTickers
+              ? myActive.map((c, i) => (
+                  <CandidateItem key={`mt-${c.ticker}-${c.strike}-${c.right}-${i}`} cand={c} />
+                ))
+              : broadActive.map((c, i) => (
+                  <BroadCandidateItem key={`br-${c.ticker}-${c.strike}-${c.right}-${i}`} cand={c} />
+                ))}
+          </div>
+        </>
+      )}
     </Card>
   );
 }
