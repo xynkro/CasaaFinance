@@ -96,9 +96,12 @@ action queue the PWA Decisions tab reads). Both share-entry ideas (BUY_DIP /
 TRIM) AND option-entry ideas (CSP / CC / PMCC / LONG_CALL / LONG_PUT) live in
 the same `decision_queue` JSON now — the brain emits one queue, not two.
 
-The legacy `option_recommendations` sheet (Strategy Notes) is no longer
-written by the brain; the PWA Options › Ideas tab will go stale during the
-parity-check window and is removed in a follow-up phase.
+The legacy `option_recommendations` sheet (formerly "Strategy Notes") is no
+longer written by the brain. The PWA Options › Ideas tab was removed in
+Phase D — the unified `decision_queue` is now the single surface for both
+share + option ideas. The brain still READS the last 30 rows of
+`option_recommendations` as historical context (see §2 state-gather) — that
+sheet keeps accumulating from `market_scan.py` and `daily_options_scan.py`.
 
 **6a — Sonnet expands JSON to markdown:**
 

@@ -8,7 +8,10 @@ Writes to the `scan_results` sheet that the PWA Daily Scan card reads.
 
 Differences from market_scan.py:
   - market_scan: BROAD universe (LunarCrush + WSB + quality watchlist)
-                 → option_recommendations sheet → "Strategy Notes" card
+                 → option_recommendations sheet (history archive; brain
+                   reads last 30 rows for context per generate_wsr_full.py
+                   and generate_daily_brief.py — no PWA surface since
+                   Phase D of the Decisions↔Ideas merge)
   - daily_options_scan: USER'S OWN tickers (positions + queue)
                  → scan_results sheet → "Daily Scan" card (executable)
 

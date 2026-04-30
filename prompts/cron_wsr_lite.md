@@ -213,9 +213,12 @@ iv_rank. Always populate ALL fields — never omit a key.
 no new ideas), SKIP §5c entirely (do not invoke push_decisions.py with
 an empty `decisions[]` array — the script will error).
 
-The legacy `option_recommendations` sheet is no longer written. The PWA
-Options › Ideas tab will go stale during the parity-check window and is
-removed in a follow-up phase.
+The legacy `option_recommendations` sheet is no longer written by the brain.
+The PWA Options › Ideas tab was removed in Phase D — the unified
+`decision_queue` is now the single surface for both share + option ideas.
+The brain still READS the last 30 rows of `option_recommendations` as
+historical context (see §2) — that sheet keeps accumulating from
+`market_scan.py` and `daily_options_scan.py`.
 
 **🚨 CC ELIGIBILITY RULE (non-negotiable):**
 

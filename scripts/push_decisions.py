@@ -42,11 +42,11 @@ Input JSON shape (stdin or --json-file):
     }
 
 Behaviour:
-  - Idempotent upsert by (date, account, ticker, strategy, strike) — same
-    compound key as push_recommendations.py. Lets the brain emit BUY_DIP MDT
-    AND a hypothetical CSP MDT in the same week without one clobbering the
-    other. For legacy share-only rows (strategy="", strike=0) the key
-    collapses naturally to (date, account, ticker, "", "0.00").
+  - Idempotent upsert by (date, account, ticker, strategy, strike). Lets
+    the brain emit BUY_DIP MDT AND a hypothetical CSP MDT in the same week
+    without one clobbering the other. For legacy share-only rows
+    (strategy="", strike=0) the key collapses naturally to
+    (date, account, ticker, "", "0.00").
   - Different dates accumulate (history preserved).
   - Backward-compat: legacy rows in the sheet with only 9 columns are
     pad-read to the new 22-col HEADERS — gspread returns shorter lists
