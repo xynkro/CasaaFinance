@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# casaa — single-entry launcher for FinancePWA operations
+# Type `casaa` (no args) to list every command.
+#
+# Install (one-time):
+#   echo 'export PATH="$HOME/Documents/Trading/FinancePWA/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
+#
+# Then from anywhere on this Mac:
+#   casaa               # list all commands
+#   casaa ibkr          # grab IBKR positions (needs TWS open + logged in)
+#   casaa grab          # cloud yahoo-grab — both accounts
+#   casaa grab-sarah    # cloud yahoo-grab — sarah only
+#   casaa grab-caspar   # cloud yahoo-grab — caspar only
+#   casaa options       # cloud options refresh (every-30-min cron, but force now)
+#   casaa brief         # daily brief brain (Mon-Fri 07:03 cron)
+#   casaa wsr-lite      # wsr-lite brain (Wed/Fri 19:33 cron)
+#   casaa wsr-full      # wsr-full brain (Sun 19:37 cron)
+#   casaa scan          # daily options scan (10:30 SGT cron)
+#   casaa deploy        # check latest deploy status
+#   casaa sheets        # show latest counts per sheet
+#   casaa logs          # tail Mac LaunchAgent logs (.state/)
+#   casaa status        # quick health check — last hour of cron runs
+
+set -euo pipefail
+
+REPO="${HOME}/Documents/Trading/FinancePWA"
+GH_REPO="xynkro/CasaaFinance"
+
+cd "$REPO"
+
+case "${1:-help}" in
+
+  ibkr)
+    echo "→ ibkr-grab — needs TWS running on localhost:7497 + logged in"
+    echo "  press Ctrl+C now if TWS isn't open."
+    sleep 1
+    source .venv/bin/activate
+    python src/ibkr_grab.py --sync
+    ;;
+
+  grab)
+    echo "→ yahoo-grab (cloud, both accounts)"
+    gh workflow run yahoo-grab.yml --repo "$GH_REPO"
+    ;;
+
+  grab-sarah)
+    echo "→ yahoo-grab (cloud, sarah only)"
+    gh workflow run yahoo-grab.yml --repo "$GH_REPO" -f sarah_only=true
+    ;;
+
+  grab-caspar)
+    echo "→ yahoo-grab (cloud, caspar only)"
+    gh workflow run yahoo-grab.yml --repo "$GH_REPO" -f caspar_only=true
+    ;;
+
+  options)
+    echo "→ options-refresh (cloud)"
+    gh workflow run options-refresh.yml --repo "$GH_REPO"
+    ;;
+
+  brief|daily|daily-brief)
+    echo "→ daily-brief brain"
+    gh workflow run daily-brief.yml --repo "$GH_REPO"
+    ;;
+
+  wsr-lite|lite)
+    echo "→ wsr-lite brain"
+    gh workflow run wsr-lite.yml --repo "$GH_REPO"
+    ;;
+
+  wsr-full|full|wsr)
+    echo "→ wsr-full brain"
+    gh workflow run wsr-full.yml --repo "$GH_REPO"
+    ;;
+
+  scan)
+    echo "→ daily options scan"
+    gh workflow run daily-options-scan.yml --repo "$GH_REPO"
+    ;;
+
+  market-scan)
+    echo "→ market scan"
+    gh workflow run market-scan.yml --repo "$GH_REPO"
+    ;;
+
+  deploy)
+    gh run list --workflow=deploy.yml --limit 5 --repo "$GH_REPO"
+    ;;
+
+  status)
+    echo "=== last 10 cron runs ==="
+    gh run list --limit 10 --repo "$GH_REPO" --json status,conclusion,workflowName,createdAt \
+      --template '{{range .}}{{.createdAt | timeago}} {{printf "%-12s" .conclusion}} {{.workflowName}}{{"\n"}}{{end}}'
+    ;;
+
+  sheets)
+    source .venv/bin/activate
+    python3 -c "
+from src.sync import load_env
+from src import sheets as sh
+load_env()
+client = sh.authenticate()
+ss = sh._open_sheet(client)
+for tab in ['snapshot_caspar','snapshot_sarah','positions_caspar','positions_sarah','options','decision_queue','wsr_summary','daily_brief_latest','scan_results']:
+    rows = ss.worksheet(tab).get_all_values()
+    if len(rows) <= 1:
+        print(f'  {tab:25} empty')
+        continue
+    last_dates = sorted(set(r[0][:10] for r in rows[1:] if r and r[0]))[-1:]
+    last = last_dates[0] if last_dates else 'none'
+    today_n = sum(1 for r in rows[1:] if r and r[0].startswith(last))
+    print(f'  {tab:25} latest={last} ({today_n} rows on that date) | total={len(rows)-1}')
+"
+    ;;
+
+  logs)
+    echo "=== ibkr-grab last 30 lines ==="
+    tail -n 30 "$REPO/.state/ibkr-grab-stderr.log" 2>/dev/null || echo "(no log)"
+    echo "=== daily-tracker last 30 lines ==="
+    tail -n 30 "$REPO/.state/daily-tracker-stderr.log" 2>/dev/null || echo "(no log)"
+    ;;
+
+  help|--help|-h|"")
+    cat <<EOF
+casaa — FinancePWA launcher
+
+DATA REFRESH
+  ibkr            grab IBKR positions from local TWS (TWS must be open + logged in)
+  grab            cloud yahoo-grab — both accounts
+  grab-sarah      cloud yahoo-grab — sarah only
+  grab-caspar     cloud yahoo-grab — caspar only
+  options         cloud options refresh (price + moneyness + Greeks)
+  scan            daily options scan
+  market-scan     market scan (broad universe)
+
+BRAIN
+  brief           daily brief (cloud, Opus)
+  wsr-lite        mid-week pulse (cloud, Opus)
+  wsr-full        Monday WSR (cloud, Opus)
+
+INSPECT
+  status          last 10 cron runs (success/fail)
+  sheets          latest row counts in each Google Sheet
+  deploy          last 5 PWA deploys
+  logs            tail Mac LaunchAgent logs
+
+EVERYTHING USES gh CLI — NO PAT NEEDED.
+EOF
+    ;;
+
+  *)
+    echo "unknown command: $1"
+    echo "run 'casaa' (no args) for the full list"
+    exit 1
+    ;;
+esac
