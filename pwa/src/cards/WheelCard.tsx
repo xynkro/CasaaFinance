@@ -1,4 +1,5 @@
 import type { OptionRow, PositionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
+import { numeric } from "../data";
 import { Card } from "./Card";
 import { CircleDot, AlertTriangle, TrendingUp, TrendingDown, Shield, Info, Zap } from "lucide-react";
 import { useState } from "react";
@@ -73,7 +74,7 @@ function RiskBadge({ risk }: { risk: string }) {
 
 function TrendIndicator({ trend, momentum }: { trend: string; momentum: string }) {
   const color = TREND_STYLE[trend] ?? "text-slate-500";
-  const mom = Number(momentum);
+  const mom = numeric(momentum);
   const Icon = mom >= 0 ? TrendingUp : TrendingDown;
   if (!trend || trend === "?") return null;
   return (
@@ -133,22 +134,22 @@ function OptionItem({
 }) {
   const [expanded, setExpanded] = useState(false);
   const right = opt.right === "C" ? "CALL" : opt.right === "P" ? "PUT" : opt.right;
-  const dte = Number(opt.dte);
+  const dte = numeric(opt.dte);
   const dteLabel = dte < 0 ? "—" : dte === 0 ? "EXP" : `${dte}d`;
-  const adjCost = Number(opt.adj_cost_basis);
-  const underlying = Number(opt.underlying_last);
-  const strike = Number(opt.strike);
+  const adjCost = numeric(opt.adj_cost_basis);
+  const underlying = numeric(opt.underlying_last);
+  const strike = numeric(opt.strike);
   const wheelLeg = WHEEL_LEG_LABEL[opt.wheel_leg] ?? opt.wheel_leg;
-  const confidence = Number(opt.confidence_pct) || 0;
-  const vol = Number(opt.volatility_annual) * 100;
-  const rsi = Number(opt.rsi_14);
-  const sma20 = Number(opt.sma_20);
-  const sma50 = Number(opt.sma_50);
+  const confidence = numeric(opt.confidence_pct);
+  const vol = numeric(opt.volatility_annual) * 100;
+  const rsi = numeric(opt.rsi_14);
+  const sma20 = numeric(opt.sma_20);
+  const sma50 = numeric(opt.sma_50);
 
   // Find matching stock position for context
   const stock = stockPositions.find((p) => p.ticker === opt.ticker);
-  const stockQty = stock ? Number(stock.qty) : 0;
-  const stockAvg = stock ? Number(stock.avg_cost) : 0;
+  const stockQty = stock ? numeric(stock.qty) : 0;
+  const stockAvg = stock ? numeric(stock.avg_cost) : 0;
 
   return (
     <button
@@ -230,13 +231,13 @@ function OptionItem({
           <Shield size={10} className="text-indigo-400" />
           <span className="text-slate-500">Captured:</span>
           <span className={`tabular-nums font-semibold ${
-            Number(exitPlan.profit_capture_pct) >= 50 ? "text-emerald-400" : "text-slate-300"
+            numeric(exitPlan.profit_capture_pct) >= 50 ? "text-emerald-400" : "text-slate-300"
           }`}>
-            {Number(exitPlan.profit_capture_pct).toFixed(0)}%
+            {numeric(exitPlan.profit_capture_pct).toFixed(0)}%
           </span>
           <span className="text-slate-600">·</span>
           <span className="text-slate-500">Close at</span>
-          <span className="text-emerald-400 font-semibold tabular-nums">${Number(exitPlan.target_close_at).toFixed(2)}</span>
+          <span className="text-emerald-400 font-semibold tabular-nums">${numeric(exitPlan.target_close_at).toFixed(2)}</span>
         </div>
       )}
 
@@ -256,11 +257,11 @@ function OptionItem({
               <div className="text-[length:var(--t-2xs)] text-slate-600 mb-1">Strategy scores</div>
               <div className="grid grid-cols-5 gap-1.5 text-[length:var(--t-2xs)]">
                 {[
-                  { label: "BUY", val: Number(techScore.score_buy) },
-                  { label: "CSP", val: Number(techScore.score_csp) },
-                  { label: "CC", val: Number(techScore.score_cc) },
-                  { label: "LC", val: Number(techScore.score_long_call) },
-                  { label: "LP", val: Number(techScore.score_long_put) },
+                  { label: "BUY", val: numeric(techScore.score_buy) },
+                  { label: "CSP", val: numeric(techScore.score_csp) },
+                  { label: "CC", val: numeric(techScore.score_cc) },
+                  { label: "LC", val: numeric(techScore.score_long_call) },
+                  { label: "LP", val: numeric(techScore.score_long_put) },
                 ].map((s) => (
                   <div key={s.label} className="text-center">
                     <div className="text-slate-600">{s.label}</div>
@@ -275,10 +276,10 @@ function OptionItem({
                   {techScore.top_drivers}
                 </div>
               )}
-              {techScore.earnings_date && Number(techScore.earnings_days_away) >= 0 && (
+              {techScore.earnings_date && numeric(techScore.earnings_days_away) >= 0 && (
                 <div className={`flex items-center gap-1 text-[length:var(--t-2xs)] mt-1.5 ${
-                  Number(techScore.earnings_days_away) <= 7 ? "text-red-400" :
-                  Number(techScore.earnings_days_away) <= 14 ? "text-amber-400" : "text-slate-400"
+                  numeric(techScore.earnings_days_away) <= 7 ? "text-red-400" :
+                  numeric(techScore.earnings_days_away) <= 14 ? "text-amber-400" : "text-slate-400"
                 }`}>
                   <Zap size={10} />
                   <span className="font-semibold">

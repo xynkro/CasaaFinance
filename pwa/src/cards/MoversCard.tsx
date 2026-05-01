@@ -1,4 +1,5 @@
 import type { PositionRow } from "../data";
+import { numeric, numericOrNull } from "../data";
 import { Card } from "./Card";
 import { sectorFor } from "../lib/emojis";
 import { TrendingUp, TrendingDown } from "lucide-react";
@@ -13,19 +14,21 @@ interface Mover {
 
 function buildMovers(positions: PositionRow[], ccy: "USD" | "SGD"): Mover[] {
   return positions
-    .map((p) => {
-      const avg = Number(p.avg_cost);
-      const last = Number(p.last);
-      const pct = avg > 0 ? ((last - avg) / avg) * 100 : 0;
+    .map((p): Mover | null => {
+      const avg = numericOrNull(p.avg_cost);
+      const last = numericOrNull(p.last);
+      // Skip rows missing either price datum — pct would be misleading.
+      if (avg === null || last === null || avg <= 0) return null;
+      const pct = ((last - avg) / avg) * 100;
       return {
         ticker: p.ticker,
         pct,
-        upl: Number(p.upl),
+        upl: numeric(p.upl),
         ccy,
         emoji: sectorFor(p.ticker).emoji,
       };
     })
-    .filter((m) => !isNaN(m.pct));
+    .filter((m): m is Mover => m !== null);
 }
 
 function Row({ m, rank }: { m: Mover; rank: number }) {

@@ -33,6 +33,37 @@ async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
   return data;
 }
 
+// ---------- numeric coercion at the data boundary ----------
+
+/**
+ * Coerce a string|undefined sheet cell to a number with a stable fallback.
+ * Replaces ad-hoc `Number(x) || 0` / `if (!v) continue` / unguarded `Number()`
+ * patterns scattered across consumer cards.
+ *
+ * Rules:
+ * - undefined/null/empty-string → fallback
+ * - "NaN" / non-numeric strings → fallback
+ * - Anything `Number()` parses successfully → that number (zero is preserved)
+ *
+ * Fallback default is 0; pass `null` if you need to distinguish "no data"
+ * from "zero" (e.g. price-charts that should skip the point entirely).
+ */
+export function numeric(v: string | undefined | null, fallback = 0): number {
+  if (v === undefined || v === null || v === "") return fallback;
+  const n = Number(v);
+  return Number.isNaN(n) ? fallback : n;
+}
+
+/**
+ * Same as numeric() but returns null for missing/invalid — useful when
+ * the consumer wants to filter the row out entirely rather than show 0.
+ */
+export function numericOrNull(v: string | undefined | null): number | null {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isNaN(n) ? null : n;
+}
+
 /**
  * Normalize snapshot rows from either account's CSV headers into the
  * generic SnapshotRow shape.  Caspar's sheet uses `net_liq_usd` / `cash`,

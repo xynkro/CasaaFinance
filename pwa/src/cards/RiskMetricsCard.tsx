@@ -1,4 +1,5 @@
 import type { SnapshotRow, MacroRow } from "../data";
+import { numeric } from "../data";
 import { Card } from "./Card";
 import { Activity, TrendingUp, TrendingDown, AlertTriangle, Scale } from "lucide-react";
 
@@ -12,8 +13,8 @@ function dailyReturns(rows: SnapshotRow[]): number[] {
   const sorted = sortedByDate(rows);
   const returns: number[] = [];
   for (let i = 1; i < sorted.length; i++) {
-    const prev = Number(sorted[i - 1].net_liq);
-    const curr = Number(sorted[i].net_liq);
+    const prev = numeric(sorted[i - 1].net_liq);
+    const curr = numeric(sorted[i].net_liq);
     if (prev > 0 && curr > 0) returns.push((curr - prev) / prev);
   }
   return returns;
@@ -49,7 +50,7 @@ function maxDrawdown(rows: SnapshotRow[]): { pct: number; peak: number; trough: 
   let peakVal = 0;
   let troughVal = 0;
   for (const r of sorted) {
-    const v = Number(r.net_liq);
+    const v = numeric(r.net_liq);
     if (!v) continue;
     if (v > peak) peak = v;
     if (peak > 0) {
@@ -162,7 +163,7 @@ export function RiskMetricsCard({
   const fxByDate = new Map<string, number>();
   for (const m of macroHistory) {
     const d = m.date.split("T")[0];
-    const fx = Number(m.usd_sgd);
+    const fx = numeric(m.usd_sgd);
     if (fx > 0) fxByDate.set(d, fx);
   }
 
@@ -170,13 +171,13 @@ export function RiskMetricsCard({
   const dateMap = new Map<string, { caspar: number; sarah: number }>();
   for (const r of casparHistory) {
     const d = r.date.split("T")[0];
-    const v = Number(r.net_liq);
+    const v = numeric(r.net_liq);
     if (!dateMap.has(d)) dateMap.set(d, { caspar: 0, sarah: 0 });
     dateMap.get(d)!.caspar = v;
   }
   for (const r of sarahHistory) {
     const d = r.date.split("T")[0];
-    const v = Number(r.net_liq);
+    const v = numeric(r.net_liq);
     if (!dateMap.has(d)) dateMap.set(d, { caspar: 0, sarah: 0 });
     dateMap.get(d)!.sarah = v;
   }
@@ -202,8 +203,8 @@ export function RiskMetricsCard({
 
   // SPX returns from macro
   const spxRows = macroHistory
-    .filter((m) => Number(m.spx) > 0)
-    .map((m) => ({ date: m.date, val: Number(m.spx) }))
+    .filter((m) => numeric(m.spx) > 0)
+    .map((m) => ({ date: m.date, val: numeric(m.spx) }))
     .sort((a, b) => a.date.localeCompare(b.date));
   const spxRets: number[] = [];
   for (let i = 1; i < spxRows.length; i++) {
