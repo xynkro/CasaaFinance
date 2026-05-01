@@ -62,17 +62,25 @@ def ping_grab_ready(
     date: str,
     caspar_positions: int,
     sarah_positions: int,
-    opts_skipped: int,
+    caspar_options: int,
+    sarah_options: int,
     pwa_url: str | None = None,
 ) -> dict:
     """Ping after IBKR portfolio grab sync."""
+    def _line(name: str, stk: int, opt: int) -> str:
+        if stk == 0 and opt == 0:
+            return f"  {name}: nothing"
+        parts = []
+        if stk:
+            parts.append(f"{stk} stock{'s' if stk != 1 else ''}")
+        if opt:
+            parts.append(f"{opt} option{'s' if opt != 1 else ''}")
+        return f"  {name}: {', '.join(parts)}"
     lines = [
         f"📸 Portfolio grab {date} synced",
-        f"  Caspar: {caspar_positions} positions",
-        f"  Sarah: {sarah_positions} positions (stocks)",
+        _line("Caspar", caspar_positions, caspar_options),
+        _line("Sarah", sarah_positions, sarah_options),
     ]
-    if opts_skipped:
-        lines.append(f"  ⚠️ {opts_skipped} options skipped (no tab yet)")
     if pwa_url:
         lines.append(f"📱 PWA: {pwa_url}")
     return send("\n".join(lines), parse_mode="none")

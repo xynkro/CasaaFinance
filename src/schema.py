@@ -800,7 +800,8 @@ def positions_caspar_from_grab(grab: dict) -> List[PositionRow]:
 
 
 def positions_sarah_from_grab(grab: dict) -> List[PositionRow]:
-    """Build Sarah position rows from grab JSON. Stocks only (sec_type=STK), options skipped."""
+    """Build Sarah position rows from grab JSON. Stocks only — options
+    flow through options_from_grab() and the unified `options` sheet."""
     date = str(grab.get("grab_date", ""))
     sa = grab.get("accounts", {}).get("sarah", {})
     net_liq = float(sa.get("summary", {}).get("net_liquidation_sgd", 0.0))
@@ -818,6 +819,68 @@ def positions_sarah_from_grab(grab: dict) -> List[PositionRow]:
             mkt_val=mkt_val,
             upl=float(pos.get("upl", 0.0)),
             weight=mkt_val / net_liq if net_liq else 0.0,
+        ))
+    return out
+
+
+def options_from_grab(grab: dict, account: str) -> List[OptionRow]:
+    """
+    Build OptionRow rows for one account from grab JSON. Both Caspar and
+    Sarah's options live in the unified `options` sheet (the `account`
+    column disambiguates).
+
+    IBKR-known fields (qty, credit, last, mkt_val, upl) populated from the
+    grab. Cloud-derived fields (underlying_last, moneyness, dte,
+    assignment_risk, momentum_5d, trend_risk, sigma, RSI, SMAs) left blank
+    — options_refresh_cloud.py fills them within 30 min during US session.
+    Mac-tethered fields (wheel_leg, adj_cost_basis, confidence_pct,
+    confidence_reasoning) left blank — daily_tracker.py fills them at
+    06:00 SGT when it runs nightly.
+    """
+    date = str(grab.get("grab_date", ""))
+    acct = grab.get("accounts", {}).get(account, {})
+    out: List[OptionRow] = []
+    for opt in (acct.get("options") or []):
+        if opt.get("sec_type") != "OPT":
+            continue
+        try:
+            qty = float(opt.get("qty", 0.0))
+            avg_cost_credit = float(opt.get("avg_cost_credit", opt.get("avg_cost", 0.0)))
+            multiplier = float(opt.get("multiplier", 100))
+            credit = avg_cost_credit / multiplier if multiplier else avg_cost_credit / 100
+            strike = float(opt.get("strike", 0.0))
+        except (ValueError, TypeError):
+            continue
+        if not opt.get("symbol") or not opt.get("expiry"):
+            continue
+        out.append(OptionRow(
+            date=date,
+            account=account,
+            ticker=str(opt["symbol"]),
+            right=str(opt.get("right", "")).strip().upper(),
+            strike=strike,
+            expiry=str(opt["expiry"]),
+            qty=qty,
+            credit=credit,
+            last=float(opt.get("last", 0.0)),
+            mkt_val=float(opt.get("mkt_val", 0.0)),
+            upl=float(opt.get("upl", 0.0)),
+            # cloud-derived (options_refresh_cloud.py fills within 30min):
+            underlying_last=0.0,
+            moneyness="",
+            dte=0,
+            assignment_risk="",
+            # Mac-derived (daily_tracker.py fills at 06:00 SGT):
+            wheel_leg="",
+            adj_cost_basis=0.0,
+            momentum_5d=0.0,
+            trend_risk="?",
+            confidence_pct=0,
+            confidence_reasoning="",
+            volatility_annual=0.0,
+            rsi_14=50.0,
+            sma_20=0.0,
+            sma_50=0.0,
         ))
     return out
 

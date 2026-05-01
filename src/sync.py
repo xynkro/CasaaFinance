@@ -337,10 +337,8 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
         pos_c = S.positions_caspar_from_grab(grab)
         snap_s = S.snapshot_sarah_from_grab(grab)
         pos_s = S.positions_sarah_from_grab(grab)
-
-        # Count skipped options for info
-        opts = grab.get("accounts", {}).get("sarah", {}).get("options") or []
-        opts_skipped = len(opts)
+        opts_c = S.options_from_grab(grab, "caspar")
+        opts_s = S.options_from_grab(grab, "sarah")
 
         if args.dryrun:
             print(f"[dryrun] snapshot_caspar: {snap_c.to_row()}")
@@ -355,8 +353,9 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
                 print(f"  {p.to_row()}")
             if len(pos_s) > 3:
                 print(f"  ... and {len(pos_s) - 3} more")
-            if opts_skipped:
-                print(f"[dryrun] options skipped: {opts_skipped} (short calls — no options tab yet)")
+            print(f"[dryrun] options: caspar={len(opts_c)}, sarah={len(opts_s)} -> options tab")
+            for o in (opts_c + opts_s)[:5]:
+                print(f"  {o.account:7} {o.ticker:6} {o.right} ${o.strike:>7.2f} exp={o.expiry} qty={o.qty:>+4.0f}")
             print(f"[dryrun] telegram: grab ready + date")
             return 0
 
@@ -380,6 +379,15 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
             n = sh.append_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
             result.rows_written["positions_sarah"] = n
 
+            # Options for both accounts -> unified `options` tab. IBKR-known
+            # fields populated; cloud options-refresh fills derived fields
+            # within 30 min, daily_tracker fills Mac-tethered fields at 06:00 SGT.
+            opt_rows = [o.to_row() for o in (opts_c + opts_s)]
+            if opt_rows:
+                sh.ensure_headers(client, S.OptionRow.TAB_NAME, S.OptionRow.HEADERS)
+                n = sh.append_rows(client, S.OptionRow.TAB_NAME, opt_rows)
+                result.rows_written[S.OptionRow.TAB_NAME] = n
+
             result.sheet_ok = True
             logger.info(f"Sheets OK — {result.rows_written}")
         except Exception as e:
@@ -392,7 +400,7 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
         # --- Telegram ---
         try:
             pwa_url = os.environ.get("PWA_URL") or None
-            tg.ping_grab_ready(date, len(pos_c), len(pos_s), opts_skipped, pwa_url)
+            tg.ping_grab_ready(date, len(pos_c), len(pos_s), len(opts_c), len(opts_s), pwa_url)
             result.telegram_ok = True
             logger.info("Telegram OK")
         except Exception as e:
