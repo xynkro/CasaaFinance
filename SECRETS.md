@@ -86,6 +86,8 @@ files for UTC values.
 | `wsr-lite.yml` | Wed/Fri 19:33 | Mid-week pulse (trigger audit + decision queue check) |
 | `wsr-full.yml` | Sun 19:37 | Full Monday strategy review |
 | `yahoo-grab.yml` | Hourly :07 | Live portfolio prices (no IBKR needed) |
+| `macro-grab.yml` | Hourly :17 | Macro indicators (VIX/SPX/DXY) + simple options refresh |
+| `options-refresh.yml` | Every 30min, US market hours (Mon-Fri 21:00-05:30 SGT) | Full options refresh: moneyness/DTE/assignment_risk/momentum/RSI/SMA/sigma — frees Mac from daily critical path |
 | `market-scan.yml` | Daily 10:33 | Options screener across LunarCrush + WSB + quality watchlist |
 | `poll-drive-wsr.yml` | :13, :43 every hour | Pick up any .md you upload manually to Drive |
 

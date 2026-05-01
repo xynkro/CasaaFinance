@@ -25,8 +25,13 @@ ss = sh._open_sheet(client)
 # All required tabs:
 # - macro (last 7 rows for week trend)
 # - snapshot_caspar, snapshot_sarah (last 7 rows for WoW deltas)
-# - positions_caspar, positions_sarah (latest snapshot only)
-# - options (all open positions)
+# - positions_caspar, positions_sarah (latest snapshot only,
+#     refreshed hourly by yahoo-grab.yml cloud cron)
+# - options (all open positions, refreshed every 30 min during US
+#     market hours by options-refresh.yml — moneyness, DTE,
+#     assignment_risk, trend_risk, momentum_5d, sigma, RSI, SMAs are
+#     all yfinance-derivable and stay fresh even when the Mac is off.
+#     New positions are still discovered nightly by Mac ibkr-grab.)
 # - option_recommendations (latest market_scan output)
 # - scan_results (latest IBKR scan if TWS was on)
 # - exit_plans (latest)

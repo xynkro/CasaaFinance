@@ -1,0 +1,53 @@
+name: Options Refresh — Every 30min during US market hours
+
+# Hourly cadence is too slow for an options book that can swing meaningfully
+# inside a single session. This workflow refreshes the `options` sheet every
+# 30 minutes while US markets are open, so the brain (and the PWA) see fresh
+# moneyness, DTE, assignment_risk, and trend_risk without waiting for the
+# Mac's nightly daily-tracker run.
+#
+# Schedule: every :00 and :30 between 13:00-21:30 UTC, weekdays only.
+#   13:00 UTC = 09:00 ET = market open at 09:30 ET (1 run pre-open)
+#   21:30 UTC = 17:30 ET = 30 min after close
+#   Weekdays only (Mon-Fri).
+# In SGT this is roughly 21:00-05:30 next day — covers every minute of US
+# session plus 30 min buffer either side.
+
+on:
+  schedule:
+    - cron: "0,30 13-21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+        description: "Dry run — print, don't write to sheet"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: options-refresh
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run options_refresh_cloud
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/options_refresh_cloud.py $ARGS

@@ -38,6 +38,8 @@ if full_rows:
 
 Also pull positions, options, exit_plans, decision_queue, scan_results, technical_scores, latest macro, and option_recommendations — same pattern as the daily brief.
 
+The `options` tab is refreshed every 30 minutes during US market hours by the cloud `options-refresh.yml` workflow (moneyness, DTE, assignment_risk, trend_risk, momentum_5d, sigma, RSI, SMAs all yfinance-derivable). The latest snapshot is the freshest you'll have, regardless of whether the Mac is on. New positions still get added nightly via Mac ibkr-grab.
+
 ### 3. Check trigger states (the most important section)
 
 For every trigger from the Monday WSR (TQQQ $52, SSO $60, MSFT $405, etc.):
