@@ -105,12 +105,3 @@ export function sectorFor(ticker: string): { sector: string; emoji: string } {
   const t = ticker.toUpperCase();
   return SECTOR_MAP[t] ?? { sector: "Other", emoji: "📊" };
 }
-
-/** Macro indicator emojis for the ticker strip. */
-export const MACRO_EMOJI: Record<string, string> = {
-  VIX: "🌡️",
-  DXY: "💵",
-  "10Y": "📈",
-  SPX: "📊",
-  "USD/SGD": "🇸🇬",
-};

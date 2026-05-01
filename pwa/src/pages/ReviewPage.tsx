@@ -27,7 +27,9 @@ function loadLastSub(): ReviewSubTab {
   try {
     const v = localStorage.getItem(LAST_KEY);
     if (v === "closed" || v === "numbers" || v === "reports") return v;
-  } catch {}
+  } catch {
+    // ignore
+  }
   return "closed";
 }
 
@@ -66,7 +68,9 @@ export function ReviewPage({
   const handleSub = (key: string) => {
     const next = key as ReviewSubTab;
     setSub(next);
-    try { localStorage.setItem(LAST_KEY, next); } catch {}
+    try { localStorage.setItem(LAST_KEY, next); } catch {
+      // ignore
+    }
   };
 
   // Badge: count of closed decisions in the last 30 days for the closed-decisions tab

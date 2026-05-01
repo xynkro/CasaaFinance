@@ -408,6 +408,21 @@ body::before {
 }
 .pop-in { animation: popIn 0.35s var(--spring) both; }
 
+/* ─── Reduced motion ─────────────────────────────────────────────────────── */
+/* Respect iOS "Reduce Motion" — outdoor sun-reading session win. Strips the
+   fade/slide/scale entrance animations and clamps any remaining transition
+   to ~instant. The user gets the same content without the motion stack. */
+@media (prefers-reduced-motion: reduce) {
+  .fade-up, .slide-in, .scale-in, .pop-in, .pulse-glow, .shimmer,
+  .fade-up-1, .fade-up-2, .fade-up-3, .fade-up-4 {
+    animation: none !important;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ─── Scrollbar ──────────────────────────────────────────────────────────── */
 .no-scrollbar                    { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }

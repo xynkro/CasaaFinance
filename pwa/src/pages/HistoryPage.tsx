@@ -13,15 +13,9 @@ import {
   CartesianGrid,
 } from "recharts";
 import { TrendingUp, BarChart3, Activity } from "lucide-react";
+import { shortDate } from "../lib/dates";
 
 // ---------- helpers ----------
-
-function shortDate(d: string): string {
-  const s = d.slice(0, 10); // YYYY-MM-DD
-  const [, m, day] = s.split("-");
-  const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[Number(m)]} ${Number(day)}`;
-}
 
 function fmtUsd(v: number): string {
   return `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;

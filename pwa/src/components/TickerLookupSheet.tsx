@@ -32,14 +32,19 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Auto-focus the input each time the sheet opens. Reset of the query is
+  // handled in the close handlers below — keeping it out of the effect
+  // avoids a setState-in-effect cascade (react-hooks/set-state-in-effect).
   useEffect(() => {
-    if (open) {
-      const t = setTimeout(() => inputRef.current?.focus(), 80);
-      return () => clearTimeout(t);
-    } else {
-      setQuery("");
-    }
+    if (!open) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 80);
+    return () => clearTimeout(t);
   }, [open]);
+
+  const handleClose = () => {
+    setQuery("");
+    onClose();
+  };
 
   const upper = query.trim().toUpperCase();
 
@@ -55,12 +60,12 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
     if (!upper) return;
     const match = technicalScores.find((t) => t.ticker === upper);
     onSelect(upper, match);
-    onClose();
+    handleClose();
   };
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") handleAnalyze();
-    if (e.key === "Escape") onClose();
+    if (e.key === "Escape") handleClose();
   };
 
   if (!open) return null;
@@ -71,7 +76,7 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
       <div
         className="fixed inset-0 z-40"
         style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" }}
-        onClick={onClose}
+        onClick={handleClose}
       />
 
       {/* Bottom sheet */}
@@ -94,7 +99,7 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[length:var(--t-lg)] font-bold text-white">Analyse a Ticker</h2>
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="w-7 h-7 rounded-full flex items-center justify-center"
               style={{ background: "rgba(255,255,255,0.08)" }}
             >
@@ -146,7 +151,7 @@ export function TickerLookupSheet({ open, onClose, technicalScores, onSelect }: 
                 return (
                   <button
                     key={t.ticker}
-                    onClick={() => { onSelect(t.ticker, t); onClose(); }}
+                    onClick={() => { onSelect(t.ticker, t); handleClose(); }}
                     className="w-full flex items-center gap-3 px-4 py-3 active:bg-white/5 text-left transition-colors"
                     style={{ borderTop: i > 0 ? "1px solid rgba(255,255,255,0.05)" : "none" }}
                   >

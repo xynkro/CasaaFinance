@@ -2,27 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Lock, ShieldCheck } from "lucide-react";
 
 const VALID_PINS = ["797997", "899665"];
-const STORAGE_KEY = "casaa_pin_ok";
 const PIN_LENGTH = 6;
-
-export function usePinAuth() {
-  const [authed, setAuthed] = useState(() => {
-    try {
-      const ts = Number(localStorage.getItem(STORAGE_KEY) || "0");
-      // Session valid for 7 days
-      return ts > 0 && Date.now() - ts < 7 * 86400 * 1000;
-    } catch {
-      return false;
-    }
-  });
-
-  const grant = () => {
-    localStorage.setItem(STORAGE_KEY, String(Date.now()));
-    setAuthed(true);
-  };
-
-  return { authed, grant };
-}
 
 export function PinGate({ onSuccess }: { onSuccess: () => void }) {
   const [digits, setDigits] = useState<string[]>(Array(PIN_LENGTH).fill(""));
@@ -102,10 +82,6 @@ export function PinGate({ onSuccess }: { onSuccess: () => void }) {
         className={`glass-bright rounded-3xl p-8 w-full max-w-sm flex flex-col items-center gap-6 transition-all duration-300 ${
           error ? "animate-[shake_0.4s_ease-in-out]" : ""
         } ${success ? "scale-[0.97] opacity-80" : ""}`}
-        style={{
-          // @ts-expect-error -- inline keyframes
-          "--tw-animate-shake": error ? "1" : "0",
-        }}
       >
         <div
           className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-300 ${

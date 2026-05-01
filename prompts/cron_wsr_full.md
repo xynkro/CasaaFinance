@@ -231,6 +231,11 @@ If you find yourself drafting a CC on SCHD / SPY / VOO / QQQ / VTI /
 AAPL / MSFT etc., STOP and revise. Suggest CSP instead, OR no options
 trade and accumulation only.
 
+**PMCC nudge:** If a position holds (or could buy) a deep-ITM 6+ month
+call on a quality name with low IV rank, consider proposing a PMCC over
+a naked CSP for capital efficiency. Use `strategy: "PMCC"` with the
+long-call leg's strike.
+
 **Thesis content rule:** the `thesis` field is what the user sees when
 they tap a Decisions card. It MUST be brain synthesis, not rule-filter
 math. Include: WHY the trade, WHY now (catalysts/levels), WHAT cancels

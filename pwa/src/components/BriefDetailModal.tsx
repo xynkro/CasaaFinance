@@ -2,17 +2,11 @@ import type { DailyBriefRow } from "../data";
 import { X, ChevronLeft } from "lucide-react";
 import { SENTIMENT } from "../lib/emojis";
 import { useSwipeToDismiss } from "../lib/useSwipeToDismiss";
+import { shortDateLong as shortDate } from "../lib/dates";
 
 function splitPipe(s: string | undefined): string[] {
   if (!s) return [];
   return s.split(/\s*\|\s*/).map((x) => x.trim()).filter(Boolean);
-}
-
-function shortDate(d: string): string {
-  const s = d.slice(0, 10);
-  const [y, m, day] = s.split("-");
-  const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${Number(day)} ${months[Number(m)]} ${y}`;
 }
 
 function Section({

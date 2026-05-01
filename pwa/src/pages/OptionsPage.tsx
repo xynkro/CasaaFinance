@@ -46,14 +46,18 @@ export function OptionsPage({
     try {
       const saved = localStorage.getItem(LAST_KEY) as Subtab | null;
       if (saved === "defense" || saved === "book" || saved === "scan") return saved;
-    } catch {}
+    } catch {
+      // ignore
+    }
     return "book";
   });
 
   const handleChange = (key: string) => {
     const next = key as Subtab;
     setSub(next);
-    try { localStorage.setItem(LAST_KEY, next); } catch {}
+    try { localStorage.setItem(LAST_KEY, next); } catch {
+      // ignore
+    }
   };
 
   // Badges

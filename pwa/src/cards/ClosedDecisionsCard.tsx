@@ -10,6 +10,7 @@ import {
   ChevronRight,
   X,
 } from "lucide-react";
+import { shortDate } from "../lib/dates";
 
 // ---------- types & constants ----------
 
@@ -20,14 +21,6 @@ const CLOSED_STATUSES = new Set(["filled", "killed", "expired"]);
 
 function num(v: string | undefined): number {
   return !v ? 0 : Number(v) || 0;
-}
-
-function shortDate(d: string): string {
-  const s = d.slice(0, 10);
-  const [, m, day] = s.split("-");
-  if (!m || !day) return s;
-  const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[Number(m)]} ${Number(day)}`;
 }
 
 function dayKey(d: string): string {
@@ -602,7 +595,9 @@ function loadLastWindow(): Window {
   try {
     const v = localStorage.getItem(LAST_KEY);
     if (v === "7d" || v === "30d" || v === "90d" || v === "all") return v;
-  } catch {}
+  } catch {
+    // ignore
+  }
   return "30d";
 }
 
@@ -612,7 +607,9 @@ export function ClosedDecisionsCard({ decisionsAll }: { decisionsAll: DecisionRo
 
   const handleWindow = (w: Window) => {
     setWindow(w);
-    try { localStorage.setItem(LAST_KEY, w); } catch {}
+    try { localStorage.setItem(LAST_KEY, w); } catch {
+      // ignore
+    }
   };
 
   // Filter: closed status only, then by window

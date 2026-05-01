@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Settings } from "../settings";
-import { LogOut, DollarSign, LayoutGrid, ListChecks, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check } from "lucide-react";
+import { LogOut, DollarSign, LayoutGrid, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check } from "lucide-react";
 
 const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Review", "Settings"];
 
@@ -243,14 +243,6 @@ export function SettingsPage({
               <option value="SGD">SGD only</option>
               <option value="both">Both</option>
             </select>
-          </SettingRow>
-
-          <SettingRow icon={LayoutGrid} label="Compact cards" description="Smaller card layout">
-            <Toggle on={settings.compactCards} onToggle={() => onUpdate({ compactCards: !settings.compactCards })} />
-          </SettingRow>
-
-          <SettingRow icon={ListChecks} label="Show decisions" description="Decision queue on portfolio">
-            <Toggle on={settings.showDecisions} onToggle={() => onUpdate({ showDecisions: !settings.showDecisions })} />
           </SettingRow>
 
           <SettingRow icon={Home} label="Default tab" description="Tab shown on launch">

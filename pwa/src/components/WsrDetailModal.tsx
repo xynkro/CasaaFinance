@@ -3,13 +3,7 @@ import type { WsrSummaryRow } from "../data";
 import { X, ChevronLeft, BookOpen } from "lucide-react";
 import { marked } from "marked";
 import { useSwipeToDismiss } from "../lib/useSwipeToDismiss";
-
-function shortDate(d: string): string {
-  const s = d.slice(0, 10);
-  const [y, m, day] = s.split("-");
-  const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${Number(day)} ${months[Number(m)]} ${y}`;
-}
+import { shortDateLong as shortDate } from "../lib/dates";
 
 const REGIME_STYLE: Record<string, { bg: string; text: string; border: string; label: string }> = {
   bull_early_cycle: { bg: "bg-emerald-500/12", text: "text-emerald-400", border: "border-emerald-500/30", label: "Bull · Early" },

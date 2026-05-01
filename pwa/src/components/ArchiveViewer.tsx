@@ -1,13 +1,7 @@
 import type { ArchiveRow } from "../data";
 import { X, ChevronLeft, ExternalLink } from "lucide-react";
 import { useSwipeToDismiss } from "../lib/useSwipeToDismiss";
-
-function shortDate(d: string): string {
-  const s = d.slice(0, 10);
-  const [y, m, day] = s.split("-");
-  const months = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${Number(day)} ${months[Number(m)]} ${y}`;
-}
+import { shortDateLong as shortDate } from "../lib/dates";
 
 export function ArchiveViewer({
   row,

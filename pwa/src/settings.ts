@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 
 export interface Settings {
   currency: "USD" | "SGD" | "both";
-  compactCards: boolean;
-  showDecisions: boolean;
   defaultTab: number;
   bgDarkness: number;        // 0-100, applied as overlay opacity
   bgBlur: number;            // 0-30px extra blur
@@ -19,8 +17,6 @@ export interface Settings {
 
 const DEFAULTS: Settings = {
   currency: "both",
-  compactCards: false,
-  showDecisions: true,
   defaultTab: 0,
   bgDarkness: 70,
   bgBlur: 0,

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchDashboard, type DashboardData } from "./data";
 import type { TechnicalScoreRow } from "./data";
-import { PinGate, usePinAuth } from "./PinGate";
+import { PinGate } from "./PinGate";
+import { usePinAuth } from "./lib/usePinAuth";
 import { useSettings } from "./settings";
 import { TabBar } from "./components/TabBar";
 import { PullToRefresh } from "./components/PullToRefresh";
@@ -36,6 +37,10 @@ function Dashboard() {
     });
   };
 
+  // Fetch on mount. setState-in-effect is the canonical pattern for
+  // "load when component mounts", and React's docs explicitly call it out
+  // as fine for external-system sync (network → state).
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, []);
 
   // Auto-refresh: every 15 min + whenever the app comes back to foreground
@@ -52,7 +57,6 @@ function Dashboard() {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

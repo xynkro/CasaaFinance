@@ -32,7 +32,9 @@ function loadLastSub(): HomeSubTab {
   try {
     const v = localStorage.getItem(LAST_SUB_KEY);
     if (v === "wsr" || v === "daily" || v === "lite") return v;
-  } catch {}
+  } catch {
+    // ignore — localStorage may be disabled (private mode / quota)
+  }
   return "daily";
 }
 
@@ -49,7 +51,9 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
   const handleSubChange = (key: string) => {
     const next = key as HomeSubTab;
     setSub(next);
-    try { localStorage.setItem(LAST_SUB_KEY, next); } catch {}
+    try { localStorage.setItem(LAST_SUB_KEY, next); } catch {
+      // ignore
+    }
   };
 
   const liteFresh = wsrLite ? isWsrLiteFresh(wsrLite.date) : false;

@@ -28,7 +28,9 @@ export function SwipeTabs({
           const n = Number(v);
           if (Number.isFinite(n) && n >= 0 && n < tabs.length) return n;
         }
-      } catch {}
+      } catch {
+        // ignore
+      }
     }
     return defaultIndex;
   };
@@ -42,7 +44,9 @@ export function SwipeTabs({
 
   useEffect(() => {
     if (persistKey) {
-      try { localStorage.setItem(persistKey, String(active)); } catch {}
+      try { localStorage.setItem(persistKey, String(active)); } catch {
+        // ignore
+      }
     }
   }, [active, persistKey]);
 

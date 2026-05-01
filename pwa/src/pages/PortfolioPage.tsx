@@ -24,7 +24,9 @@ const PORTFOLIO_MIGRATION_KEY = "casaa_portfolio_subtab_migrated_v2";
       localStorage.setItem(PORTFOLIO_SUB_KEY, "1"); // Sarah was idx 2
     }
     localStorage.setItem(PORTFOLIO_MIGRATION_KEY, "1");
-  } catch {}
+  } catch {
+    // ignore
+  }
 })();
 
 export function PortfolioPage({
