@@ -1,4 +1,4 @@
-name: Macro + Options Refresh — Hourly
+name: Macro Refresh — Hourly
 
 on:
   schedule:
@@ -36,8 +36,3 @@ jobs:
           ARGS=""
           if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
           python scripts/macro_grab.py $ARGS
-      - name: Refresh known option positions
-        run: |
-          ARGS=""
-          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
-          python scripts/options_refresh.py $ARGS

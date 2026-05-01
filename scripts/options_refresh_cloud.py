@@ -47,7 +47,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -58,6 +58,11 @@ sys.path.insert(0, str(ROOT))
 # under their bare ticker; they need .SI suffix on Yahoo). yahoo_grab.py has a
 # wider list — daily_tracker's is narrower because options are US-only.
 SGX_TICKERS: set[str] = {"C6L", "G3B", "ES3"}
+
+# Lookback window for per-position-latest selection. Positions whose most
+# recent row is older than this are dropped (they're either closed-out or
+# stale enough that we shouldn't resurrect them every refresh).
+OPTIONS_LOOKBACK_DAYS: int = 7
 
 
 def _setup_logging() -> logging.Logger:
@@ -207,6 +212,41 @@ def _calc_trend_risk(right: str, strike: float, underlying: float, momentum_5d: 
             return "SAFE"
 
 
+def _latest_per_position(data: list[dict], lookback_days: int = OPTIONS_LOOKBACK_DAYS) -> list[dict]:
+    """
+    Select the most recent row for each unique open position
+    (account, ticker, right, strike, expiry). Drops positions whose latest
+    row is older than `lookback_days` so closed-out positions don't get
+    resurrected forever.
+
+    Replaces the older "latest_date = max(date)" timestamp-bucket logic, which
+    failed when partial snapshots landed (e.g. yfinance hiccup on one account's
+    tickers caused subsequent refreshes to inherit the gap forever — sarah's
+    rows vanished from the options sheet for ~14 hours starting 2026-04-30
+    22:14 UTC).
+    """
+    cutoff = (date.today() - timedelta(days=lookback_days)).isoformat()
+    by_pos: dict[tuple, dict] = {}
+    for row in data:
+        key = (
+            (row.get("account") or "").strip().lower(),
+            (row.get("ticker")  or "").strip().upper(),
+            (row.get("right")   or "").strip().upper(),
+            (row.get("strike")  or "").strip(),
+            (row.get("expiry")  or "").strip(),
+        )
+        if not key[1]:  # missing ticker — skip
+            continue
+        date_field = row.get("date") or ""
+        # Drop rows older than cutoff (compare YYYY-MM-DD prefix)
+        if date_field[:10] < cutoff:
+            continue
+        prev = by_pos.get(key)
+        if prev is None or date_field > (prev.get("date") or ""):
+            by_pos[key] = row
+    return list(by_pos.values())
+
+
 def _calc_assignment_risk(moneyness: str, dte: int, trend_risk: str = "") -> str:
     """Same logic as daily_tracker.calc_assignment_risk — copied verbatim."""
     if moneyness == "ITM":
@@ -256,9 +296,11 @@ def main() -> int:
         logger.info("Options tab has only blank rows — nothing to refresh")
         return 0
 
-    latest_date = max(r.get("date", "") for r in data)
-    latest_options = [r for r in data if r.get("date") == latest_date]
-    logger.info(f"Latest snapshot: {latest_date} ({len(latest_options)} positions)")
+    latest_options = _latest_per_position(data)
+    logger.info(
+        f"Latest open positions: {len(latest_options)} "
+        f"(per-position latest, {OPTIONS_LOOKBACK_DAYS} day lookback)"
+    )
 
     # ─── Collect unique underlying tickers ──────────────────────────────────
     tickers = sorted({r["ticker"] for r in latest_options if r.get("ticker")})
