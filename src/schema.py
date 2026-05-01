@@ -11,8 +11,26 @@ If you change a schema here, update the sheet tab header row to match.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import List
+
+
+# All sheet audit timestamps are SGT-anchored so Mac-written rows
+# (datetime.now() = local SGT) and cloud-written rows (GH Actions UTC)
+# sort lexicographically into a single chronological order. Without this,
+# UTC-13:54 cloud writes appear "before" SGT-21:53 Mac writes in string
+# sort, even though they happened ~minutes apart in real time.
+SGT = timezone(timedelta(hours=8), name="SGT")
+
+
+def now_sgt_iso() -> str:
+    """Current SGT instant as 'YYYY-MM-DDTHHMMSS' for sheet audit suffixes."""
+    return datetime.now(SGT).strftime("%Y-%m-%dT%H%M%S")
+
+
+def now_sgt_date() -> str:
+    """Current SGT calendar date as 'YYYY-MM-DD'."""
+    return datetime.now(SGT).strftime("%Y-%m-%d")
 
 
 def _num(x, ndp: int = 2) -> str:
@@ -26,8 +44,8 @@ def _num(x, ndp: int = 2) -> str:
 
 
 def _ts_suffix(date: str) -> str:
-    """Append HHMMSS to a YYYY-MM-DD date for audit-trail uniqueness on re-run."""
-    return f"{date}T{datetime.now().strftime('%H%M%S')}"
+    """Append HHMMSS (SGT) to a YYYY-MM-DD date for audit-trail uniqueness."""
+    return f"{date}T{datetime.now(SGT).strftime('%H%M%S')}"
 
 
 @dataclass
