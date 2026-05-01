@@ -323,7 +323,11 @@ def main() -> int:
         logger.info(f"  Price: {t:<6} = ${p:.2f}")
 
     # ─── Build refreshed rows ───────────────────────────────────────────────
-    now_ts = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    # SGT timestamp so cloud writes sort chronologically with Mac writes
+    # (Mac's datetime.now() is SGT; GH Actions' is UTC — using a shared
+    # SGT anchor prevents the lexicographic-sort scrambling).
+    from src.schema import now_sgt_iso
+    now_ts = now_sgt_iso()
     refreshed_rows: list[list[str]] = []
     refreshed_count = 0
     skipped_count = 0

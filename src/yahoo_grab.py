@@ -156,7 +156,8 @@ def refresh_account(
         logger.warning(f"No positions found for {account}")
         return
 
-    now_ts = datetime.now().strftime("%Y-%m-%dT%H%M%S")
+    from src.schema import now_sgt_iso
+    now_ts = now_sgt_iso()  # SGT-anchored so cloud + Mac writes sort consistently
     updated_rows: list[list[str]] = []
     total_mkt_val = 0.0
     total_upl = 0.0
