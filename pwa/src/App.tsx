@@ -117,6 +117,8 @@ function Dashboard() {
             optionsDefense={data?.optionsDefense ?? []}
             wheelNextLeg={data?.wheelNextLeg ?? []}
             exitPlans={data?.exitPlans ?? []}
+            casparPositions={data?.casparPositions ?? []}
+            sarahPositions={data?.sarahPositions ?? []}
           />
         );
       case 4:

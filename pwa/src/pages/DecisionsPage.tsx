@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type {
   DecisionRow,
+  PositionRow,
   TechnicalScoreRow,
   OptionsDefenseRow,
   WheelNextLegRow,
@@ -10,6 +11,7 @@ import { Card } from "../cards/Card";
 import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
 import { ActionQueueCard } from "../cards/ActionQueueCard";
 import { StockDetail } from "../components/StockDetail";
+import { daysAgo } from "../lib/dates";
 import {
   Target,
   Clock,
@@ -263,7 +265,167 @@ function CardActions({ ticker }: { ticker: string }) {
   );
 }
 
-function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () => void }) {
+/**
+ * Compact "as of Nd ago" chip — color-coded by staleness so the user can see
+ * at a glance when brain prose has been recycled past its useful life.
+ *   - 0d   → slate (today)
+ *   - 1-3d → muted slate
+ *   - 4-7d → amber (a touch stale)
+ *   - 8d+  → red (clearly stale)
+ */
+function AgeChip({ date }: { date: string }) {
+  const n = daysAgo(date);
+  let label: string;
+  if (n === 0) label = "now";
+  else label = `${n}d`;
+
+  let cls = "bg-white/5 text-slate-500 border-white/5";
+  if (n >= 8) cls = "bg-red-500/10 text-red-400 border-red-500/20";
+  else if (n >= 4) cls = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+
+  return (
+    <span
+      className={`px-1.5 py-0.5 rounded-md border text-[length:var(--t-2xs)] font-medium tabular-nums ${cls}`}
+      aria-label={n === 0 ? "Refreshed today" : `Refreshed ${n} days ago`}
+    >
+      {label}
+    </span>
+  );
+}
+
+/**
+ * Resolve the live current price for a decision ticker.
+ *   - First check positions (held tickers — most authoritative because IBKR-fed)
+ *   - Fall back to technical_scores (catches anything in the daily scan)
+ *   - Returns undefined if the ticker isn't anywhere — overlay then renders nothing.
+ */
+function lookupCurrentPrice(
+  ticker: string,
+  casparPositions: PositionRow[],
+  sarahPositions: PositionRow[],
+  technicalScores: TechnicalScoreRow[],
+): number | undefined {
+  if (!ticker) return undefined;
+  const t = ticker.toUpperCase();
+  const fromPos = (rows: PositionRow[]) => rows.find((r) => r.ticker?.toUpperCase() === t);
+  const cas = fromPos(casparPositions);
+  if (cas) {
+    const n = Number(cas.last);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  const sar = fromPos(sarahPositions);
+  if (sar) {
+    const n = Number(sar.last);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  const tech = technicalScores.find((r) => r.ticker?.toUpperCase() === t);
+  if (tech) {
+    const n = Number(tech.close);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  return undefined;
+}
+
+/**
+ * Live-price overlay rendered below the thesis. Shows current underlying,
+ * delta vs. the brain-emitted entry, and a verdict label so stale prose
+ * ("MDT $83.49 IN $84 entry zone") is contradicted on the same row when
+ * MDT actually trades $78.24.
+ *
+ * If no current price is available, returns null — no empty space.
+ */
+function PriceOverlay({
+  current,
+  decision,
+}: {
+  current: number;
+  decision: DecisionRow;
+}) {
+  const entry = Number(decision.entry);
+  if (!entry || isNaN(entry) || entry <= 0) return null;
+
+  const distancePct = ((current - entry) / entry) * 100;
+  const strategy = decision.strategy ?? "";
+  const isOptionStrategy = OPTIONS_STRATEGIES.includes(strategy);
+  const isTrim = strategy === "TRIM";
+
+  // Implied stop: 5% below entry for shares, 8% for blue-chip-style entries.
+  // (Brain doesn't emit stop directly — these are conservative defaults that
+  // match the 5/8% floors used elsewhere in exit-planning.)
+  const stopPct = decision.bucket?.toLowerCase() === "blue_chip" ? 0.92 : 0.95;
+
+  let color = "text-slate-500";
+  let label = "";
+
+  if (isOptionStrategy) {
+    // For CSP/CC/PMCC the `entry` field is the underlying reference price.
+    // Skip verdict labels — just show now / Δ for context.
+    label = "";
+    color = "text-slate-400";
+  } else if (isTrim) {
+    // TRIM: brain wants to sell at-or-above entry → green when current >= entry.
+    if (current >= entry) {
+      color = "text-emerald-400";
+      label = "ready";
+    } else if (distancePct >= -2) {
+      color = "text-amber-400";
+      label = "near zone";
+    } else {
+      color = "text-slate-500";
+      label = "below";
+    }
+  } else {
+    // BUY_DIP / share entry: brain wants to buy at-or-below entry.
+    if (current <= entry * stopPct) {
+      color = "text-red-400";
+      label = "past stop";
+    } else if (current <= entry) {
+      color = "text-emerald-400";
+      label = "in zone";
+    } else if (distancePct <= 2) {
+      color = "text-amber-400";
+      label = "near zone";
+    } else {
+      color = "text-slate-500";
+      label = "missed";
+    }
+  }
+
+  const sign = distancePct >= 0 ? "+" : "";
+  const entryStr = entry.toFixed(entry < 10 ? 2 : entry < 100 ? 2 : 0);
+
+  return (
+    <div
+      className={`flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[length:var(--t-2xs)] tabular-nums mb-3 ${color}`}
+      style={{ marginTop: -4 }}
+    >
+      <span>
+        now <span className="font-semibold">${current.toFixed(2)}</span>
+      </span>
+      <span className="text-slate-700">·</span>
+      <span>
+        {sign}
+        {distancePct.toFixed(1)}% vs entry ${entryStr}
+      </span>
+      {label && (
+        <>
+          <span className="text-slate-700">·</span>
+          <span className="font-medium">{label}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DecisionCard({
+  decision,
+  onTap,
+  currentPrice,
+}: {
+  decision: DecisionRow;
+  onTap: () => void;
+  currentPrice: number | undefined;
+}) {
   const status = STATUS_CONFIG[decision.status?.toLowerCase()] ?? DEFAULT_STATUS;
   const Icon = status.icon;
   const conv = Math.round(Number(decision.conv) || 0);
@@ -297,7 +459,8 @@ function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () =>
             <div className="text-[length:var(--t-2xs)] text-slate-500 uppercase">{decision.account || "—"}</div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <AgeChip date={decision.date} />
           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${status.bg}`}>
             <Icon size={12} className={status.text} />
             <span className={`text-[length:var(--t-xs)] font-semibold ${status.text}`}>{status.label}</span>
@@ -308,6 +471,9 @@ function DecisionCard({ decision, onTap }: { decision: DecisionRow; onTap: () =>
 
       {/* Thesis */}
       <p className="text-[length:var(--t-sm)] text-slate-300 leading-relaxed mb-3">{decision.thesis_1liner}</p>
+
+      {/* Live-price overlay — surfaces ground truth even when brain prose lags. */}
+      {currentPrice !== undefined && <PriceOverlay current={currentPrice} decision={decision} />}
 
       {/* Options-spec sub-row (only for option strategies) */}
       {showOptionsSpec && <OptionsSpecRow decision={decision} />}
@@ -397,6 +563,8 @@ export function DecisionsPage({
   optionsDefense,
   wheelNextLeg,
   exitPlans,
+  casparPositions,
+  sarahPositions,
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
@@ -404,10 +572,21 @@ export function DecisionsPage({
   optionsDefense?: OptionsDefenseRow[];
   wheelNextLeg?: WheelNextLegRow[];
   exitPlans?: ExitPlanRow[];
+  casparPositions?: PositionRow[];
+  sarahPositions?: PositionRow[];
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const techByTicker = new Map<string, TechnicalScoreRow>();
   for (const t of technicalScores ?? []) techByTicker.set(t.ticker, t);
+
+  // Resolve live price once per row (positions first, scores fallback).
+  const priceFor = (ticker: string) =>
+    lookupCurrentPrice(
+      ticker,
+      casparPositions ?? [],
+      sarahPositions ?? [],
+      technicalScores ?? [],
+    );
 
   // If we have no WSR decisions, still show BuyRecommendationsCard if we have scores
   const showBuyRecs = (technicalScores?.length ?? 0) > 0;
@@ -487,7 +666,11 @@ export function DecisionsPage({
                 <SectionHeader label="Active Options" count={activeOptions.length} />
                 {activeOptions.map((d, i) => (
                   <div key={`opt-${d.ticker}-${d.date}-${i}`}>
-                    <DecisionCard decision={d} onTap={() => setSelected(d)} />
+                    <DecisionCard
+                      decision={d}
+                      onTap={() => setSelected(d)}
+                      currentPrice={priceFor(d.ticker)}
+                    />
                   </div>
                 ))}
               </div>
@@ -499,7 +682,11 @@ export function DecisionsPage({
                 <SectionHeader label="Share Decisions" count={shareDecisionsAll.length} />
                 {shareDecisionsAll.map((d, i) => (
                   <div key={`share-${d.ticker}-${d.date}-${i}`}>
-                    <DecisionCard decision={d} onTap={() => setSelected(d)} />
+                    <DecisionCard
+                      decision={d}
+                      onTap={() => setSelected(d)}
+                      currentPrice={priceFor(d.ticker)}
+                    />
                   </div>
                 ))}
               </div>
