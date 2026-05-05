@@ -209,6 +209,30 @@ use `""` (empty string) for `right` and `expiry`, and 0 for `strike` /
 premium / delta / yield / breakeven / iv_rank. Always populate ALL
 fields — use 0 / "" for inapplicable ones, never omit a key.
 
+**🔴 PRICE-ANCHOR RULE (non-negotiable)**: Every `thesis_1liner` you
+emit MUST reference the **CURRENT** underlying price, not last week's.
+Read it from `positions_caspar` / `positions_sarah` `last` column for
+held tickers, or from `scan_results` / `technical_scores` `close` for
+unheld watchlist tickers. **DO NOT copy thesis prose verbatim from
+the previous week's row.** Re-anchor the dollar reference each run.
+
+If the current price has moved by >2% vs your prior thesis:
+- Update the in-thesis price reference AND re-evaluate viability.
+- If price moved past the implied stop level (typically entry × 0.95
+  for shares; entry × 0.92 for blue-chip), flip `status` to `killed`
+  with a reason in the thesis ("stop breached at $X — original entry
+  $Y, was $Z one week ago").
+- If price moved further INTO the entry zone (lower is better for a
+  BUY_DIP, up to stop), flag thesis as STILL VALID and stronger.
+- If price ran past entry (upside breakout), flip `status` to
+  `watching` or `killed` per the rule docs.
+
+Each Sunday, you are NOT just refreshing the same theses — you are
+RE-COMMITTING each one at today's price, OR flagging which prices have
+invalidated which theses. The PWA Decisions tab also shows a live-price
+overlay and "as of N days ago" chip per row, so users can see staleness
+even if your prose lags. But the prose should not lag.
+
 **Empty week:** if you have zero actionable entries this week, SKIP §6c
 entirely (do not invoke push_decisions.py with an empty `decisions[]`
 array — the script will error and the run reports a false negative).

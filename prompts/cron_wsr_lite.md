@@ -211,6 +211,29 @@ you're refreshing for mid-week.
 `expiry`, and 0 for `strike` / premium / delta / yield / breakeven /
 iv_rank. Always populate ALL fields — never omit a key.
 
+**🔴 PRICE-ANCHOR RULE (non-negotiable)**: Every `thesis_1liner` you
+emit MUST reference the **CURRENT** underlying price, not last week's.
+Read it from `positions_caspar` / `positions_sarah` `last` column for
+held tickers, or from `scan_results` / `technical_scores` `close` for
+unheld watchlist tickers. **DO NOT copy thesis prose verbatim from
+the previous week's row.** Re-anchor the dollar reference each run.
+
+If the current price has moved by >2% vs your last thesis:
+- Update the in-thesis price reference AND re-evaluate viability.
+- If price moved past the implied stop level (typically entry × 0.95
+  for shares; entry × 0.92 for blue-chip), flip `status` to `killed`
+  with a reason in the thesis ("stop breached at $X — original entry
+  $Y, was $Z").
+- If price moved further INTO the entry zone (i.e. for a BUY_DIP, lower
+  is better up to the stop), flag thesis as STILL VALID and stronger
+  (better entry now).
+- If price moved AWAY from the entry zone (e.g. ran past entry to the
+  upside), flip `status` to `watching` or `killed` per the rule docs.
+
+The cleanest mental model: every Wed/Fri, you are NOT just refreshing
+the same thesis — you are RE-COMMITTING to it at today's price, OR
+flagging that today's price has invalidated it.
+
 **Empty week:** if you have zero actionable entries (no held options,
 no new ideas), SKIP §5c entirely (do not invoke push_decisions.py with
 an empty `decisions[]` array — the script will error).
