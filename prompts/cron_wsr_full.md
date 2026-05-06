@@ -140,6 +140,74 @@ The vcp-screener feeds Minervini-style breakout candidates. canslim-screener fee
 - **Parabolic short** (`parabolic-short-trade-planner`): vertical move > 50% in 30 days, RSI > 80, exhaustion candle → DO NOT propose as a long, but flag in `redteam_summary` if you see this pattern in a name we hold
 - **Position sizer**: when proposing a new entry, reference your sizing logic ("4% of NLV at $X stop = N shares")
 
+**Defensive Expansion (REQUIRED — regardless of regime):**
+
+Even in CASH_PRIORITY / REDUCE_ONLY regimes, the brain MUST propose a
+minimum of 3-5 DEFENSIVE expansion ideas. These are positions APPROPRIATE
+FOR the current regime — not "ignore the regime and add risk." Examples
+that fit a defensive regime:
+
+- **Protective puts** on held positions (long puts on TQQQ, SSO if
+  the user holds them; AAPL/AMD if held)
+- **Gold/silver** — GLD, SLV, GDX as Concentration-regime hedges
+- **Defensive sector ETFs** — XLP, XLV, XLU
+- **Volatility products** — VIXM (NOT VIX spot), small allocation
+- **Quality dividend names** — KO, JNJ, PG at oversold RSI
+- **CSPs on quality at deep OTM** — collect premium without commitment
+
+Each defensive expansion proposal MUST include:
+- Why it fits the current regime (cite breadth/distribution_day/macro
+  signals explicitly)
+- Position sizing within exposure ceiling (suggest ≤1% NLV for new
+  defensive entries when exposure is constrained)
+- Specific entry trigger and stop level
+
+If you cannot find 3 defensive expansions, you must explicitly explain
+WHY (e.g., "all defensive sectors are themselves overbought").
+
+**Aggressive Watch Lane (parallel pipeline):**
+
+Ideas that FAIL the current regime gates but are otherwise high-quality
+should not be silently dropped. Capture them in an "aggressive watch"
+queue with explicit re-entry triggers. Emit them as decision_queue rows
+with `status: "watching"` and a clear trigger condition in the thesis.
+
+Format:
+```
+"AMZN BUY_DIP @ $215 — currently failing breadth gate (33/100 < 50).
+Re-evaluate when breadth_score ≥ 50 AND (daily TV ≥ BUY OR distribution
+days drop below SEVERE). Current setup: post-earnings flag, 50% retrace
+of November rally."
+```
+
+Per-WSR run: at least 2-3 aggressive watch entries. These represent
+"things we'd act on in a different regime" — preserves the brain's
+creative output and gives the user a list to monitor for regime change.
+
+Aggressive watch entries are EXPLICITLY DIFFERENT from your defensive
+expansions — they fail the current gate. The PWA Decisions tab will
+show them in the watching section with the trigger explicit.
+
+**Minimum Idea Quota (per-WSR-run REQUIRED):**
+
+Each WSR Full run MUST produce:
+- ≥4 NEW decision rows (status: pending OR watching) NOT in the existing
+  queue (i.e. fresh additions, not refreshes of existing positions)
+- Of those 4+: ≥1 new CSP or CC candidate (from options_yield_candidates
+  if available, else from your own analysis)
+- Of those 4+: ≥1 defensive expansion idea (per the rule above)
+- Of those 4+: ≥1 aggressive watch entry (per the rule above)
+
+If the brain genuinely cannot meet the quota, it must include in
+`redteam_summary` an explicit explanation of WHY no fresh ideas are
+available — citing specific gates (breadth, exposure, TV signals)
+that blocked each candidate considered.
+
+This rule prevents the brain from defaulting to "refresh existing
+positions only" mode. Even in tight regimes, fresh ideas should
+flow — they just go to the right queue (defensive expansion, watching
+with trigger, etc.).
+
 **Week lookback:** Each daily brief contributed something. What were the events Mon-Fri? What positions were affected?
 
 **Thesis drift flags:** For each position with a stated thesis, did this week confirm or break it? Flag any thesis still active but unresolved.
@@ -282,6 +350,16 @@ without one clobbering the other — strategy + strike differentiate them.
 not yet in zone), `filled` (already executed), `killed` (thesis broken),
 `expired` (DTE elapsed without action).
 
+The unified queue now mixes 4 row types (use `status` to differentiate):
+- `pending` — actionable this week, fits exposure budget
+- `watching` — aggressive watch (trigger condition in thesis) OR
+  share entry awaiting price (existing meaning)
+- `filled` — held position, brain's mid-period thesis update
+- `killed` / `expired` — historical; don't re-emit unless re-validating
+
+Defensive expansions go in `pending` if they fit ≤1% NLV cap, or
+`watching` if exposure is too tight even for that.
+
 **Strategy values:** `BUY_DIP` (share entry on pullback), `TRIM` (share
 exit), `CSP`, `CC`, `PMCC`, `LONG_CALL`, `LONG_PUT`. For share entries:
 use `""` (empty string) for `right` and `expiry`, and 0 for `strike` /
@@ -339,14 +417,28 @@ If you find yourself drafting a CC on SCHD / SPY / VOO / QQQ / VTI /
 AAPL / MSFT etc., STOP and revise. Suggest CSP instead, OR no options
 trade and accumulation only.
 
-**🔴 EXPOSURE CONSTRAINT RULE (non-negotiable):**
+**🔴 EXPOSURE CONSTRAINT (graduated):**
 
 Read the latest `exposure_posture` row before proposing any decisions.
 
-- If `recommendation == "CASH_PRIORITY"`: do NOT propose any new BUY_DIP / TRIM-up / CSP / CC entries with `status: pending`. All new candidates must be `status: watching` with explicit re-entry condition (e.g. "watching for posture ≥ NEW_ENTRY_ALLOWED AND TICKER ≤ entry").
-- If `recommendation == "REDUCE_ONLY"`: do NOT propose new BUY_DIPs. You MAY propose TRIM (status pending) on existing positions over target. CSP/CC defenses on held positions still allowed.
-- If `recommendation == "NEW_ENTRY_ALLOWED"`: standard rules apply.
-- Always cite the exposure ceiling in your `thesis_1liner` for any pending row, e.g. "ceiling 65%, headroom +$1,200 — fits within REDUCE_ONLY for trim".
+- `CASH_PRIORITY` → No `pending` BUY_DIPs/CSPs that ADD net long
+  exposure. EXCEPTION: defensive positions (puts, gold, defensive
+  sectors, volatility hedges) capped at ≤1% NLV per position with
+  explicit hedge thesis.
+- `REDUCE_ONLY` → Maximum 2 new `pending` entries per WSR run; both
+  must be high-conviction (conv ≥ 4) AND high quality (passes TV
+  multi-TF confluence).
+- `NEW_ENTRY_ALLOWED` → No cap, but exposure_ceiling must be
+  respected when sizing.
+
+Aggressive watch entries (status: watching) are NOT subject to the
+exposure constraint — they don't allocate capital until triggered.
+This is the safety valve that lets creative output flow even when
+exposure is tight.
+
+Always cite the exposure ceiling in your `thesis_1liner` for any
+pending row, e.g. "ceiling 65%, headroom +$1,200 — fits within
+REDUCE_ONLY for trim".
 
 **PMCC nudge:** If a position holds (or could buy) a deep-ITM 6+ month
 call on a quality name with low IV rank, consider proposing a PMCC over
