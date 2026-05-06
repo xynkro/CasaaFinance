@@ -1,0 +1,54 @@
+name: TradingView Signals — Daily
+
+# Daily TradingView 26-indicator consensus pull. Hits TV's PUBLIC scanner
+# endpoint (no API key) for our active universe — positions, options,
+# decision_queue, scan_results, screen_candidates — across BOTH 1d and 1W
+# intervals. One row per (ticker, interval) appended to `tv_signals`.
+#
+# The brain (WSR Full + Lite) reads these rows for multi-timeframe
+# confluence checks: TF divergence flags, RSI extremes, BUY_DIP gating.
+#
+# No FMP_API_KEY needed. No claude-code action needed. Pure Python.
+
+on:
+  schedule:
+    # 22:30 UTC = 06:30 SGT next day = 30 min after regime-signals.yml.
+    # Mon-Fri only — weekend US prices don't change so we'd write duplicate rows.
+    - cron: "30 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tv-signals
+  cancel-in-progress: true
+
+jobs:
+  signals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Run tv_signals_run
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/tv_signals_run.py $ARGS

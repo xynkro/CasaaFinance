@@ -93,6 +93,11 @@ case "${1:-help}" in
     gh workflow run screen-candidates.yml --repo "$GH_REPO"
     ;;
 
+  tv)
+    echo "→ tv-signals (cloud cron, manual trigger — daily TV 26-indicator pull)"
+    gh workflow run tv-signals.yml --repo "$GH_REPO"
+    ;;
+
   exposure)
     # Always runs locally — needs no FMP key (works off whatever's in the
     # `regime_signals` sheet plus current snapshot rows).
@@ -165,6 +170,7 @@ REGIME / EXPOSURE / SCREEN
   regime          cloud regime-signals (breadth + ftd + dist-day + macro)
   exposure        local exposure_posture (caspar + sarah headroom)
   screen          cloud screen-candidates (vcp + canslim, FMP key required)
+  tv              cloud tv-signals (TradingView 26-indicator consensus, 1d + 1W)
 
 BRAIN
   brief           daily brief (cloud, Opus)

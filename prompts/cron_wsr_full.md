@@ -46,6 +46,9 @@ ss = sh._open_sheet(client)
 #     bias, participation, recommendation, confidence)
 # - screen_candidates (LAST 30 DAYS, BOTH SOURCES — vcp + canslim
 #     weekly fresh-blood ticker pool)
+# - tv_signals (LATEST per ticker, both 1d and 1W intervals — TradingView's
+#     26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL plus
+#     all underlying indicator values)
 ```
 
 ### 3. Web research — week's macro & news
@@ -94,6 +97,31 @@ Read the latest `regime_signals` rows for all sources. Use them as PRIMARY regim
 If signals conflict, default to the more conservative interpretation. Do not override quant signals with vibe.
 
 Confirm or change the regime. List evidence for and against. Cite the four scores explicitly in your reasoning.
+
+**TradingView consensus (multi-timeframe confluence check):**
+
+For each held position AND each pending decision_queue entry, read the
+latest tv_signals rows on 1d and 1W intervals. Cite explicitly in the
+thesis when:
+- Daily and weekly DISAGREE (one BUY, other SELL) → flag as "TF divergence"
+  in red-team flags. Don't propose new entries on TF-divergent names.
+- Daily AND weekly both STRONG_BUY → consensus tailwind, fine to add.
+- Daily SELL on a position we hold → flag in defense, consider trim.
+- RSI > 75 on weekly + daily → overbought; flag in red-team.
+- RSI < 30 on weekly + daily AND we hold a CSP → assignment risk rising.
+
+Do NOT mechanically follow TV recommendation — it's one input among
+many. Use it as a sanity-check on your own thesis.
+
+For NEW BUY_DIP candidates from screen_candidates, REQUIRE:
+  - daily TV recommendation in {BUY, STRONG_BUY}
+  - weekly TV recommendation NOT in {SELL, STRONG_SELL}
+If neither holds, demote to status=watching with note "TV signal
+weak — wait for confluence."
+
+For swing-trading entry/exit pattern recognition, see `prompts/swing_playbook.md`.
+Cite the named pattern in your thesis when applicable (e.g. "Pullback to 20EMA",
+"VCP", "Liquidity sweep", "Breakout retest").
 
 **Screen candidates (fresh-blood ingestion):**
 

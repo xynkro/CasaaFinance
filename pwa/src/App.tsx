@@ -122,6 +122,7 @@ function Dashboard() {
             exposurePosture={data?.exposurePosture ?? null}
             casparSnapshot={data?.caspar ?? null}
             sarahSnapshot={data?.sarah ?? null}
+            tvSignals={data?.tvSignals}
           />
         );
       case 4:

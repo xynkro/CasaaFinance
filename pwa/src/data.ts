@@ -30,6 +30,10 @@ const GIDS: Record<string, string> = {
   regime_signals: "0",
   exposure_posture: "0",
   screen_candidates: "0",
+  // TradingView 26-indicator consensus, populated daily by tv-signals.yml.
+  // One row per (ticker, interval) — both 1d and 1W. The DecisionCard reads
+  // the latest 1d + 1W row per ticker for the consensus chip.
+  tv_signals: "1954107259",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -405,6 +409,76 @@ export interface ScreenCandidateRow {
   rationale: string;
 }
 
+/**
+ * TradingView 26-indicator consensus per (ticker, interval).
+ * Written daily by `scripts/tv_signals_run.py` for both 1d and 1W
+ * intervals. The DecisionCard renders a small chip showing the
+ * recommendation for both timeframes; the brain uses the same data
+ * server-side for multi-timeframe confluence checks.
+ */
+export interface TvSignalRow {
+  date: string;
+  ticker: string;
+  exchange: string;
+  interval: string;             // "1d" | "1W" | "1M"
+  recommendation: string;       // STRONG_BUY | BUY | NEUTRAL | SELL | STRONG_SELL | "ERROR: ..."
+  buy_count: string;
+  sell_count: string;
+  neutral_count: string;
+  score_all: string;            // -1.0 to +1.0
+  score_ma: string;
+  score_other: string;
+  close: string;
+  volume: string;
+  change_pct: string;
+  rsi: string;
+  macd: string;
+  macd_signal: string;
+  ema20: string;
+  ema50: string;
+  ema200: string;
+  adx: string;
+  bb_upper: string;
+  bb_lower: string;
+  stoch_k: string;
+  stoch_d: string;
+  cci20: string;
+}
+
+/** Latest 1d + 1W TV signal for one ticker. */
+export interface TvConsensus {
+  daily?: TvSignalRow;
+  weekly?: TvSignalRow;
+}
+
+/**
+ * Build a per-ticker map: ticker -> { daily, weekly } using only the LATEST
+ * row per (ticker, interval). The cron writes one row per ticker per day
+ * per interval, so the latest row is the source of truth.
+ */
+export function lookupTvConsensusMap(rows: TvSignalRow[]): Map<string, TvConsensus> {
+  const out = new Map<string, TvConsensus>();
+  if (!rows.length) return out;
+  // Group by (ticker, interval), keeping the row with the largest date.
+  const latest = new Map<string, TvSignalRow>();
+  for (const r of rows) {
+    if (!r.ticker || !r.interval) continue;
+    const key = `${r.ticker.toUpperCase()}|${r.interval}`;
+    const prev = latest.get(key);
+    if (!prev || (r.date ?? "") > (prev.date ?? "")) {
+      latest.set(key, r);
+    }
+  }
+  for (const [key, row] of latest) {
+    const [ticker, interval] = key.split("|");
+    if (!out.has(ticker)) out.set(ticker, {});
+    const entry = out.get(ticker)!;
+    if (interval === "1d") entry.daily = row;
+    else if (interval === "1W") entry.weekly = row;
+  }
+  return out;
+}
+
 // ---------- aggregate fetch ----------
 
 export interface DashboardData {
@@ -436,6 +510,8 @@ export interface DashboardData {
   regimeSignalsLatest: Record<string, RegimeSignalRow>;  // keyed by source
   exposurePosture: ExposurePostureRow | null;
   screenCandidates: ScreenCandidateRow[];                // last 30d, both sources
+  // TradingView consensus chip data — keyed by upper-cased ticker.
+  tvSignals: Map<string, TvConsensus>;
   error: string | null;
 }
 
@@ -466,7 +542,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, scanRows, optRecRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows, regimeRows, postureRows, screenRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, scanRows, optRecRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows, regimeRows, postureRows, screenRows, tvRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
@@ -490,6 +566,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<RegimeSignalRow>("regime_signals").catch(() => [] as RegimeSignalRow[]),
         fetchTab<ExposurePostureRow>("exposure_posture").catch(() => [] as ExposurePostureRow[]),
         fetchTab<ScreenCandidateRow>("screen_candidates").catch(() => [] as ScreenCandidateRow[]),
+        // TradingView 26-indicator consensus (1d + 1W per ticker).
+        fetchTab<TvSignalRow>("tv_signals").catch(() => [] as TvSignalRow[]),
       ]);
     const casparRows = normalizeSnapshot(casparRaw);
     const sarahRows = normalizeSnapshot(sarahRaw);
@@ -548,6 +626,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       regimeSignalsLatest,
       exposurePosture: latest(postureRows),
       screenCandidates: sortByDate(screenRows),
+      tvSignals: lookupTvConsensusMap(tvRows),
       error: null,
     };
   } catch (e) {
@@ -562,6 +641,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       regimeSignalsLatest: {},
       exposurePosture: null,
       screenCandidates: [],
+      tvSignals: new Map(),
       error: String(e),
     };
   }

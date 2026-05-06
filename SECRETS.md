@@ -94,6 +94,38 @@ After this, the next scheduled `regime-signals` run will populate `ftd`,
 
 ---
 
+## TradingView MCP integration
+
+The brain pipeline reads a daily TradingView 26-indicator consensus per
+ticker × interval. No API key needed — `scripts/tv_signals_run.py` hits
+the public scanner endpoint at `scanner.tradingview.com/america/scan`
+which accepts batches of 20 symbols per call across 1d and 1W intervals.
+
+- **What it writes:** one row per (ticker, interval) to the `tv_signals`
+  sheet tab. Universe = active book (positions, options, decision_queue
+  last 30d, scan_results last 7d, screen_candidates last 30d).
+- **Schedule:** `tv-signals.yml`, daily 22:30 UTC = 06:30 SGT (Mon-Fri).
+  Runs 30 min after `regime-signals.yml` so the WSR brain finds both
+  signals fresh when it wakes up.
+- **Throughput:** ~28 active tickers × 2 intervals = 56 rows in ~10s.
+  Rate-limit handling: 0.5s sleep between batches; on HTTP 429 sleep
+  60s and retry once. The scanner endpoint is much more lenient than
+  the per-symbol library API which gets blocked aggressively.
+- **Cost:** $0 (public endpoint, no key, no Claude action).
+- **Manual trigger:** `casaa tv` from anywhere on the Mac.
+
+The brain prompts (`prompts/cron_wsr_full.md`, `cron_wsr_lite.md`) have
+been updated with explicit multi-timeframe confluence rules — TF
+divergence flags, RSI extremes, and BUY_DIP gating that requires daily
+TV in {BUY, STRONG_BUY} and weekly NOT in {SELL, STRONG_SELL}.
+
+For pattern recognition vocabulary, see `prompts/swing_playbook.md` —
+seven distilled swing-trading patterns the brain cites by name in
+thesis prose (VCP, Pullback to 20EMA, Liquidity Sweep, Anchored VWAP,
+Breakout Retest, Range Filter, MTF Confluence).
+
+---
+
 ## Verify the secrets work
 
 Once all 4 secrets are added, manually trigger any of the simple workflows:
@@ -124,6 +156,7 @@ files for UTC values.
 | `poll-drive-wsr.yml` | :13, :43 every hour | Pick up any .md you upload manually to Drive |
 | `regime-signals.yml` | Mon-Fri 22:00 UTC (06:00 SGT next day) | Regime indicators (breadth + ftd + dist-day + macro) → exposure posture |
 | `screen-candidates.yml` | Sun 11:00 UTC (19:00 SGT) | Weekly fresh tickers (vcp + canslim) before WSR Full |
+| `tv-signals.yml` | Mon-Fri 22:30 UTC (06:30 SGT next day) | TradingView 26-indicator consensus (1d + 1W) for active universe |
 
 ---
 

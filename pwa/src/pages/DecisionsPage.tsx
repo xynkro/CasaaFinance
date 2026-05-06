@@ -8,6 +8,7 @@ import type {
   OptionsDefenseRow,
   WheelNextLegRow,
   ExitPlanRow,
+  TvConsensus,
 } from "../data";
 import { Card } from "../cards/Card";
 import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
@@ -25,6 +26,7 @@ import {
   Copy,
   Check,
   ExternalLink,
+  AlertCircle,
 } from "lucide-react";
 
 const OPTIONS_STRATEGIES = ["CSP", "CC", "PMCC", "LONG_CALL", "LONG_PUT"];
@@ -420,14 +422,106 @@ function PriceOverlay({
   );
 }
 
+/**
+ * TradingView 26-indicator consensus chip — renders 1d + 1W recommendations
+ * side-by-side with color-coding. Amber warning icon when timeframes
+ * disagree directionally (one BUY-side, other SELL-side).
+ *
+ * Returns null if neither timeframe has data → no empty space.
+ */
+function TvConsensusChip({ consensus }: { consensus: TvConsensus | undefined }) {
+  if (!consensus || (!consensus.daily && !consensus.weekly)) return null;
+
+  // Color-mapping per recommendation label.
+  const recColor = (rec: string | undefined): string => {
+    const r = (rec ?? "").toUpperCase();
+    if (r === "STRONG_BUY" || r === "BUY") return "text-emerald-400";
+    if (r === "STRONG_SELL" || r === "SELL") return "text-red-400";
+    if (r === "NEUTRAL") return "text-slate-400";
+    return "text-slate-600"; // ERROR / unknown
+  };
+
+  // Side classification for divergence detection.
+  const recSide = (rec: string | undefined): "buy" | "sell" | "neutral" | "unknown" => {
+    const r = (rec ?? "").toUpperCase();
+    if (r === "STRONG_BUY" || r === "BUY") return "buy";
+    if (r === "STRONG_SELL" || r === "SELL") return "sell";
+    if (r === "NEUTRAL") return "neutral";
+    return "unknown";
+  };
+
+  // Compact label rendering — drop the STRONG_ prefix to save space.
+  const fmtRec = (rec: string | undefined): string => {
+    const r = (rec ?? "").toUpperCase();
+    if (r === "STRONG_BUY") return "STR BUY";
+    if (r === "STRONG_SELL") return "STR SELL";
+    if (!r || r.startsWith("ERROR")) return "—";
+    return r;
+  };
+
+  const dailyRec = consensus.daily?.recommendation;
+  const weeklyRec = consensus.weekly?.recommendation;
+  const dailySide = recSide(dailyRec);
+  const weeklySide = recSide(weeklyRec);
+
+  // TF divergence: one side BUY, the other SELL.
+  const isDivergent =
+    (dailySide === "buy" && weeklySide === "sell") ||
+    (dailySide === "sell" && weeklySide === "buy");
+
+  // Counts (approximated server-side; rendered as "buy/26").
+  const dailyBuy = Number(consensus.daily?.buy_count ?? 0);
+  const weeklyBuy = Number(consensus.weekly?.buy_count ?? 0);
+
+  return (
+    <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mb-3 text-[length:var(--t-2xs)]">
+      <span className="text-slate-600 font-semibold uppercase tracking-wider">TV</span>
+      {consensus.daily && (
+        <span className="flex items-center gap-1">
+          <span className="text-slate-600">1d</span>
+          <span className={`font-semibold tabular-nums ${recColor(dailyRec)}`}>
+            {fmtRec(dailyRec)}
+          </span>
+          {!isNaN(dailyBuy) && dailyBuy > 0 && (
+            <span className="text-slate-600 tabular-nums">{dailyBuy}/26</span>
+          )}
+        </span>
+      )}
+      {consensus.weekly && (
+        <span className="flex items-center gap-1">
+          <span className="text-slate-700">·</span>
+          <span className="text-slate-600">1W</span>
+          <span className={`font-semibold tabular-nums ${recColor(weeklyRec)}`}>
+            {fmtRec(weeklyRec)}
+          </span>
+          {!isNaN(weeklyBuy) && weeklyBuy > 0 && (
+            <span className="text-slate-600 tabular-nums">{weeklyBuy}/26</span>
+          )}
+        </span>
+      )}
+      {isDivergent && (
+        <span
+          className="flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20"
+          title="Timeframe divergence: daily and weekly disagree"
+        >
+          <AlertCircle size={10} />
+          <span className="font-medium">TF div</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function DecisionCard({
   decision,
   onTap,
   currentPrice,
+  tvConsensus,
 }: {
   decision: DecisionRow;
   onTap: () => void;
   currentPrice: number | undefined;
+  tvConsensus: TvConsensus | undefined;
 }) {
   const status = STATUS_CONFIG[decision.status?.toLowerCase()] ?? DEFAULT_STATUS;
   const Icon = status.icon;
@@ -477,6 +571,10 @@ function DecisionCard({
 
       {/* Live-price overlay — surfaces ground truth even when brain prose lags. */}
       {currentPrice !== undefined && <PriceOverlay current={currentPrice} decision={decision} />}
+
+      {/* TradingView 26-indicator consensus (1d + 1W) — external sanity-check
+          on the brain's thesis. Amber warning if timeframes disagree. */}
+      <TvConsensusChip consensus={tvConsensus} />
 
       {/* Options-spec sub-row (only for option strategies) */}
       {showOptionsSpec && <OptionsSpecRow decision={decision} />}
@@ -571,6 +669,7 @@ export function DecisionsPage({
   exposurePosture,
   casparSnapshot,
   sarahSnapshot,
+  tvSignals,
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
@@ -583,6 +682,7 @@ export function DecisionsPage({
   exposurePosture?: ExposurePostureRow | null;
   casparSnapshot?: SnapshotRow | null;
   sarahSnapshot?: SnapshotRow | null;
+  tvSignals?: Map<string, TvConsensus>;
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const techByTicker = new Map<string, TechnicalScoreRow>();
@@ -596,6 +696,12 @@ export function DecisionsPage({
       sarahPositions ?? [],
       technicalScores ?? [],
     );
+
+  // TV consensus lookup — case-insensitive on ticker.
+  const tvFor = (ticker: string): TvConsensus | undefined => {
+    if (!tvSignals || !ticker) return undefined;
+    return tvSignals.get(ticker.toUpperCase());
+  };
 
   // If we have no WSR decisions, still show BuyRecommendationsCard if we have scores
   const showBuyRecs = (technicalScores?.length ?? 0) > 0;
@@ -690,6 +796,7 @@ export function DecisionsPage({
                       decision={d}
                       onTap={() => setSelected(d)}
                       currentPrice={priceFor(d.ticker)}
+                      tvConsensus={tvFor(d.ticker)}
                     />
                   </div>
                 ))}
@@ -706,6 +813,7 @@ export function DecisionsPage({
                       decision={d}
                       onTap={() => setSelected(d)}
                       currentPrice={priceFor(d.ticker)}
+                      tvConsensus={tvFor(d.ticker)}
                     />
                   </div>
                 ))}

@@ -733,6 +733,102 @@ class ScreenCandidateRow:
 
 
 @dataclass
+class TvSignalRow:
+    """
+    Daily TradingView 26-indicator consensus per (ticker, interval).
+    Written by `scripts/tv_signals_run.py`. Two rows per active ticker
+    each run — one for `interval=1d`, one for `interval=1W`.
+
+    The brain uses these as a multi-timeframe confluence check on its own
+    thesis. See `prompts/cron_wsr_full.md` and `cron_wsr_lite.md` for the
+    decision rules (TF divergence flag, RSI extremes, BUY_DIP gating).
+
+    The PWA Decisions tab also surfaces a small TV consensus chip per
+    DecisionCard so the user can see the external sanity-check at a
+    glance.
+
+    Source data: TradingView's public scanner endpoint
+    (`https://scanner.tradingview.com/america/scan`). No API key required.
+    The endpoint returns Recommend.All / Recommend.MA / Recommend.Other
+    in [-1, +1] which we map to STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL
+    using the same thresholds as the `tradingview-ta` library:
+        score >  +0.5 -> STRONG_BUY
+        score >  +0.1 -> BUY
+        score >= -0.1 -> NEUTRAL
+        score >= -0.5 -> SELL
+        score <  -0.5 -> STRONG_SELL
+
+    Buy/sell/neutral counts: the scanner endpoint does NOT break out the
+    individual classifications across the 26 indicators (12 MAs + 14
+    oscillators) — that requires a per-symbol call which is rate-limited.
+    We approximate from the MA + Other scores: each MA contributes BUY or
+    SELL only (no neutrals), 15 MAs total (1 of the indicators is
+    Pivot.M.Classic which doesn't classify, and Ichimoku/VWMA/HullMA9 use
+    Rec.* values), so MA buy_count = round(15 * (1 + ma_score) / 2);
+    each oscillator can be BUY/SELL/NEUTRAL, 11 oscillators, and we
+    approximate similarly. Approximations are within ~1-2 of TV's UI
+    display and good enough for confluence checks.
+
+    `recommendation` is the LABEL on the All score; the score itself is
+    written too (in `score_all`) for finer-grained brain logic.
+    """
+    TAB_NAME = "tv_signals"
+    HEADERS = [
+        "date", "ticker", "exchange",          # identity
+        "interval",                            # "1d" | "1W" | "1M"
+        "recommendation",                      # STRONG_BUY | BUY | NEUTRAL | SELL | STRONG_SELL | ERROR: ...
+        "buy_count", "sell_count", "neutral_count",
+        "score_all", "score_ma", "score_other",
+        "close", "volume", "change_pct",
+        "rsi", "macd", "macd_signal",
+        "ema20", "ema50", "ema200",
+        "adx", "bb_upper", "bb_lower",
+        "stoch_k", "stoch_d", "cci20",
+    ]
+
+    date: str
+    ticker: str
+    exchange: str           # "NASDAQ" | "NYSE" | "AMEX" | "" (errored)
+    interval: str           # "1d" | "1W" | "1M"
+    recommendation: str     # see class docstring; or "ERROR: <reason>"
+    buy_count: int          # approximated, see class docstring
+    sell_count: int
+    neutral_count: int
+    score_all: float        # -1.0 to +1.0 (raw Recommend.All)
+    score_ma: float
+    score_other: float
+    close: float
+    volume: float
+    change_pct: float
+    rsi: float
+    macd: float
+    macd_signal: float
+    ema20: float
+    ema50: float
+    ema200: float
+    adx: float
+    bb_upper: float
+    bb_lower: float
+    stoch_k: float
+    stoch_d: float
+    cci20: float
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.ticker, self.exchange, self.interval,
+            self.recommendation,
+            str(self.buy_count), str(self.sell_count), str(self.neutral_count),
+            _num(self.score_all, 4), _num(self.score_ma, 4), _num(self.score_other, 4),
+            _num(self.close, 4), _num(self.volume, 0), _num(self.change_pct, 2),
+            _num(self.rsi, 1), _num(self.macd, 4), _num(self.macd_signal, 4),
+            _num(self.ema20, 4), _num(self.ema50, 4), _num(self.ema200, 4),
+            _num(self.adx, 2), _num(self.bb_upper, 4), _num(self.bb_lower, 4),
+            _num(self.stoch_k, 1), _num(self.stoch_d, 1), _num(self.cci20, 2),
+        ]
+
+
+@dataclass
 class TradeRow:
     """Individual trade/execution from IBKR."""
     TAB_NAME = "trades"
