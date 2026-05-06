@@ -23,12 +23,12 @@ const GIDS: Record<string, string> = {
   wsr_summary: "607663282",
   macro: "447436838",
   wsr_archive: "1065773181",
-  // TODO: replace 0 placeholders with real GIDs once Agent 1 lands the
-  // regime_signals / exposure_posture / screen_candidates tabs in the
-  // production sheet. Until then, fetchTab will 404 → catch() → empty
-  // array, and consumer components render their graceful fallbacks.
-  regime_signals: "0",
-  exposure_posture: "0",
+  // Quant regime layer — populated by regime-signals.yml daily 22:00 UTC.
+  // regime_signals: market_breadth + ftd + distribution_day + macro_regime
+  // exposure_posture: exposure-coach output (ceiling, recommendation, headroom)
+  regime_signals: "1037039714",
+  exposure_posture: "1572953132",
+  // screen_candidates created on first Sunday cron run — placeholder until then.
   screen_candidates: "0",
   // TradingView 26-indicator consensus, populated daily by tv-signals.yml.
   // One row per (ticker, interval) — both 1d and 1W. The DecisionCard reads
