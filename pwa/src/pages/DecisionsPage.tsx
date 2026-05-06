@@ -1,7 +1,9 @@
 import { useState } from "react";
 import type {
   DecisionRow,
+  ExposurePostureRow,
   PositionRow,
+  SnapshotRow,
   TechnicalScoreRow,
   OptionsDefenseRow,
   WheelNextLegRow,
@@ -10,6 +12,7 @@ import type {
 import { Card } from "../cards/Card";
 import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
 import { ActionQueueCard } from "../cards/ActionQueueCard";
+import { ExposureBudgetCard } from "../cards/ExposureBudgetCard";
 import { StockDetail } from "../components/StockDetail";
 import { daysAgo } from "../lib/dates";
 import {
@@ -565,6 +568,9 @@ export function DecisionsPage({
   exitPlans,
   casparPositions,
   sarahPositions,
+  exposurePosture,
+  casparSnapshot,
+  sarahSnapshot,
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
@@ -574,6 +580,9 @@ export function DecisionsPage({
   exitPlans?: ExitPlanRow[];
   casparPositions?: PositionRow[];
   sarahPositions?: PositionRow[];
+  exposurePosture?: ExposurePostureRow | null;
+  casparSnapshot?: SnapshotRow | null;
+  sarahSnapshot?: SnapshotRow | null;
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const techByTicker = new Map<string, TechnicalScoreRow>();
@@ -621,6 +630,17 @@ export function DecisionsPage({
   return (
     <>
       <div className="px-4 pb-4 flex flex-col gap-4">
+        {/* Exposure Budget — top-of-page strip. Always visible across
+            all status filters; renders graceful fallback if posture
+            sheet is empty (cron hasn't run yet). */}
+        <div className={nextFade()}>
+          <ExposureBudgetCard
+            posture={exposurePosture ?? null}
+            caspar={casparSnapshot ?? null}
+            sarah={sarahSnapshot ?? null}
+          />
+        </div>
+
         {/* Action Queue — only renders when non-empty */}
         <div className={nextFade()}>
           <ActionQueueCard

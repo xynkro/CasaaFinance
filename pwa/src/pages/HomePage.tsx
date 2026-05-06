@@ -73,7 +73,10 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
         />
 
         {/* MacroStrip scrolls away with content */}
-        <MacroStrip macro={data?.macro ?? null} />
+        <MacroStrip
+          macro={data?.macro ?? null}
+          regimeSignals={data?.regimeSignalsLatest}
+        />
 
         {/* Primary card */}
         <div className="fade-up fade-up-1 mt-4">

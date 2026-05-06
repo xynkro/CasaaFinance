@@ -119,6 +119,9 @@ function Dashboard() {
             exitPlans={data?.exitPlans ?? []}
             casparPositions={data?.casparPositions ?? []}
             sarahPositions={data?.sarahPositions ?? []}
+            exposurePosture={data?.exposurePosture ?? null}
+            casparSnapshot={data?.caspar ?? null}
+            sarahSnapshot={data?.sarah ?? null}
           />
         );
       case 4:

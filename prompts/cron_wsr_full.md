@@ -40,6 +40,12 @@ ss = sh._open_sheet(client)
 # - technical_scores (latest)
 # - daily_brief_latest (last 5 rows for week lookback)
 # - wsr_summary (last full WSR for thesis-carry-over)
+# - regime_signals (LAST 7 DAYS, ALL SOURCES — market_breadth, ftd,
+#     distribution_day, macro_regime; produced by Agent 1's regime cron)
+# - exposure_posture (LATEST ROW ONLY — exposure-coach output: ceiling,
+#     bias, participation, recommendation, confidence)
+# - screen_candidates (LAST 30 DAYS, BOTH SOURCES — vcp + canslim
+#     weekly fresh-blood ticker pool)
 ```
 
 ### 3. Web research — week's macro & news
@@ -77,7 +83,34 @@ Critical sections:
 
 **Macro read (2 paragraphs):** VIX/SPX/yields/DXY/USD-SGD reading. Interpret the stack — bull, bear, mixed signals?
 
-**Regime classification:** Confirm or change the regime. List evidence for and against.
+**Regime classification (quant-anchored, NOT vibes):**
+
+Read the latest `regime_signals` rows for all sources. Use them as PRIMARY regime input. Do NOT vibes-classify regime from price action. Specifically:
+- `market_breadth.score` < 50 → bias toward defensive
+- `distribution_day.label == "HIGH"` or `"SEVERE"` → regime is contracting
+- `ftd.label == "FTD_CONFIRMED"` → regime is recovering
+- `macro_regime.label` → use as the regime tag in your synthesis JSON
+
+If signals conflict, default to the more conservative interpretation. Do not override quant signals with vibe.
+
+Confirm or change the regime. List evidence for and against. Cite the four scores explicitly in your reasoning.
+
+**Screen candidates (fresh-blood ingestion):**
+
+Read the last 30 days of `screen_candidates` rows. For each ticker NOT already in your decision_queue:
+- Cross-check against your trading_rules.py bucket assignment
+- If it fits a bucket you can size into AND `exposure_posture` allows new entries: consider proposing as `BUY_DIP` candidate
+- If exposure is constrained: add as `status: watching` with the screen's trigger_price as entry
+
+The vcp-screener feeds Minervini-style breakout candidates. canslim-screener feeds O'Neil growth candidates. Treat them as fresh-blood inputs.
+
+**Strategy-class signals (for awareness, not auto-execution):** when the named pattern is observed, propose appropriately. The user has these skills available; you don't run them but you can reference them in thesis text:
+- **Breakout entry** (`breakout-trade-planner` style): tight handle, low-volume contraction, breakout on > 1.5x volume → propose `BUY_DIP` near pivot
+- **PEAD setup** (`pead-screener` style): post-earnings gap > 5% with high volume → propose `BUY_DIP` near closing day-of-print price
+- **Earnings analyzer**: 5-factor scoring (gap size, volume, sector strength, fundamental quality, technical setup) → cite if you use it in a thesis
+- **Pair trade** (`pair-trade-screener`): only relevant if you find a high-correlation pair with diverged spreads — propose as a paired action across two decision rows
+- **Parabolic short** (`parabolic-short-trade-planner`): vertical move > 50% in 30 days, RSI > 80, exhaustion candle → DO NOT propose as a long, but flag in `redteam_summary` if you see this pattern in a name we hold
+- **Position sizer**: when proposing a new entry, reference your sizing logic ("4% of NLV at $X stop = N shares")
 
 **Week lookback:** Each daily brief contributed something. What were the events Mon-Fri? What positions were affected?
 
@@ -92,6 +125,24 @@ Critical sections:
 **Actionable entries:** For each "BUY ON PULLBACK" name, give entry/target/stop/catalysts.
 
 **For Caspar / For Sarah:** Per-account snapshot, performance, options scan, action plan, watch triggers.
+
+**Regime anchor (REQUIRED top-level JSON field):** Always emit a `regime_anchor` object at top level of the synthesis JSON so Sonnet can surface it explicitly during the format step:
+
+```json
+{
+  ...
+  "regime_anchor": {
+    "breadth_score": 33,
+    "distribution_label": "CAUTION",
+    "ftd_label": "NO_SIGNAL",
+    "macro_regime": "Concentration",
+    "exposure_ceiling": 50,
+    "exposure_recommendation": "REDUCE_ONLY"
+  }
+}
+```
+
+Pull each field from the latest `regime_signals` and `exposure_posture` rows. If a source hasn't reported (sheet empty or cron not yet run), emit `null` for that field — Sonnet renders "—" for nulls.
 
 ### 6. Format and push (TWO writes — markdown + unified decision queue)
 
@@ -259,6 +310,15 @@ because assignment = paid to acquire the compounder/quality at your price.
 If you find yourself drafting a CC on SCHD / SPY / VOO / QQQ / VTI /
 AAPL / MSFT etc., STOP and revise. Suggest CSP instead, OR no options
 trade and accumulation only.
+
+**🔴 EXPOSURE CONSTRAINT RULE (non-negotiable):**
+
+Read the latest `exposure_posture` row before proposing any decisions.
+
+- If `recommendation == "CASH_PRIORITY"`: do NOT propose any new BUY_DIP / TRIM-up / CSP / CC entries with `status: pending`. All new candidates must be `status: watching` with explicit re-entry condition (e.g. "watching for posture ≥ NEW_ENTRY_ALLOWED AND TICKER ≤ entry").
+- If `recommendation == "REDUCE_ONLY"`: do NOT propose new BUY_DIPs. You MAY propose TRIM (status pending) on existing positions over target. CSP/CC defenses on held positions still allowed.
+- If `recommendation == "NEW_ENTRY_ALLOWED"`: standard rules apply.
+- Always cite the exposure ceiling in your `thesis_1liner` for any pending row, e.g. "ceiling 65%, headroom +$1,200 — fits within REDUCE_ONLY for trim".
 
 **PMCC nudge:** If a position holds (or could buy) a deep-ITM 6+ month
 call on a quality name with low IV rank, consider proposing a PMCC over

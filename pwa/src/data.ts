@@ -23,6 +23,13 @@ const GIDS: Record<string, string> = {
   wsr_summary: "607663282",
   macro: "447436838",
   wsr_archive: "1065773181",
+  // TODO: replace 0 placeholders with real GIDs once Agent 1 lands the
+  // regime_signals / exposure_posture / screen_candidates tabs in the
+  // production sheet. Until then, fetchTab will 404 → catch() → empty
+  // array, and consumer components render their graceful fallbacks.
+  regime_signals: "0",
+  exposure_posture: "0",
+  screen_candidates: "0",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -352,6 +359,52 @@ export interface ArchiveRow {
   drive_url: string;
 }
 
+/**
+ * Regime signal row — daily output from Agent 1's regime cron.
+ * One row per (date, source). source ∈ {market_breadth, ftd,
+ * distribution_day, macro_regime}. score is 0-100; label is
+ * source-specific (e.g. "FTD_CONFIRMED", "HIGH", "Concentration").
+ */
+export interface RegimeSignalRow {
+  date: string;
+  source: string;          // "market_breadth" | "ftd" | "distribution_day" | "macro_regime"
+  score: string;           // 0-100
+  label: string;           // source-specific label
+  summary: string;
+  raw_json: string;
+}
+
+/**
+ * Exposure posture row — daily output from exposure-coach.
+ * One row per date. recommendation gates new-entry flow.
+ */
+export interface ExposurePostureRow {
+  date: string;
+  exposure_ceiling_pct: string;     // 0-100
+  bias: string;                     // "GROWTH" | "VALUE" | "NEUTRAL"
+  participation: string;            // "BROAD" | "NARROW"
+  recommendation: string;           // "NEW_ENTRY_ALLOWED" | "REDUCE_ONLY" | "CASH_PRIORITY"
+  confidence: string;               // 0-1
+  rationale: string;
+  components_json: string;
+}
+
+/**
+ * Screen candidate row — weekly output from vcp + canslim screeners.
+ * Fresh-blood ticker pool the brain can pull from when proposing
+ * BUY_DIP entries.
+ */
+export interface ScreenCandidateRow {
+  date: string;
+  source: string;          // "vcp" | "canslim"
+  ticker: string;
+  sector: string;
+  score: string;
+  trigger_price: string;
+  stop_price: string;
+  rationale: string;
+}
+
 // ---------- aggregate fetch ----------
 
 export interface DashboardData {
@@ -379,6 +432,10 @@ export interface DashboardData {
   sarahHistory: SnapshotRow[];
   macroHistory: MacroRow[];
   archive: ArchiveRow[];
+  // Regime + exposure (Agent 1's regime cron output)
+  regimeSignalsLatest: Record<string, RegimeSignalRow>;  // keyed by source
+  exposurePosture: ExposurePostureRow | null;
+  screenCandidates: ScreenCandidateRow[];                // last 30d, both sources
   error: string | null;
 }
 
@@ -409,7 +466,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, scanRows, optRecRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, scanRows, optRecRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows, regimeRows, postureRows, screenRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
@@ -427,9 +484,28 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<DecisionRow>("decision_queue").catch(() => [] as DecisionRow[]),
         fetchTab<MacroRow>("macro"),
         fetchTab<ArchiveRow>("wsr_archive").catch(() => [] as ArchiveRow[]),
+        // New regime tabs (Agent 1's regime cron output). GIDs are
+        // placeholder zeros — the catch fallback keeps things alive
+        // until production GIDs land.
+        fetchTab<RegimeSignalRow>("regime_signals").catch(() => [] as RegimeSignalRow[]),
+        fetchTab<ExposurePostureRow>("exposure_posture").catch(() => [] as ExposurePostureRow[]),
+        fetchTab<ScreenCandidateRow>("screen_candidates").catch(() => [] as ScreenCandidateRow[]),
       ]);
     const casparRows = normalizeSnapshot(casparRaw);
     const sarahRows = normalizeSnapshot(sarahRaw);
+
+    // Latest regime row per source (market_breadth / ftd /
+    // distribution_day / macro_regime). Sources without rows just
+    // don't appear in the map → consumers default to "—".
+    const regimeSignalsLatest: Record<string, RegimeSignalRow> = {};
+    for (const r of regimeRows) {
+      if (!r.source) continue;
+      const prev = regimeSignalsLatest[r.source];
+      if (!prev || (r.date ?? "") > (prev.date ?? "")) {
+        regimeSignalsLatest[r.source] = r;
+      }
+    }
+
     return {
       dailyHistory: dedup(dailyRows).reverse(),
       daily: latest(dailyRows),
@@ -469,6 +545,9 @@ export async function fetchDashboard(): Promise<DashboardData> {
       sarahHistory: dedup(sarahRows),
       macroHistory: dedup(macroRows),
       archive: sortByDate(archiveRows).reverse(),
+      regimeSignalsLatest,
+      exposurePosture: latest(postureRows),
+      screenCandidates: sortByDate(screenRows),
       error: null,
     };
   } catch (e) {
@@ -479,7 +558,11 @@ export async function fetchDashboard(): Promise<DashboardData> {
       wheelNextLeg: [], scanResults: [], optionRecommendations: [], exitPlans: [], optionsDefense: [],
       wsrSummary: null, wsrLite: null, decisions: [], decisionsAll: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
-      archive: [], error: String(e),
+      archive: [],
+      regimeSignalsLatest: {},
+      exposurePosture: null,
+      screenCandidates: [],
+      error: String(e),
     };
   }
 }

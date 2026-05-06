@@ -38,6 +38,16 @@ if full_rows:
 
 Also pull positions, options, exit_plans, decision_queue, scan_results, technical_scores, latest macro, and option_recommendations — same pattern as the daily brief.
 
+```python
+# Additional regime tabs (Agent 1's regime cron output):
+# - regime_signals (LAST 7 DAYS, ALL SOURCES — market_breadth, ftd,
+#     distribution_day, macro_regime)
+# - exposure_posture (LATEST ROW ONLY — exposure-coach output: ceiling,
+#     bias, participation, recommendation, confidence)
+# - screen_candidates (LAST 30 DAYS, BOTH SOURCES — vcp + canslim
+#     weekly fresh-blood ticker pool)
+```
+
 The `options` tab is refreshed every 30 minutes during US market hours by the cloud `options-refresh.yml` workflow (moneyness, DTE, assignment_risk, trend_risk, momentum_5d, sigma, RSI, SMAs all yfinance-derivable). The latest snapshot is the freshest you'll have, regardless of whether the Mac is on. New positions still get added nightly via Mac ibkr-grab.
 
 ### 3. Check trigger states (the most important section)
@@ -54,6 +64,16 @@ Also check options book — for each open option position:
 
 Use the rules from `src/trading_rules.py` — particularly `ROLL_RULES` for delta thresholds.
 
+**Regime classification (quant-anchored, NOT vibes):**
+
+Read the latest `regime_signals` rows for all sources. Use them as PRIMARY regime input. Do NOT vibes-classify regime from price action. Specifically:
+- `market_breadth.score` < 50 → bias toward defensive
+- `distribution_day.label == "HIGH"` or `"SEVERE"` → regime is contracting
+- `ftd.label == "FTD_CONFIRMED"` → regime is recovering
+- `macro_regime.label` → use as the regime tag in your synthesis JSON
+
+If signals conflict, default to the more conservative interpretation. Do not override quant signals with vibe.
+
 ### 4. Synthesize JSON (compact — Sonnet expands later)
 
 Output a JSON matching this schema (pass to Sonnet template at `prompts/sonnet_format_wsr_lite.md`):
@@ -65,6 +85,14 @@ Output a JSON matching this schema (pass to Sonnet template at `prompts/sonnet_f
   "regime": "bull_late_cycle",
   "regime_unchanged": true|false,
   "regime_drift_text": "1-2 paragraphs synthesising the past 2-3 days",
+  "regime_anchor": {
+    "breadth_score": 33,
+    "distribution_label": "CAUTION",
+    "ftd_label": "NO_SIGNAL",
+    "macro_regime": "Concentration",
+    "exposure_ceiling": 50,
+    "exposure_recommendation": "REDUCE_ONLY"
+  },
   "trigger_audit": [...],
   "options_book": [...],
   "decision_queue": [...],
@@ -83,6 +111,8 @@ Output a JSON matching this schema (pass to Sonnet template at `prompts/sonnet_f
   "week_events": ""
 }
 ```
+
+**`regime_anchor` (REQUIRED top-level field):** Pull each value from the latest `regime_signals` and `exposure_posture` rows. If a source hasn't reported, emit `null` for that field — Sonnet renders "—" for nulls. This forces an explicit read of the quant regime signals during the format step, surfacing them in the rendered markdown.
 
 The `verdict`, `confidence`, etc. are flat fields used by `push_brief.py` for the sheet schema. The nested `trigger_audit`, `options_book`, etc. feed into Sonnet's formatter.
 
@@ -254,6 +284,15 @@ Wheeling SCHD specifically is a thesis violation — interrupting the
 plan. See `cc_eligible_buckets` in the trading rules dict.
 
 CSP on those names IS appropriate — paid to maybe acquire the compounder.
+
+**🔴 EXPOSURE CONSTRAINT RULE (non-negotiable):**
+
+Read the latest `exposure_posture` row before proposing any decisions.
+
+- If `recommendation == "CASH_PRIORITY"`: do NOT propose any new BUY_DIP / TRIM-up / CSP / CC entries with `status: pending`. All new candidates must be `status: watching` with explicit re-entry condition (e.g. "watching for posture ≥ NEW_ENTRY_ALLOWED AND TICKER ≤ entry").
+- If `recommendation == "REDUCE_ONLY"`: do NOT propose new BUY_DIPs. You MAY propose TRIM (status pending) on existing positions over target. CSP/CC defenses on held positions still allowed.
+- If `recommendation == "NEW_ENTRY_ALLOWED"`: standard rules apply.
+- Always cite the exposure ceiling in your `thesis_1liner` for any pending row, e.g. "ceiling 65%, headroom +$1,200 — fits within REDUCE_ONLY for trim".
 
 **Thesis content rule:** the `thesis` field is what the user sees when
 they tap a Decisions card. It MUST be brain synthesis, not rule-filter
