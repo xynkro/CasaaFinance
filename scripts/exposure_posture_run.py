@@ -135,6 +135,23 @@ def read_latest_regime_signals(client) -> dict[str, dict]:
                 raw.setdefault("ftd_score", int(score_val))
             elif source == "macro_regime":
                 raw.setdefault("regime_score", int(score_val))
+                # Macro-regime-detector emits `regime` as a nested dict
+                # (e.g. {"label": "Concentration", "transitioning": false}).
+                # exposure-coach's extract_regime_name calls
+                # `data["regime"].capitalize()` and crashes on dicts. Flatten
+                # to the label string the extractor expects, OR if absent,
+                # set from our `label` column.
+                regime_field = raw.get("regime")
+                if isinstance(regime_field, dict):
+                    label = (
+                        regime_field.get("label")
+                        or regime_field.get("name")
+                        or regime_field.get("current_regime")
+                        or rec.get("label", "")
+                    )
+                    raw["regime"] = str(label) if label else rec.get("label", "")
+                elif not isinstance(regime_field, str):
+                    raw["regime"] = rec.get("label", "")
             elif source == "distribution_day":
                 # exposure-coach has no top_risk equivalent for distribution_day
                 # — pass through as top_risk so HIGH risk reduces the ceiling.
