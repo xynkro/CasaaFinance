@@ -46,6 +46,10 @@ ss = sh._open_sheet(client)
 #     bias, participation, recommendation, confidence)
 # - screen_candidates (LAST 30 DAYS, BOTH SOURCES — vcp + canslim
 #     weekly fresh-blood ticker pool)
+# - options_yield_candidates (LATEST 30 — top 20 ranked CSP/CC setups
+#     by annualized yield, IV rank, and spread quality. Sunday cron at
+#     12:00 UTC writes a fresh batch every week. Read these to propose
+#     NEW CSP/CC entries — not just refresh existing positions.)
 # - tv_signals (LATEST per ticker, both 1d and 1W intervals — TradingView's
 #     26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL plus
 #     all underlying indicator values)
@@ -138,6 +142,22 @@ Read the last 30 days of `screen_candidates` rows. For each ticker NOT already i
 - If exposure is constrained: add as `status: watching` with the screen's trigger_price as entry
 
 The vcp-screener feeds Minervini-style breakout candidates. canslim-screener feeds O'Neil growth candidates. Treat them as fresh-blood inputs.
+
+**Options yield candidates (fresh CSP/CC ingestion):**
+
+Read the latest `options_yield_candidates` rows. For each top-5 candidate
+NOT already in your decision_queue:
+- Cross-check against your trading_rules.py bucket assignment.
+- Cross-check exposure_posture: if NEW_ENTRY_ALLOWED → consider as
+  pending CSP/CC; if REDUCE_ONLY → propose as watching with explicit
+  re-entry trigger; if CASH_PRIORITY → still mention top 2 candidates
+  in the redteam_summary as "what we're watching for when conditions
+  loosen."
+
+Per-WSR-run minimum: at least ONE new CSP or CC candidate must be
+proposed (or explicitly skipped with a reason). The brain has been
+limiting itself to refreshing existing positions — this rule forces
+fresh option-strategy proposals.
 
 **Universe expansion (forced):** before synthesizing, sweep the
 watchlist categories from `prompts/watchlist.yaml` that match the

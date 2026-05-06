@@ -1,0 +1,64 @@
+name: Options Yield Screener — Weekly
+
+# Sunday between screen-candidates (11:00 UTC) and WSR Full (11:37 UTC).
+# Scans a wide wheel-target universe via yfinance for high-yield CSP/CC
+# setups in the 25-50 DTE window. Top 20 (by composite of annualised
+# yield + IV rank + delta sweet-spot + spread + liquidity) appended to
+# the `options_yield_candidates` Google Sheet tab.
+#
+# The WSR brain reads these rows and is required to propose at least
+# ONE new CSP or CC candidate per run (or explicitly skip with reason).
+#
+# No FMP_API_KEY needed — pure yfinance. Should work today regardless
+# of FMP availability. Falls back to a hardcoded universe if
+# `src.watchlist.get_universe()` fails.
+
+on:
+  schedule:
+    # 12:00 UTC Sunday = 20:00 SGT Sunday — runs after screen-candidates
+    # at 11:00 UTC and ~37min before wsr-full.yml (19:37 SGT = 11:37 UTC)
+    # so its rows are fresh when the WSR brain reads them.
+    - cron: "0 12 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: options-yield
+  cancel-in-progress: true
+
+jobs:
+  yield:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Install screener deps
+        # yfinance + pandas come via requirements.txt; PyYAML is needed
+        # for the watchlist.yaml fallback path. scipy is intentionally
+        # omitted — the script uses math.erf for the normal CDF.
+        run: pip install pandas PyYAML
+
+      - name: Run options_yield_screener
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/options_yield_screener.py $ARGS

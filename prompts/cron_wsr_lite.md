@@ -46,6 +46,9 @@ Also pull positions, options, exit_plans, decision_queue, scan_results, technica
 #     bias, participation, recommendation, confidence)
 # - screen_candidates (LAST 30 DAYS, BOTH SOURCES — vcp + canslim
 #     weekly fresh-blood ticker pool)
+# - options_yield_candidates (LATEST 30 — top 20 ranked CSP/CC setups
+#     written Sundays by the options-yield-screener cron. Read these
+#     for fresh CSP/CC ideas to fold into mid-week proposals.)
 # - tv_signals (LATEST per ticker, both 1d and 1W intervals — TradingView's
 #     26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL plus
 #     all underlying indicator values)
@@ -109,6 +112,22 @@ speculative_growth + high_iv_wheel_targets when bullish. For each
 ticker NOT already in your decision_queue with a daily TV BUY signal,
 evaluate as a candidate. Mention 2-3 names you considered (and skipped)
 in the verdict so it's visible the brain looked outside the held book.
+
+**Options yield candidates (mid-week refresh of fresh CSP/CC pool):**
+
+Read the latest `options_yield_candidates` rows (refreshed Sundays by
+the options-yield-screener cron). For each top-3 CSP/CC NOT already in
+your decision_queue:
+- Cross-check against your trading_rules.py bucket assignment.
+- Cross-check exposure_posture: if NEW_ENTRY_ALLOWED → consider as
+  pending CSP/CC; if REDUCE_ONLY → propose as watching with explicit
+  re-entry trigger; if CASH_PRIORITY → mention top candidate in
+  redteam_summary as "what we're watching for when conditions loosen."
+
+Per-WSR-Lite-run minimum: at least ONE new CSP or CC candidate must be
+proposed (or explicitly skipped with a reason). The brain has been
+limiting itself to refreshing existing positions — this rule forces
+fresh option-strategy proposals mid-week too.
 
 **Defensive Expansion (REQUIRED — regardless of regime):**
 

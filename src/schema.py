@@ -829,6 +829,74 @@ class TvSignalRow:
 
 
 @dataclass
+class OptionsYieldCandidateRow:
+    """
+    Weekly wide-universe options-yield screener output. Sunday between
+    screen-candidates (11:00 UTC) and WSR Full (11:37 UTC) so the brain
+    has fresh CSP/CC strategy candidates to propose.
+
+    The brain was previously refreshing existing options positions but
+    proposing zero NEW CSP/CC entries because nothing surfaced fresh
+    high-yield setups. This row supplies the candidate pool — top 20
+    ranked by composite (annualised yield + IV rank + delta sweet-spot
+    + spread + liquidity) across a wide wheel-target universe.
+
+    See `scripts/options_yield_screener.py` for the generator.
+    """
+    TAB_NAME = "options_yield_candidates"
+    HEADERS = [
+        "date", "ticker",                    # identity
+        "strategy",                          # "CSP" | "CC"
+        "right", "strike", "expiry",         # contract spec
+        "dte",                               # days to expiry
+        "underlying_last",                   # current spot
+        "delta",                             # 0.20-0.30 typical
+        "premium",                           # mid (bid+ask)/2
+        "annual_yield_pct",                  # premium / strike × 365/dte × 100
+        "iv", "iv_rank",                     # implied vol + rank 0-100
+        "moneyness",                         # "OTM" typically (we filter for it)
+        "spread_pct",                        # bid-ask spread / mid
+        "open_interest", "volume",           # liquidity check
+        "score",                             # composite 0-100 ranking
+        "rationale",                         # 1-line "why this candidate"
+    ]
+
+    date: str
+    ticker: str
+    strategy: str            # "CSP" | "CC"
+    right: str               # "P" | "C"
+    strike: float
+    expiry: str              # "YYYYMMDD"
+    dte: int
+    underlying_last: float
+    delta: float
+    premium: float
+    annual_yield_pct: float
+    iv: float
+    iv_rank: float
+    moneyness: str           # "OTM" typically
+    spread_pct: float        # 0.0-1.0 fractional (bid-ask / mid)
+    open_interest: int
+    volume: int
+    score: float             # 0-100 composite
+    rationale: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.ticker, self.strategy, self.right,
+            _num(self.strike, 2), self.expiry, str(self.dte),
+            _num(self.underlying_last, 4),
+            _num(self.delta, 4), _num(self.premium, 4),
+            _num(self.annual_yield_pct, 2),
+            _num(self.iv, 4), _num(self.iv_rank, 1),
+            self.moneyness, _num(self.spread_pct, 4),
+            str(self.open_interest), str(self.volume),
+            _num(self.score, 1), self.rationale,
+        ]
+
+
+@dataclass
 class TradeRow:
     """Individual trade/execution from IBKR."""
     TAB_NAME = "trades"

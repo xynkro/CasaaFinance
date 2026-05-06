@@ -119,6 +119,11 @@ print(f'  {\"TOTAL UNIQUE\":30} {total_unique}')
     gh workflow run screen-candidates.yml --repo "$GH_REPO"
     ;;
 
+  yield)
+    echo "→ options-yield-screener (cloud cron, manual trigger)"
+    gh workflow run options-yield.yml --repo "$GH_REPO"
+    ;;
+
   tv)
     echo "→ tv-signals (cloud cron, manual trigger — daily TV 26-indicator pull)"
     gh workflow run tv-signals.yml --repo "$GH_REPO"
@@ -197,6 +202,7 @@ REGIME / EXPOSURE / SCREEN
   regime          cloud regime-signals (breadth + ftd + dist-day + macro)
   exposure        local exposure_posture (caspar + sarah headroom)
   screen          cloud screen-candidates (vcp + canslim, FMP key required)
+  yield           cloud options-yield-screener (CSP + CC candidates by yield)
   tv              cloud tv-signals (TradingView 26-indicator consensus, 1d + 1W)
 
 BRAIN

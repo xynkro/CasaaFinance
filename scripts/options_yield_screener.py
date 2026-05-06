@@ -1,0 +1,706 @@
+#!/usr/bin/env python3
+"""
+options_yield_screener.py — Wide-universe CSP/CC candidate generator.
+
+Why this exists:
+  The brain proposes 0 new CSP/CC strategies because nothing GENERATES
+  fresh option-strategy candidates. `vcp-screener` and `canslim-screener`
+  find STOCK candidates only. This script scans a wide wheel-target
+  universe for high-yield CSP/CC setups and surfaces top 20 to the
+  `options_yield_candidates` sheet so the WSR brain can propose them as
+  fresh CSP/CC entries.
+
+Logic:
+  1. Load wide universe via `src.watchlist.get_universe()` if available;
+     otherwise fall back to a hardcoded curated list.
+  2. For each ticker, fetch via yfinance:
+       - 60-day history → realized vol → IV proxy
+       - Option chain for expiries in the 25-50 DTE window
+       - OTM puts (CSP) and OTM calls (CC, gated by trading_rules bucket)
+  3. Compute Black-Scholes delta (math.erf-based normal CDF — no scipy).
+     Premium = (bid+ask)/2; annual yield = premium/strike × 365/dte × 100.
+     IV rank approximated from current-vs-realized vol band.
+  4. Filter:
+       dte ∈ [25, 50], abs(delta) ∈ [0.18, 0.32], bid > 0.05,
+       iv_rank ≥ 30, spread_pct ≤ 0.20.
+       For CCs, ticker bucket must be in cc_eligible_buckets per
+       src/trading_rules.py — DO NOT propose CCs on SCHD/blue_chip/
+       leveraged_etf.
+  5. Score (0-100) by yield + IV rank + delta sweet-spot + spread + OI.
+  6. Top 20 written to `options_yield_candidates` sheet with rationale.
+
+Usage:
+  python scripts/options_yield_screener.py            # live write
+  python scripts/options_yield_screener.py --dry      # print only
+
+Cron: .github/workflows/options-yield.yml — Sunday 12:00 UTC, between
+screen-candidates.yml (11:00 UTC) and wsr-full.yml (11:37 UTC).
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import math
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, datetime
+from pathlib import Path
+from typing import Optional
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_PROJECT_ROOT))
+
+from src import schema as S          # noqa: E402
+from src import sheets as sh         # noqa: E402
+from src.sync import load_env        # noqa: E402
+
+
+# ──────────────────── Tunables ────────────────────────────────────────────
+
+DTE_MIN = 25
+DTE_MAX = 50
+DELTA_MIN = 0.18
+DELTA_MAX = 0.32
+DELTA_TARGET = 0.25
+MIN_BID = 0.05
+MIN_IV_RANK = 30.0
+MAX_SPREAD_PCT = 0.20            # fractional (bid-ask)/mid
+MIN_OI_FOR_BONUS = 100
+MAX_TOP = 20
+INTER_TICKER_SLEEP = 0.5         # seconds between tickers (politeness)
+MAX_WORKERS = 3                  # concurrent yfinance fetches
+
+# Hardcoded fallback universe used if `src.watchlist.get_universe()` fails.
+# Mix of held tickers + curated wheel-target names.
+HARDCODED_FALLBACK = [
+    # Held wheel candidates
+    "BBAI", "BTBT", "OPEN", "RCAT", "AAPL", "BYND", "SBET", "HIMS",
+    # Curated wheel-target list per spec
+    "F", "T", "BAC", "WFC", "INTC", "MU", "PYPL", "U", "RBLX", "SOFI",
+    "RIVN", "AFRM", "SHOP", "COIN", "AMD", "NVDA", "TSLA", "MSFT",
+    "AAPL", "GOOGL", "META", "NFLX", "AMZN", "JPM", "V", "MA",
+]
+
+# Ticker → bucket map for CC eligibility gating. Mirrors the bucket
+# semantics in src/trading_rules.py without forcing every ticker to
+# resolve — anything not listed is treated as "spec_growth" (CC-eligible
+# by default; CSP-eligible too) which is the correct conservative default
+# for a wheel-target universe.
+TICKER_BUCKET: dict[str, str] = {
+    # core (no CCs ever)
+    "SCHD": "core", "SPY": "core", "VOO": "core", "QQQ": "core",
+    "VTI": "core", "VEA": "core", "VWO": "core", "BND": "core",
+    # blue_chip (no CCs unless strike ≥ 115% cost — we exclude entirely
+    # in the screener since we don't track per-user cost basis here)
+    "AAPL": "blue_chip", "MSFT": "blue_chip", "GOOGL": "blue_chip",
+    "GOOG": "blue_chip", "AMZN": "blue_chip", "META": "blue_chip",
+    "NFLX": "blue_chip", "JPM": "blue_chip", "V": "blue_chip",
+    "MA": "blue_chip", "JNJ": "blue_chip", "PG": "blue_chip",
+    "KO": "blue_chip", "BRK-B": "blue_chip",
+    # leveraged_etf (no CCs ever — daily reset + assignment compounds)
+    "TQQQ": "leveraged_etf", "SQQQ": "leveraged_etf",
+    "SSO": "leveraged_etf", "UPRO": "leveraged_etf",
+    "SOXL": "leveraged_etf", "TNA": "leveraged_etf",
+    # commodity_etf (CCs OK on strength)
+    "GLD": "commodity_etf", "SLV": "commodity_etf", "GDX": "commodity_etf",
+    "GDXJ": "commodity_etf", "USO": "commodity_etf", "UNG": "commodity_etf",
+    "DBA": "commodity_etf", "CPER": "commodity_etf", "GLDM": "commodity_etf",
+    # quality_growth (CCs OK)
+    "AMD": "quality_growth", "NVDA": "quality_growth",
+    # spec_growth (CCs OK — this is the natural CC pool)
+    "F": "spec_growth", "T": "spec_growth", "BAC": "spec_growth",
+    "WFC": "spec_growth", "INTC": "spec_growth", "MU": "spec_growth",
+    "PYPL": "spec_growth", "U": "spec_growth", "RBLX": "spec_growth",
+    "SOFI": "spec_growth", "RIVN": "spec_growth", "AFRM": "spec_growth",
+    "SHOP": "spec_growth", "COIN": "spec_growth", "TSLA": "spec_growth",
+    "OPEN": "spec_growth", "RDDT": "spec_growth", "PLTR": "spec_growth",
+    "SQ": "spec_growth", "HIMS": "spec_growth", "SBET": "spec_growth",
+    # lottery (CSPs blocked, CCs OK)
+    "BBAI": "lottery", "BTBT": "lottery", "RCAT": "lottery",
+    "BYND": "lottery",
+    # defensive ETFs (treat as commodity_etf-like — CCs OK on strength)
+    "XLV": "commodity_etf", "XLP": "commodity_etf", "XLU": "commodity_etf",
+    "VHT": "commodity_etf", "VDC": "commodity_etf", "VPU": "commodity_etf",
+    "ITA": "commodity_etf", "KRE": "commodity_etf",
+    # volatility products — never wheel
+    "VIXM": "leveraged_etf", "UVXY": "leveraged_etf", "SVXY": "leveraged_etf",
+}
+
+
+def _bucket_for(ticker: str) -> str:
+    """Return bucket name for a ticker. Defaults to 'spec_growth' (most permissive
+    natural wheel target) when unknown."""
+    return TICKER_BUCKET.get(ticker.upper(), "spec_growth")
+
+
+# ──────────────────── Math helpers ────────────────────────────────────────
+
+def _norm_cdf(x: float) -> float:
+    """Standard-normal CDF using math.erf — no scipy dependency."""
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def bs_delta(S: float, K: float, T: float, sigma: float, r: float, right: str) -> float:
+    """Black-Scholes delta. `right` is 'C' or 'P'. Returns signed delta."""
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0.0
+    try:
+        d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+    if right == "C":
+        return _norm_cdf(d1)
+    return _norm_cdf(d1) - 1.0
+
+
+def _realized_vol_annual(closes: list[float], lookback: int = 60) -> float:
+    """Annualized realized vol from daily log returns over `lookback` days."""
+    if len(closes) < 5:
+        return 0.0
+    series = closes[-lookback:] if len(closes) >= lookback else closes
+    rets: list[float] = []
+    for a, b in zip(series[:-1], series[1:]):
+        if a > 0 and b > 0:
+            rets.append(math.log(b / a))
+    if len(rets) < 2:
+        return 0.0
+    mean = sum(rets) / len(rets)
+    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    daily_vol = math.sqrt(max(var, 0.0))
+    return daily_vol * math.sqrt(252.0)
+
+
+# ──────────────────── Logger ──────────────────────────────────────────────
+
+def setup_logger() -> logging.Logger:
+    logger = logging.getLogger("options_yield_screener")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        h = logging.StreamHandler(sys.stderr)
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(h)
+    return logger
+
+
+# ──────────────────── Universe loading ────────────────────────────────────
+
+def load_universe(logger: logging.Logger) -> list[str]:
+    """
+    Try `src.watchlist.get_universe()`; fall back to hardcoded list if
+    unavailable or empty. We blend held + decision_queue + a curated
+    wheel-target pool so the brain sees the full cross-section.
+    """
+    try:
+        from src.watchlist import get_universe, flatten  # type: ignore
+        # get_universe needs a sheets client to resolve __from_sheets_*__
+        # sentinels. If sheet auth fails, we still have the YAML's hardcoded
+        # category lists.
+        try:
+            client = sh.authenticate()
+        except Exception as e:
+            logger.warning(f"sheet auth failed for universe ({e}); using YAML fallbacks only")
+            client = None
+        universe = get_universe(client, logger=logger) if client else {}
+        # If sheet auth failed, get_universe is bypassed — read YAML directly.
+        if not universe:
+            try:
+                import yaml
+                yaml_path = _PROJECT_ROOT / "prompts" / "watchlist.yaml"
+                cfg = yaml.safe_load(yaml_path.read_text()) or {}
+                sections = cfg.get("universe") or {}
+                fallback_pool: list[str] = []
+                for body in sections.values():
+                    body = body or {}
+                    fallback_pool.extend(body.get("tickers") or [])
+                    fallback_pool.extend(body.get("fallback") or [])
+                universe = {"yaml_fallback": fallback_pool}
+            except Exception as e:
+                logger.warning(f"YAML fallback failed too ({e}); using hardcoded list")
+                universe = {}
+        flat = flatten(universe) if universe else []
+        if flat:
+            logger.info(f"loaded {len(flat)} tickers from watchlist module")
+            return flat
+    except ImportError:
+        logger.info("src.watchlist not importable — using hardcoded fallback")
+    except Exception as e:
+        logger.warning(f"watchlist load raised {e}; using hardcoded fallback")
+
+    # Hardcoded fallback (de-duped)
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in HARDCODED_FALLBACK:
+        u = t.upper()
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    logger.info(f"using hardcoded fallback universe: {len(out)} tickers")
+    return out
+
+
+# ──────────────────── yfinance fetching ───────────────────────────────────
+
+def _fetch_underlying(ticker: str, logger: logging.Logger) -> Optional[dict]:
+    """
+    Pull current spot + 60-day closes for a ticker. Returns None on failure.
+    """
+    import yfinance as yf
+
+    try:
+        t = yf.Ticker(ticker)
+        # 90 calendar days ≈ 60 trading days
+        hist = t.history(period="90d", interval="1d", auto_adjust=False)
+    except Exception as e:
+        logger.debug(f"  {ticker}: history fetch failed: {e}")
+        return None
+
+    if hist is None or len(hist) < 5:
+        return None
+
+    closes = [float(x) for x in hist["Close"].dropna().tolist() if x and x > 0]
+    if len(closes) < 5:
+        return None
+    spot = closes[-1]
+    sigma = _realized_vol_annual(closes, 60) * 1.10  # 1.1× multiplier per spec
+    return {
+        "ticker": ticker,
+        "spot": spot,
+        "closes": closes,
+        "sigma_proxy": sigma,
+    }
+
+
+def _pick_expiries(expiries: tuple[str, ...]) -> list[str]:
+    """
+    Return up to 3 expiry strings whose DTE falls in [DTE_MIN, DTE_MAX],
+    closest to a 35-DTE midpoint first.
+    """
+    today = date.today()
+    cands: list[tuple[int, str]] = []
+    for exp in expiries:
+        try:
+            ed = datetime.strptime(exp, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        dte = (ed - today).days
+        if DTE_MIN <= dte <= DTE_MAX:
+            cands.append((dte, exp))
+    cands.sort(key=lambda x: abs(x[0] - 35))
+    return [exp for _, exp in cands[:3]]
+
+
+def _candidates_from_chain(
+    ticker: str,
+    expiry_iso: str,
+    right: str,           # "P" (CSP) or "C" (CC)
+    spot: float,
+    sigma_proxy: float,
+    logger: logging.Logger,
+) -> list[dict]:
+    """
+    Walk the option chain at one expiry+right and return per-strike candidate
+    dicts that satisfy the OTM + delta + liquidity gates.
+    """
+    import yfinance as yf
+
+    try:
+        t = yf.Ticker(ticker)
+        chain = t.option_chain(expiry_iso)
+    except Exception as e:
+        logger.debug(f"  {ticker} {expiry_iso} {right}: chain fetch failed: {e}")
+        return []
+
+    df = chain.puts if right == "P" else chain.calls
+    if df is None or df.empty:
+        return []
+
+    today = date.today()
+    try:
+        ed = datetime.strptime(expiry_iso, "%Y-%m-%d").date()
+    except ValueError:
+        return []
+    dte = (ed - today).days
+    if dte < DTE_MIN or dte > DTE_MAX:
+        return []
+    T = max(dte, 1) / 365.0
+
+    out: list[dict] = []
+    for _, row in df.iterrows():
+        try:
+            K = float(row.get("strike") or 0)
+            if K <= 0:
+                continue
+
+            # OTM filter
+            if right == "P":
+                if K >= spot:
+                    continue       # not OTM
+            else:
+                if K <= spot:
+                    continue       # not OTM
+
+            bid = float(row.get("bid", 0) or 0)
+            ask = float(row.get("ask", 0) or 0)
+            last_p = float(row.get("lastPrice", 0) or 0)
+            volume = int(row.get("volume", 0) or 0)
+            oi = int(row.get("openInterest", 0) or 0)
+            iv_chain = float(row.get("impliedVolatility", 0) or 0)
+
+            # Liquidity / mid-price
+            if bid <= MIN_BID:
+                continue
+            if ask <= 0 or ask < bid:
+                continue
+            mid = (bid + ask) / 2
+            if mid <= 0:
+                continue
+            spread_pct = (ask - bid) / mid if mid > 0 else 1.0
+            if spread_pct > MAX_SPREAD_PCT:
+                continue
+
+            # IV — prefer chain IV, fall back to realized-vol proxy
+            iv_for_delta = iv_chain if 0.05 < iv_chain < 3.0 else sigma_proxy
+            if iv_for_delta <= 0:
+                continue
+            iv_for_record = iv_chain if 0.05 < iv_chain < 3.0 else sigma_proxy
+
+            delta = bs_delta(spot, K, T, iv_for_delta, 0.045, right)
+            delta_mag = abs(delta)
+            if delta_mag < DELTA_MIN or delta_mag > DELTA_MAX:
+                continue
+
+            annual_yield = (mid / K) * (365.0 / max(dte, 1)) * 100.0
+
+            out.append({
+                "ticker": ticker,
+                "right": right,
+                "strike": K,
+                "expiry_iso": expiry_iso,
+                "dte": dte,
+                "bid": bid,
+                "ask": ask,
+                "mid": mid,
+                "last": last_p,
+                "iv": iv_for_record,
+                "iv_chain": iv_chain,
+                "delta": delta,
+                "delta_mag": delta_mag,
+                "spread_pct": spread_pct,
+                "volume": volume,
+                "open_interest": oi,
+                "annual_yield_pct": annual_yield,
+                "spot": spot,
+                "sigma_proxy": sigma_proxy,
+            })
+        except (ValueError, KeyError, TypeError):
+            continue
+
+    return out
+
+
+# ──────────────────── IV rank approximation ───────────────────────────────
+
+def _approx_iv_rank(iv_now: float, sigma_proxy: float) -> float:
+    """
+    IV rank without 1Y IV history.
+
+    `sigma_proxy` is realized vol × 1.10 — i.e. an estimate of "fair" IV
+    given the past 60 days of price action. We treat it as the midpoint
+    of an implied IV-history band and map current IV to a percentile:
+
+        ratio = iv_now / sigma_proxy
+        ratio  0.6 → rank   0
+        ratio  1.0 → rank  50  (current IV at par with realized proxy)
+        ratio  1.4 → rank 100  (current IV 40% above proxy = high IV rank)
+
+    Capped to [0, 100]. This is intentionally generous on the upside —
+    when chain IV is well above realized vol, premiums are actually rich,
+    so the rank should reflect that. The brain still owns final selection.
+    """
+    if iv_now <= 0 or sigma_proxy <= 0:
+        return 0.0
+    ratio = iv_now / max(sigma_proxy, 1e-6)
+    # Map ratio band [0.6, 1.4] → [0, 100] with 1.0 = 50.
+    rank = (ratio - 0.6) / (1.4 - 0.6) * 100.0
+    return max(0.0, min(100.0, rank))
+
+
+# ──────────────────── Scoring ────────────────────────────────────────────
+
+def score_candidate(c: dict) -> float:
+    """
+    score = (annual_yield_pct * 2)              # max ~50 (high yield)
+          + (iv_rank * 0.3)                     # max 30 (rich IV)
+          + (-abs(delta - 0.25) * 100)          # max ~5 at 0.25Δ
+          + (-spread_pct * 100)                 # spread penalty
+          + (volume_score)                      # +0-15 for OI > 100
+    """
+    yield_pts = min(50.0, c["annual_yield_pct"] * 2.0)
+    iv_pts = min(30.0, c["iv_rank"] * 0.3)
+    delta_pen = -abs(c["delta_mag"] - DELTA_TARGET) * 100.0   # negative or 0
+    spread_pen = -c["spread_pct"] * 100.0
+    oi = c["open_interest"]
+    if oi >= 1000:
+        liq_pts = 15.0
+    elif oi >= 500:
+        liq_pts = 10.0
+    elif oi >= MIN_OI_FOR_BONUS:
+        liq_pts = 5.0
+    else:
+        liq_pts = 0.0
+    raw = yield_pts + iv_pts + delta_pen + spread_pen + liq_pts
+    # Clamp to [0, 100] for display
+    return max(0.0, min(100.0, raw))
+
+
+# ──────────────────── CC eligibility ────────────────────────────────────
+
+def cc_blocked_by_bucket(ticker: str) -> tuple[bool, str]:
+    """
+    Return (blocked, reason). True if this ticker is in a bucket where CC
+    is NOT eligible (core / blue_chip / leveraged_etf). For blue_chip we
+    block here because the screener doesn't know per-user cost basis;
+    the brain can override at recommendation time if it has cost info.
+    """
+    from src.trading_rules import CC_ELIGIBLE_BUCKETS  # local import — late binding
+
+    bucket = _bucket_for(ticker)
+    if bucket == "blue_chip":
+        return True, "CC blocked: blue_chip (need strike ≥ 115% cost — brain decides)"
+    if not CC_ELIGIBLE_BUCKETS.get(bucket, True):
+        return True, f"CC blocked: {bucket} not CC-eligible"
+    return False, bucket
+
+
+def csp_blocked_by_bucket(ticker: str) -> tuple[bool, str]:
+    """
+    Return (blocked, reason). True if this ticker is in a bucket where CSP
+    is NOT eligible (lottery / leveraged_etf per CSP_ELIGIBLE_BUCKETS).
+    """
+    from src.trading_rules import CSP_ELIGIBLE_BUCKETS  # local import
+
+    bucket = _bucket_for(ticker)
+    if not CSP_ELIGIBLE_BUCKETS.get(bucket, True):
+        return True, f"CSP blocked: {bucket} not CSP-eligible"
+    return False, bucket
+
+
+# ──────────────────── Per-ticker pipeline ────────────────────────────────
+
+def scan_ticker(ticker: str, logger: logging.Logger) -> list[dict]:
+    """
+    Returns a list of fully-scored candidate dicts (CSP and/or CC) for one
+    ticker. Empty list if nothing qualifies.
+    """
+    import yfinance as yf
+
+    base = _fetch_underlying(ticker, logger)
+    if not base:
+        logger.debug(f"  {ticker}: no underlying data")
+        return []
+
+    spot = base["spot"]
+    sigma_proxy = base["sigma_proxy"]
+    if spot <= 0 or sigma_proxy <= 0:
+        return []
+
+    try:
+        t = yf.Ticker(ticker)
+        all_exps = tuple(t.options or ())
+    except Exception as e:
+        logger.debug(f"  {ticker}: options list failed: {e}")
+        return []
+    target_exps = _pick_expiries(all_exps)
+    if not target_exps:
+        return []
+
+    cc_blocked, cc_reason = cc_blocked_by_bucket(ticker)
+    csp_blocked, csp_reason = csp_blocked_by_bucket(ticker)
+    bucket = _bucket_for(ticker)
+
+    raw_candidates: list[dict] = []
+    for exp in target_exps:
+        # CSPs (skip if bucket blocks — e.g. lottery/leveraged_etf)
+        if not csp_blocked:
+            for c in _candidates_from_chain(ticker, exp, "P", spot, sigma_proxy, logger):
+                c["strategy"] = "CSP"
+                c["bucket"] = bucket
+                raw_candidates.append(c)
+        # CCs (skip if bucket blocks)
+        if not cc_blocked:
+            for c in _candidates_from_chain(ticker, exp, "C", spot, sigma_proxy, logger):
+                c["strategy"] = "CC"
+                c["bucket"] = bucket
+                raw_candidates.append(c)
+
+    if not raw_candidates:
+        if cc_blocked and csp_blocked:
+            logger.debug(f"  {ticker}: {cc_reason}; {csp_reason}")
+
+    # Apply IV-rank filter + score
+    ranked: list[dict] = []
+    for c in raw_candidates:
+        c["iv_rank"] = _approx_iv_rank(c["iv"], sigma_proxy)
+        if c["iv_rank"] < MIN_IV_RANK:
+            continue
+        c["score"] = score_candidate(c)
+        ranked.append(c)
+
+    # Per-ticker dedupe: prefer the highest-scoring candidate per
+    # (strategy, expiry) so we don't flood the sheet with multiple
+    # adjacent strikes from the same expiry.
+    by_key: dict[tuple, dict] = {}
+    for c in ranked:
+        key = (c["strategy"], c["expiry_iso"])
+        prev = by_key.get(key)
+        if prev is None or c["score"] > prev["score"]:
+            by_key[key] = c
+    deduped = list(by_key.values())
+
+    return deduped
+
+
+# ──────────────────── Build sheet rows ────────────────────────────────────
+
+def _build_rationale(c: dict) -> str:
+    """One-line "why this candidate" string."""
+    iv_rank = c["iv_rank"]
+    if iv_rank >= 70:
+        iv_word = "very rich"
+    elif iv_rank >= 50:
+        iv_word = "rich"
+    elif iv_rank >= 35:
+        iv_word = "elevated"
+    else:
+        iv_word = "modest"
+    return (
+        f"{c['strategy']} — IV rank {iv_rank:.0f} {iv_word}; "
+        f"{c['dte']} DTE {abs(c['delta']):.2f}Δ at "
+        f"${c['strike']:.2f} strike; "
+        f"{c['annual_yield_pct']:.1f}% annual yield."
+    )[:500]
+
+
+def to_schema_row(c: dict, today_iso: str) -> S.OptionsYieldCandidateRow:
+    return S.OptionsYieldCandidateRow(
+        date=today_iso,
+        ticker=c["ticker"],
+        strategy=c["strategy"],
+        right=c["right"],
+        strike=float(c["strike"]),
+        expiry=c["expiry_iso"].replace("-", ""),
+        dte=int(c["dte"]),
+        underlying_last=float(c["spot"]),
+        delta=float(c["delta"]),
+        premium=float(c["mid"]),
+        annual_yield_pct=float(c["annual_yield_pct"]),
+        iv=float(c["iv"]),
+        iv_rank=float(c["iv_rank"]),
+        moneyness="OTM",
+        spread_pct=float(c["spread_pct"]),
+        open_interest=int(c["open_interest"]),
+        volume=int(c["volume"]),
+        score=float(c["score"]),
+        rationale=_build_rationale(c),
+    )
+
+
+# ──────────────────── Main ────────────────────────────────────────────────
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--dry", "--dry-run", action="store_true",
+                        help="parse only, print rows that would be appended; no Sheet write")
+    parser.add_argument("--limit", type=int, default=0,
+                        help="cap number of tickers to scan (0 = all). useful for local smoke tests.")
+    args = parser.parse_args()
+
+    load_env()
+    logger = setup_logger()
+    today_iso = S.now_sgt_date()
+    logger.info(f"options_yield_screener start (date={today_iso}, dry={args.dry})")
+
+    universe = load_universe(logger)
+    if args.limit > 0:
+        universe = universe[: args.limit]
+    if not universe:
+        logger.warning("empty universe — nothing to scan")
+        return 0
+
+    # Filter out non-US listings (e.g. .SI tickers don't have US options).
+    us_universe = [t for t in universe if "." not in t and "-" not in t.replace("-B", "")]
+    logger.info(f"scanning {len(us_universe)} US-listed tickers (from {len(universe)} total)")
+
+    all_candidates: list[dict] = []
+
+    # Run with bounded concurrency. yfinance is slow; ThreadPoolExecutor
+    # speeds up the I/O-bound option-chain fetches without hammering
+    # Yahoo's rate-limiter (max_workers=3 + sleep between submissions).
+    def _wrapped(t: str) -> list[dict]:
+        try:
+            return scan_ticker(t, logger)
+        except Exception as e:
+            logger.warning(f"  {t}: scan_ticker raised {e}")
+            return []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = []
+        for i, ticker in enumerate(us_universe):
+            futures.append(pool.submit(_wrapped, ticker))
+            # Politeness — slow down submission, not the workers themselves
+            if i and i % MAX_WORKERS == 0:
+                time.sleep(INTER_TICKER_SLEEP)
+        for fut in as_completed(futures):
+            cands = fut.result()
+            if cands:
+                t = cands[0]["ticker"]
+                logger.info(
+                    f"  {t}: {len(cands)} candidate(s) "
+                    f"(top score {max(c['score'] for c in cands):.1f})"
+                )
+                all_candidates.extend(cands)
+
+    if not all_candidates:
+        logger.warning("no candidates passed filters — nothing to write")
+        return 0
+
+    # Sort all candidates by score desc, keep top MAX_TOP
+    all_candidates.sort(key=lambda c: c["score"], reverse=True)
+    top = all_candidates[:MAX_TOP]
+    logger.info(f"top {len(top)} of {len(all_candidates)} total candidates")
+
+    # Build sheet rows
+    rows = [to_schema_row(c, today_iso) for c in top]
+
+    if args.dry:
+        for r in rows:
+            print(f"  [dry] {r.to_row()}")
+        # Plus a human-readable rationale list
+        print("\n=== TOP CANDIDATES ===")
+        for c in top:
+            print(
+                f"  {c['ticker']:<6} {c['strategy']} {c['right']} "
+                f"${c['strike']:>7.2f} exp={c['expiry_iso']} dte={c['dte']:>2} "
+                f"|Δ|={c['delta_mag']:.2f} prem=${c['mid']:.2f} "
+                f"yield={c['annual_yield_pct']:>5.1f}% IVr={c['iv_rank']:>3.0f} "
+                f"score={c['score']:>5.1f}"
+            )
+        return 0
+
+    try:
+        client = sh.authenticate()
+        sh.ensure_headers(client, S.OptionsYieldCandidateRow.TAB_NAME,
+                          S.OptionsYieldCandidateRow.HEADERS)
+        n = sh.append_rows(client, S.OptionsYieldCandidateRow.TAB_NAME,
+                           [r.to_row() for r in rows])
+        logger.info(f"appended {n} rows to {S.OptionsYieldCandidateRow.TAB_NAME}")
+    except Exception as e:
+        logger.error(f"sheets write failed: {e}")
+        return 2
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
