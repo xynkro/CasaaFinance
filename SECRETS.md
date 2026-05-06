@@ -62,6 +62,38 @@ credentials. Treat it like a password.
 
 ---
 
+## OPTIONAL: FMP API key for regime detection
+
+The `regime-signals.yml` and `screen-candidates.yml` workflows wrap the
+trader's quant skills (`ftd-detector`, `ibd-distribution-day-monitor`,
+`macro-regime-detector`, `vcp-screener`, `canslim-screener`). All of these
+need a Financial Modeling Prep API key for fundamentals + price history.
+
+`market-breadth-analyzer` does NOT need FMP — it pulls TraderMonty's public
+CSV. It will always run regardless.
+
+**Until `FMP_API_KEY` is set, the FMP-gated skills are skipped gracefully** —
+each one logs `skipped — no FMP key` and the workflow exits 0. No failures.
+
+### To enable the FMP-gated skills
+
+1. Sign up at <https://financialmodelingprep.com> (free tier: 250 calls/day —
+   plenty for the daily regime cron + the weekly screener cron).
+2. Add to your `~/.zshrc` (so `casaa exposure` etc. work locally):
+   ```bash
+   export FMP_API_KEY=your_key_here
+   ```
+3. Add as a GitHub Actions secret (so the cron jobs see it):
+   ```bash
+   gh secret set FMP_API_KEY --repo xynkro/CasaaFinance
+   # paste key at the prompt
+   ```
+
+After this, the next scheduled `regime-signals` run will populate `ftd`,
+`distribution_day`, and `macro_regime` rows in addition to `market_breadth`.
+
+---
+
 ## Verify the secrets work
 
 Once all 4 secrets are added, manually trigger any of the simple workflows:
@@ -90,6 +122,8 @@ files for UTC values.
 | `options-refresh.yml` | Every 30min, US market hours (Mon-Fri 21:00-05:30 SGT) | Full options refresh: moneyness/DTE/assignment_risk/momentum/RSI/SMA/sigma — frees Mac from daily critical path |
 | `market-scan.yml` | Daily 10:33 | Options screener across LunarCrush + WSB + quality watchlist |
 | `poll-drive-wsr.yml` | :13, :43 every hour | Pick up any .md you upload manually to Drive |
+| `regime-signals.yml` | Mon-Fri 22:00 UTC (06:00 SGT next day) | Regime indicators (breadth + ftd + dist-day + macro) → exposure posture |
+| `screen-candidates.yml` | Sun 11:00 UTC (19:00 SGT) | Weekly fresh tickers (vcp + canslim) before WSR Full |
 
 ---
 

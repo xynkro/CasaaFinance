@@ -83,6 +83,33 @@ case "${1:-help}" in
     gh workflow run market-scan.yml --repo "$GH_REPO"
     ;;
 
+  regime)
+    echo "→ regime-signals (cloud cron, manual trigger)"
+    gh workflow run regime-signals.yml --repo "$GH_REPO"
+    ;;
+
+  screen)
+    echo "→ screen-candidates (cloud cron, manual trigger)"
+    gh workflow run screen-candidates.yml --repo "$GH_REPO"
+    ;;
+
+  exposure)
+    # Always runs locally — needs no FMP key (works off whatever's in the
+    # `regime_signals` sheet plus current snapshot rows).
+    echo "→ exposure_posture (local)"
+    source .venv/bin/activate
+    python scripts/exposure_posture_run.py
+    ;;
+
+  breadth)
+    # Local breadth-analyzer + append to regime_signals sheet. Runs the
+    # market_breadth source only (no FMP gating). Useful as a quick smoke
+    # test that the regime pipeline works.
+    echo "→ market-breadth-analyzer (local, regime_signals row only)"
+    source .venv/bin/activate
+    python scripts/regime_signals_run.py
+    ;;
+
   deploy)
     gh run list --workflow=deploy.yml --limit 5 --repo "$GH_REPO"
     ;;
@@ -132,6 +159,12 @@ DATA REFRESH
   options         cloud options refresh (price + moneyness + Greeks)
   scan            daily options scan
   market-scan     market scan (broad universe)
+
+REGIME / EXPOSURE / SCREEN
+  breadth         local market-breadth-analyzer -> regime_signals row
+  regime          cloud regime-signals (breadth + ftd + dist-day + macro)
+  exposure        local exposure_posture (caspar + sarah headroom)
+  screen          cloud screen-candidates (vcp + canslim, FMP key required)
 
 BRAIN
   brief           daily brief (cloud, Opus)

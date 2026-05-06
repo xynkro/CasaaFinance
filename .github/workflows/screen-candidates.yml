@@ -1,0 +1,58 @@
+name: Screen Candidates — Weekly
+
+# Sunday before WSR Full. Runs vcp-screener + canslim-screener and writes the
+# top 10 from each into the `screen_candidates` sheet tab so the WSR brain
+# has fresh names rather than recycling the watchlist.
+#
+# Both screeners require FMP_API_KEY. If unset, the wrapper exits 0 silently
+# (logged warning). The free FMP tier (250 calls/day) is sufficient when the
+# CANSLIM screener is bounded to --max-candidates 35 (default in the wrapper).
+#
+# Skill scripts are vendored under vendor/skills/<skill-name>/.
+
+on:
+  schedule:
+    # 11:00 UTC Sunday = 19:00 SGT Sunday — runs ~37min before wsr-full.yml
+    # so its rows are fresh when the WSR brain reads them.
+    - cron: "0 11 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: screen-candidates
+  cancel-in-progress: true
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+      FMP_API_KEY:      ${{ secrets.FMP_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Install skill deps
+        run: pip install pandas numpy PyYAML
+
+      - name: Run screen_candidates_run
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/screen_candidates_run.py $ARGS

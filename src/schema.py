@@ -632,6 +632,107 @@ class OptionRecommendationRow:
 
 
 @dataclass
+class RegimeSignalRow:
+    """
+    Daily snapshot of one regime indicator. Append-only audit trail.
+    The brain (Opus WSR Full / Lite) reads the latest row per `source` to
+    ground its regime classification rather than vibes-classifying.
+
+    Sources expected:
+      - "market_breadth"      (no API key — runs every day)
+      - "ftd"                 (FMP key required)
+      - "distribution_day"    (FMP key required)
+      - "macro_regime"        (FMP key required)
+      - "market_top"          (FMP key required + breadth args)
+    """
+    TAB_NAME = "regime_signals"
+    HEADERS = [
+        "date", "source", "score", "label", "summary", "raw_json",
+    ]
+
+    date: str
+    source: str         # see docstring above
+    score: float        # 0-100 normalized per-source
+    label: str          # short tag e.g. "Weakening" | "FTD_CONFIRMED" | "HIGH_RISK"
+    summary: str        # 1-line human-readable
+    raw_json: str       # full skill output (truncated to 5KB)
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        # Truncate raw_json to 5KB to stay well below Sheets cell limit (50K).
+        raw = self.raw_json or ""
+        if len(raw) > 5000:
+            raw = raw[:5000] + "...[truncated]"
+        return [d, self.source, _num(self.score, 1), self.label, self.summary, raw]
+
+
+@dataclass
+class ExposurePostureRow:
+    """
+    Daily exposure-coach output — synthesizes regime_signals + portfolio
+    state into a single posture decision. Brain reads latest row to constrain
+    new entries vs cash priority.
+    """
+    TAB_NAME = "exposure_posture"
+    HEADERS = [
+        "date", "exposure_ceiling_pct", "bias", "participation",
+        "recommendation", "confidence", "rationale", "components_json",
+    ]
+
+    date: str
+    exposure_ceiling_pct: float       # 0-100
+    bias: str                         # "GROWTH" | "VALUE" | "NEUTRAL"
+    participation: str                # "BROAD" | "NARROW"
+    recommendation: str               # "NEW_ENTRY_ALLOWED" | "REDUCE_ONLY" | "CASH_PRIORITY"
+    confidence: str                   # "HIGH" | "MEDIUM" | "LOW"
+    rationale: str                    # multi-sentence explanation incl. headroom
+    components_json: str              # all 8 component scores as JSON
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        comp = self.components_json or ""
+        if len(comp) > 5000:
+            comp = comp[:5000] + "...[truncated]"
+        return [
+            d, _num(self.exposure_ceiling_pct, 0),
+            self.bias, self.participation, self.recommendation,
+            self.confidence, self.rationale, comp,
+        ]
+
+
+@dataclass
+class ScreenCandidateRow:
+    """
+    Weekly fresh-ticker screen output (vcp + canslim). Sunday before WSR Full
+    so the WSR brain has fresh names rather than recycling the watchlist.
+    """
+    TAB_NAME = "screen_candidates"
+    HEADERS = [
+        "date", "source", "ticker", "sector", "score",
+        "trigger_price", "stop_price", "rationale",
+    ]
+
+    date: str
+    source: str          # "vcp" | "canslim"
+    ticker: str
+    sector: str
+    score: float         # 0-100 quality
+    trigger_price: float # entry trigger (pivot for VCP, blank for CANSLIM)
+    stop_price: float    # implied stop
+    rationale: str       # why this passed the screen
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.source, self.ticker, self.sector,
+            _num(self.score, 1),
+            _num(self.trigger_price, 4) if self.trigger_price else "",
+            _num(self.stop_price, 4) if self.stop_price else "",
+            self.rationale,
+        ]
+
+
+@dataclass
 class TradeRow:
     """Individual trade/execution from IBKR."""
     TAB_NAME = "trades"

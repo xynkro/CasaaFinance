@@ -1,0 +1,74 @@
+name: Regime Signals — Daily
+
+# Daily regime + exposure pipeline. Runs the trader's quant skills
+# (market-breadth-analyzer, ftd-detector, ibd-distribution-day-monitor,
+# macro-regime-detector) and feeds their output into exposure-coach.
+# Each row written to the `regime_signals` and `exposure_posture` sheet
+# tabs grounds the WSR + Daily brain in numbers rather than vibes.
+#
+# FMP_API_KEY is OPTIONAL — when absent, FMP-gated skills are gracefully
+# skipped (logged warning), and exposure-coach falls back to LOW confidence
+# using just the breadth signal. The workflow exits 0 either way.
+#
+# Skill scripts are vendored under vendor/skills/<skill-name>/ so the
+# cloud runner has them without needing a separate skill marketplace clone.
+
+on:
+  schedule:
+    # 22:00 UTC = 06:00 SGT next day = US after-close + ~6h. Latest TraderMonty
+    # CSV is usually fresh by then; macro-regime/FTD pull the day's close from FMP.
+    # Mon-Fri only (no weekend US sessions to detect).
+    - cron: "0 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regime-signals
+  cancel-in-progress: true
+
+jobs:
+  signals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+      # FMP_API_KEY is optional — may be empty. The wrappers handle absence.
+      FMP_API_KEY:      ${{ secrets.FMP_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Install skill deps
+        # Skill scripts under vendor/skills/ import pandas/numpy/PyYAML in
+        # addition to project's existing requests. Add minimal extras here.
+        run: pip install pandas numpy PyYAML
+
+      - name: Run regime_signals_run
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/regime_signals_run.py $ARGS
+
+      - name: Run exposure_posture_run
+        # Always runs after regime_signals — even if breadth was the only
+        # input, exposure-coach still emits a (LOW-confidence) posture row.
+        if: always()
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/exposure_posture_run.py $ARGS
