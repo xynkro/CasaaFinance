@@ -49,6 +49,13 @@ ss = sh._open_sheet(client)
 # - tv_signals (LATEST per ticker, both 1d and 1W intervals — TradingView's
 #     26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL plus
 #     all underlying indicator values)
+# - watchlist universe: read prompts/watchlist.yaml — categorized
+#     ticker pool the brain should consider beyond just held + queue.
+#     Categories: held, stock_positions_sarah, decision_queue_active,
+#     defensive_etfs, commodity, volatility, blue_chip_dividend,
+#     speculative_growth, high_iv_wheel_targets. Use src.watchlist
+#     get_universe(client) to resolve the live ticker lists; tv_signals
+#     should already cover all of these on the 1d + 1W consensus.
 ```
 
 ### 3. Web research — week's macro & news
@@ -131,6 +138,24 @@ Read the last 30 days of `screen_candidates` rows. For each ticker NOT already i
 - If exposure is constrained: add as `status: watching` with the screen's trigger_price as entry
 
 The vcp-screener feeds Minervini-style breakout candidates. canslim-screener feeds O'Neil growth candidates. Treat them as fresh-blood inputs.
+
+**Universe expansion (forced):** before synthesizing, sweep the
+watchlist categories from `prompts/watchlist.yaml` that match the
+current regime:
+- Defensive regime (CASH_PRIORITY / REDUCE_ONLY) → defensive_etfs +
+  commodity + volatility + blue_chip_dividend
+- Neutral regime → all categories
+- Bullish regime → +speculative_growth +high_iv_wheel_targets
+
+For each ticker in the relevant categories with daily TV BUY signal
+NOT in your decision_queue, evaluate as a potential new entry. Don't
+silently skip — at minimum mention 2-3 names you considered and
+explain why you didn't propose them (e.g. "Considered XLV (defensive
+ETF) — daily NEUTRAL on TV, weekly BUY but exposure ceiling at 50%
+already; will revisit if posture loosens"). This is the user's
+explicit instruction — the brain previously vibes-limited itself to
+~28 tickers (held + decision_queue) and missed defensive/spec
+opportunities outside the existing book.
 
 **Strategy-class signals (for awareness, not auto-execution):** when the named pattern is observed, propose appropriately. The user has these skills available; you don't run them but you can reference them in thesis text:
 - **Breakout entry** (`breakout-trade-planner` style): tight handle, low-volume contraction, breakout on > 1.5x volume → propose `BUY_DIP` near pivot

@@ -83,6 +83,32 @@ case "${1:-help}" in
     gh workflow run market-scan.yml --repo "$GH_REPO"
     ;;
 
+  watchlist|wl)
+    # Show or edit the curated universe (`prompts/watchlist.yaml`).
+    # The brain reads this to know which categories to sweep when
+    # proposing fresh ideas, and tv_signals_run / screen_candidates_run
+    # use it as their input universe.
+    if [ "${2:-show}" = "edit" ]; then
+      ${EDITOR:-nano} "$REPO/prompts/watchlist.yaml"
+    else
+      source .venv/bin/activate
+      python3 -c "
+from src.watchlist import get_universe
+from src.sync import load_env
+from src import sheets as sh
+load_env()
+client = sh.authenticate()
+u = get_universe(client)
+total_unique = len(set(t for ts in u.values() for t in ts))
+for cat, tickers in u.items():
+    head = ', '.join(tickers[:8])
+    tail = '...' if len(tickers) > 8 else ''
+    print(f'  {cat:30} {len(tickers):3} tickers: {head}{tail}')
+print(f'  {\"TOTAL UNIQUE\":30} {total_unique}')
+"
+    fi
+    ;;
+
   regime)
     echo "→ regime-signals (cloud cron, manual trigger)"
     gh workflow run regime-signals.yml --repo "$GH_REPO"
@@ -166,6 +192,7 @@ DATA REFRESH
   market-scan     market scan (broad universe)
 
 REGIME / EXPOSURE / SCREEN
+  watchlist [show|edit]  show or edit the curated ~80-ticker universe
   breadth         local market-breadth-analyzer -> regime_signals row
   regime          cloud regime-signals (breadth + ftd + dist-day + macro)
   exposure        local exposure_posture (caspar + sarah headroom)

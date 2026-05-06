@@ -33,8 +33,11 @@ universe and cache misses in `~/.cache/casaa/tv_exchange_map.json`.
 For a brand-new ticker not in the hardcode list we try NASDAQ first;
 on failure (status_code "ok" but no data row), retry on NYSE.
 
-Throttling: 0.5s sleep between batch calls (~6 calls per run incl.
-fallbacks). On any HTTP 429: sleep 60s, retry once, then surrender.
+Throttling: 0.5s sleep between batch calls. With the wider watchlist
+universe (~80-90 tickers) at batch=20, the run hits ~5 batches per
+interval × 2 intervals = ~10 primary batches, plus fallback retries
+on alternate exchanges. Total wall clock typically 30-60s. On any
+HTTP 429: sleep 60s, retry once, then surrender.
 
 Usage:
   python scripts/tv_signals_run.py            # live — appends to sheet
@@ -63,6 +66,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 from src import schema as S          # noqa: E402
 from src import sheets as sh         # noqa: E402
 from src.sync import load_env        # noqa: E402
+from src.watchlist import get_universe  # noqa: E402
 
 # --- exchange cache ---------------------------------------------------------
 
@@ -305,17 +309,31 @@ def _read_latest_tickers_from_tab(client, tab_name: str, ticker_col_idx: int,
 
 def build_universe(client, logger: logging.Logger) -> list[str]:
     """
-    Dedup-merge tickers from active books:
-      - decision_queue (last 30d, col 2 = ticker)
-      - options (latest, col 2 = underlying)
-      - scan_results (last 7d, col 1 = ticker)
-      - screen_candidates (last 30d, col 2 = ticker) — may be empty
-      - positions_caspar (latest, col 1 = ticker)
-      - positions_sarah (latest, col 1 = ticker)
-    SGX tickers are dropped (not on TV `america`).
+    Dedup-merge tickers from BOTH (a) the curated watchlist YAML universe
+    (~80 names across 9 regime-tagged categories — held, stock_positions,
+    decision_queue_active, defensive_etfs, commodity, volatility,
+    blue_chip_dividend, speculative_growth, high_iv_wheel_targets), AND
+    (b) the legacy active-book reads kept as a safety net so anything
+    that touches our books (scan_results, options, etc.) still shows
+    up even if the YAML drifts.
+
+    SGX tickers are dropped (not on TV `america`). VIX is dropped here —
+    spot index, not a TV scanner symbol; brain knows about it via the
+    YAML's `notes` field but we don't try to pull TA on it.
     """
     universe: set[str] = set()
 
+    # (a) curated YAML universe — primary source, regime-tagged
+    try:
+        cats = get_universe(client, logger)
+        cat_summary = ", ".join(f"{c}={len(t)}" for c, t in cats.items())
+        logger.info(f"  [universe] watchlist.yaml: {cat_summary}")
+        for tickers in cats.values():
+            universe |= set(tickers)
+    except Exception as e:
+        logger.warning(f"  [universe] watchlist.yaml read failed ({e}) — falling back to book-only")
+
+    # (b) legacy active-book safety net — keeps any book touch in scope
     universe |= _read_recent_tickers_from_tab(client, "decision_queue", 2, 30, logger)
     universe |= _read_latest_tickers_from_tab(client, "options", 2, logger)
     universe |= _read_recent_tickers_from_tab(client, "scan_results", 1, 7, logger)
@@ -323,8 +341,10 @@ def build_universe(client, logger: logging.Logger) -> list[str]:
     universe |= _read_latest_tickers_from_tab(client, "positions_caspar", 1, logger)
     universe |= _read_latest_tickers_from_tab(client, "positions_sarah", 1, logger)
 
-    # Drop SGX-only and obvious non-tickers.
-    universe = {t for t in universe if t and t not in SGX_TICKERS and len(t) <= 6}
+    # Drop SGX-only, VIX (spot index — TV scanner doesn't quote it), and
+    # obvious non-tickers.
+    drop = SGX_TICKERS | {"VIX"}
+    universe = {t for t in universe if t and t not in drop and len(t) <= 6}
     return sorted(universe)
 
 

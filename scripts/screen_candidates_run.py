@@ -37,6 +37,7 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 from src import schema as S          # noqa: E402
 from src import sheets as sh         # noqa: E402
 from src.sync import load_env        # noqa: E402
+from src.watchlist import get_universe, flatten  # noqa: E402
 
 
 # Skill scripts: prefer user-local `~/.claude/skills/...`, fall back to
@@ -134,15 +135,29 @@ class ScreenerSpec:
     extractor: Callable[[dict], list[S.ScreenCandidateRow]]
 
 
-def _run_screener(spec: ScreenerSpec, logger: logging.Logger) -> list[S.ScreenCandidateRow]:
-    """Run one screener, return list of candidate rows. [] on error."""
+def _run_screener(spec: ScreenerSpec, logger: logging.Logger,
+                   universe: list[str] | None = None) -> list[S.ScreenCandidateRow]:
+    """
+    Run one screener, return list of candidate rows. [] on error.
+
+    If `universe` is non-empty, the screener is invoked with `--universe
+    T1 T2 …` so it screens our curated watchlist names directly instead
+    of the screener's default S&P 500 list. This guarantees our 80
+    regime-tagged names (defensive ETFs, commodity, blue-chip dividend,
+    spec-growth, high-IV wheel targets) all get rated, which is the
+    point of the wider universe.
+    """
     if not spec.script_path.exists():
         logger.warning(f"  [{spec.source}] skipped — script not found: {spec.script_path}")
         return []
 
     with tempfile.TemporaryDirectory() as tmp:
         cmd = [sys.executable, str(spec.script_path), "--output-dir", tmp, *spec.extra_args]
-        logger.info(f"  [{spec.source}] running: {' '.join(cmd[-4:])}")
+        if universe:
+            cmd.extend(["--universe", *universe])
+        logger.info(
+            f"  [{spec.source}] running on {len(universe) if universe else 'default'} symbols"
+        )
         try:
             r = subprocess.run(
                 cmd, cwd=tmp, capture_output=True, text=True, timeout=900,
@@ -221,9 +236,21 @@ def main() -> int:
     today = S.now_sgt_date()
     logger.info(f"screen_candidates_run start (date={today}, dry={args.dry})")
 
+    # Resolve the wide watchlist universe up-front so both screeners run
+    # against the same name set. Sheet auth is needed for the
+    # __from_sheets_*__ sentinels — falls back to YAML-only if it fails.
+    universe: list[str] = []
+    try:
+        client = sh.authenticate()
+        cats = get_universe(client, logger)
+        universe = flatten(cats)
+        logger.info(f"  [universe] watchlist resolved -> {len(universe)} unique tickers")
+    except Exception as e:
+        logger.warning(f"  [universe] sheet auth/resolve failed ({e}) — screeners use defaults")
+
     all_rows: list[S.ScreenCandidateRow] = []
     for spec in build_specs():
-        all_rows.extend(_run_screener(spec, logger))
+        all_rows.extend(_run_screener(spec, logger, universe=universe))
 
     if not all_rows:
         logger.warning("no candidates produced — nothing to append")

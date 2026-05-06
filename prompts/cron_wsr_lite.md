@@ -102,6 +102,14 @@ For swing-trading entry/exit pattern recognition, see `prompts/swing_playbook.md
 Cite the named pattern in your thesis when applicable (e.g. "Pullback to 20EMA",
 "VCP", "Liquidity sweep", "Breakout retest").
 
+**Universe expansion (forced):** sweep `prompts/watchlist.yaml`
+categories that match the current regime — defensive_etfs + commodity
++ volatility + blue_chip_dividend in defensive regimes; add
+speculative_growth + high_iv_wheel_targets when bullish. For each
+ticker NOT already in your decision_queue with a daily TV BUY signal,
+evaluate as a candidate. Mention 2-3 names you considered (and skipped)
+in the verdict so it's visible the brain looked outside the held book.
+
 **Defensive Expansion (REQUIRED — regardless of regime):**
 
 Even in CASH_PRIORITY / REDUCE_ONLY regimes, the brain MUST propose a

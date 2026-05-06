@@ -1,0 +1,68 @@
+# watchlist.yaml — curated universe the brain considers each run.
+#
+# Why this file exists: the brain was previously vibes-limited to ~28
+# tickers (held + decision_queue). It cannot propose what it never
+# analyses. This file widens the input pool to ~80 names across
+# regime-tagged categories.
+#
+# Consumed by:
+#   - src/watchlist.py loader → resolves __from_sheets_*__ sentinels at
+#     run time and returns {category: [tickers]}
+#   - scripts/tv_signals_run.py → flattens + dedupes, feeds the wide
+#     universe to the TradingView 26-indicator pull
+#   - scripts/screen_candidates_run.py → same wide pool gates the vcp +
+#     canslim screeners
+#   - prompts/cron_wsr_full.md §2 + §5 and prompts/cron_wsr_lite.md §3 →
+#     brain reads this file to know which categories to sweep when
+#     proposing fresh ideas, conditioned on regime
+#
+# Sentinel values:
+#   __from_sheets__ — read holding tickers from positions_caspar +
+#     positions_sarah (latest snapshot)
+#   __from_sheets_positions_sarah__ — Sarah's stock holdings only
+#   __from_sheets_positions_caspar__ — Caspar's stock holdings only
+#   __from_sheets_decision_queue_30d__ — decision_queue tickers in the
+#     last 30 days
+#
+# Anything else under `tickers:` is a hardcoded list.
+
+universe:
+
+  held:
+    description: Current options-book underlyings — read live from positions
+    source: __from_sheets__
+    fallback: [BBAI, BTBT, OPEN, RCAT, AAPL, BYND, SBET, HIMS]
+
+  stock_positions_sarah:
+    description: Sarah's stock holdings — read live from positions_sarah
+    source: __from_sheets_positions_sarah__
+
+  decision_queue_active:
+    description: Decisions in last 30 days — read live from decision_queue
+    source: __from_sheets_decision_queue_30d__
+
+  defensive_etfs:
+    description: Sector defensives — held high-quality ballast (regime hedge)
+    tickers: [XLV, XLP, XLU, VHT, VDC, VPU, ITA, KRE]
+
+  commodity:
+    description: Hard assets + ag/energy hedges
+    tickers: [GLD, SLV, GDX, GDXJ, USO, UNG, DBA, CPER]
+
+  volatility:
+    description: Volatility products — VIX is spot-only; UVXY/SVXY tradeable
+    tickers: [VIX, VIXM, UVXY, SVXY]
+    notes: VIX is spot index — not investable. Use VIXM or UVXY for actual exposure.
+
+  blue_chip_dividend:
+    description: Quality dividend payers and mega-cap compounders
+    tickers: [KO, JNJ, PG, JPM, V, MA, MSFT, GOOGL, AMZN, META, NFLX]
+    # BRK.B uses dot — handle separately if needed
+
+  speculative_growth:
+    description: Higher-volatility growth names — fertile ground for momentum trades
+    tickers: [TSLA, NVDA, AMD, COIN, PLTR, RIVN, RDDT, AFRM, SHOP, SQ]
+
+  high_iv_wheel_targets:
+    description: Names that historically offer juicy CSP/CC premiums
+    tickers: [F, T, BAC, WFC, INTC, MU, PYPL, U, RBLX, SOFI]
