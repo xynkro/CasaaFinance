@@ -129,6 +129,62 @@ function ConvictionDots({ level }: { level: number }) {
   );
 }
 
+/**
+ * Phased buy plan row — shows total qty + tranche breakdown for share recs.
+ * Hidden when both qty and accumulation_plan are absent (option strategies
+ * don't phase, so they leave both empty).
+ *
+ * The plan is pipe-separated ("5sh now | 5sh in 30d | 5sh on -5% pullback");
+ * we render each tranche on its own line with a Tn label so the user can
+ * scan the schedule at a glance instead of parsing one long string.
+ */
+function AccumulationPlanRow({ decision }: { decision: DecisionRow }) {
+  const planRaw = decision.accumulation_plan?.trim();
+  const qty = Number(decision.qty) || 0;
+  if (!planRaw && !qty) return null;
+
+  const tranches = planRaw
+    ? planRaw.split("|").map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  return (
+    <div
+      style={{
+        backgroundColor: "rgba(99,102,241,0.045)",
+        border: "1px solid rgba(99,102,241,0.18)",
+        borderRadius: 10,
+        padding: "8px 10px",
+        marginBottom: 12,
+      }}
+    >
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[length:var(--t-2xs)] uppercase font-semibold tracking-wider" style={{ color: "#a5b4fc" }}>
+          Accumulation
+        </span>
+        {qty > 0 && (
+          <span className="text-[length:var(--t-xs)] tabular-nums text-slate-300">
+            <span className="text-slate-500">total </span>{qty}sh
+          </span>
+        )}
+      </div>
+      {tranches.length > 0 ? (
+        <div className="flex flex-col gap-0.5">
+          {tranches.map((t, i) => (
+            <div key={i} className="flex items-center gap-2 text-[length:var(--t-xs)]">
+              <span className="text-slate-500 w-7 shrink-0 tabular-nums">T{i + 1}</span>
+              <span className="text-slate-300 leading-snug">{t}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[length:var(--t-xs)] text-slate-500">
+          {qty}sh — single tranche
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
   const strike = Number(decision.strike) || 0;
   const conf = Number(decision.thesis_confidence) || 0;
@@ -575,6 +631,9 @@ function DecisionCard({
       {/* TradingView 26-indicator consensus (1d + 1W) — external sanity-check
           on the brain's thesis. Amber warning if timeframes disagree. */}
       <TvConsensusChip consensus={tvConsensus} />
+
+      {/* Accumulation/tranche plan (share recs only — option recs leave it empty) */}
+      <AccumulationPlanRow decision={decision} />
 
       {/* Options-spec sub-row (only for option strategies) */}
       {showOptionsSpec && <OptionsSpecRow decision={decision} />}

@@ -358,6 +358,13 @@ export interface DecisionRow {
   thesis_confidence?: string;
   thesis?: string;
   source?: string;
+  // Phase 5b — accumulation/tranche plan extension. `qty` is the total
+  // planned share/contract count (string from sheet, parse to int). The
+  // brain or risk_parity_recommend emits a pipe-separated tranche plan
+  // ("5sh now | 5sh in 30d | 5sh on -5% pullback to $79.20") for share
+  // recs; option recs leave it empty.
+  qty?: string;
+  accumulation_plan?: string;
 }
 
 export interface ArchiveRow {

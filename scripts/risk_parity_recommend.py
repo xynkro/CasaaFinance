@@ -430,6 +430,133 @@ def compute_entry_stop_target(
     return entry, stop, target
 
 
+# --- accumulation plan logic ---------------------------------------------
+#
+# The user wants explicit phasing: "buy 5 now, then 5 later or next month".
+# We split the recommended qty into 1-3 tranches based on conviction +
+# regime status, mixing calendar triggers ("+30d") with conditional ones
+# ("on -5% pullback", "on TV daily=BUY").
+#
+# Philosophy:
+#   conv 4-5 + defensive class:  front-load (50/30/20) — can't wait, hedge now
+#   conv 4-5 + growth class:     balanced  (33/33/34)
+#   conv 3:                      conditional (33% now, 33% on confirm, 34% +60d/-5%)
+#   conv 1-2:                    toehold   (25% now, 50% on confirm, 25% on -8%)
+#   status=watching:             0sh now (regime gate), then 50/50 once gated
+# All splits floor each tranche at 1sh; tail tranche absorbs the remainder.
+# qty<3 collapses to single tranche ("Nsh now"); qty=0 returns "" (price unknown).
+
+def _split_3way(qty: int, w1: float, w2: float) -> tuple[int, int, int]:
+    """Split qty into 3 tranches with weights (w1, w2, 1-w1-w2). Each ≥1."""
+    if qty <= 0:
+        return 0, 0, 0
+    if qty == 1:
+        return 1, 0, 0
+    if qty == 2:
+        return 1, 1, 0
+    t1 = max(1, int(round(qty * w1)))
+    t2 = max(1, int(round(qty * w2)))
+    if t1 + t2 >= qty:
+        # Pathological — clamp t2 so t3 is at least 1.
+        t2 = max(1, qty - t1 - 1)
+    t3 = qty - t1 - t2
+    return t1, t2, t3
+
+
+def _split_2way(qty: int, w1: float) -> tuple[int, int]:
+    """Split qty into 2 tranches with weights (w1, 1-w1). Each ≥1 (when possible)."""
+    if qty <= 0:
+        return 0, 0
+    if qty == 1:
+        return 1, 0
+    t1 = max(1, int(round(qty * w1)))
+    if t1 >= qty:
+        t1 = qty - 1
+    t2 = qty - t1
+    return t1, t2
+
+
+def build_accumulation_plan(
+    qty: int,
+    conv: int,
+    asset_class: str,
+    status: str,
+    entry_price: float,
+) -> str:
+    """
+    Compose pipe-separated tranche plan. Empty string for qty<=0.
+    See module-level comment block above for the splitting philosophy.
+    """
+    if qty <= 0:
+        return ""
+    if qty < 3:
+        # Too small to phase meaningfully — single tranche.
+        return f"{qty}sh now"
+
+    pull_5 = entry_price * 0.95 if entry_price > 0 else 0.0
+    pull_8 = entry_price * 0.92 if entry_price > 0 else 0.0
+
+    # status="watching" overrides — exposure_posture is gating new entries.
+    if status == "watching":
+        t_a, t_b = _split_2way(qty, 0.5)
+        gate_price = f"${entry_price:.2f}" if entry_price > 0 else "current"
+        parts = [
+            "0sh now (watching exposure_posture)",
+            f"{t_a}sh on NEW_ENTRY_ALLOWED at {gate_price}",
+        ]
+        if t_b > 0:
+            parts.append(f"{t_b}sh +30d after T2 fills")
+        return " | ".join(parts)
+
+    # status="pending" — actively splitting.
+    if conv >= 4 and asset_class in DEFENSIVE_CLASSES:
+        # Front-load defensive: 50/30/20.
+        t1, t2, t3 = _split_3way(qty, 0.50, 0.30)
+        parts = [f"{t1}sh now", f"{t2}sh in 30d"]
+        if t3 > 0:
+            tail = (
+                f"{t3}sh on -5% pullback to ${pull_5:.2f}"
+                if pull_5 > 0 else f"{t3}sh on -5% pullback"
+            )
+            parts.append(tail)
+        return " | ".join(parts)
+
+    if conv >= 4:
+        # Balanced growth: 33/33/34.
+        t1, t2, t3 = _split_3way(qty, 1/3, 1/3)
+        parts = [f"{t1}sh now", f"{t2}sh in 30d"]
+        if t3 > 0:
+            tail = (
+                f"{t3}sh on -5% pullback to ${pull_5:.2f}"
+                if pull_5 > 0 else f"{t3}sh on -5% pullback"
+            )
+            parts.append(tail)
+        return " | ".join(parts)
+
+    if conv == 3:
+        # Conditional: 33% now, 33% on TV BUY confirm, 34% +60d or -5%.
+        t1, t2, t3 = _split_3way(qty, 1/3, 1/3)
+        parts = [f"{t1}sh now", f"{t2}sh on TV daily=BUY confirm"]
+        if t3 > 0:
+            tail = (
+                f"{t3}sh in 60d or on -5% to ${pull_5:.2f}"
+                if pull_5 > 0 else f"{t3}sh in 60d or on -5%"
+            )
+            parts.append(tail)
+        return " | ".join(parts)
+
+    # conv 1-2: toehold + heavy DCA on confirmation.
+    t1, t2, t3 = _split_3way(qty, 0.25, 0.50)
+    parts = [f"{t1}sh now (toehold)", f"{t2}sh on TV BUY + 30d"]
+    if t3 > 0:
+        tail = (
+            f"{t3}sh on -8% deep pullback to ${pull_8:.2f}"
+            if pull_8 > 0 else f"{t3}sh on -8% deep pullback"
+        )
+        parts.append(tail)
+    return " | ".join(parts)
+
+
 def build_thesis(
     account: str,
     ticker: str,
@@ -443,6 +570,7 @@ def build_thesis(
     exposure_recommendation: str,
     regime: dict[str, dict],
     ccy: str,
+    accumulation_plan: str = "",
 ) -> str:
     """Compose multi-sentence thesis string for DecisionRow.thesis."""
     parts: list[str] = []
@@ -454,6 +582,8 @@ def build_thesis(
         f"This recommendation sizes a 30% starter (~{target_dollars:,.0f} {ccy}) "
         f"capped at 5% NLV, equating to {qty}sh of {ticker} at current price. "
     )
+    if accumulation_plan:
+        parts.append(f"Accumulation plan: {accumulation_plan}. ")
     if tv_recommendation:
         parts.append(f"TV daily consensus: {tv_recommendation}. ")
     else:
@@ -540,11 +670,12 @@ def build_recommendations(
         entry, stop, target = compute_entry_stop_target(asset_class, price)
         conv = compute_conviction(delta_pct, asset_class, tv_rec, exposure_rec, regime)
         status = compute_status(asset_class, exposure_rec)
+        accumulation_plan = build_accumulation_plan(qty, conv, asset_class, status, entry)
 
         bucket = BUCKET_FOR_ASSET_CLASS.get(asset_class, "core")
         thesis_1liner = (
-            f"{ticker} BUY_DIP starter {qty}sh — RP rebalance: {asset_class} "
-            f"{delta_pct:+.0f}pp underweight (target ~{target_dollars:,.0f} {ccy})"
+            f"{ticker} BUY_DIP {qty}sh ({accumulation_plan or 'single tranche'}) — RP {asset_class} "
+            f"{delta_pct:+.0f}pp underweight"
         )
         thesis = build_thesis(
             account=account,
@@ -559,6 +690,7 @@ def build_recommendations(
             exposure_recommendation=exposure_rec,
             regime=regime,
             ccy=ccy,
+            accumulation_plan=accumulation_plan,
         )
 
         row = S.DecisionRow(
@@ -584,6 +716,8 @@ def build_recommendations(
             thesis_confidence=conv / 5.0,
             thesis=thesis,
             source="risk_parity",
+            qty=qty,
+            accumulation_plan=accumulation_plan,
         )
         out.append((row, asset_class))
     return out
@@ -653,26 +787,18 @@ def _print_dry(pairs: list[tuple[S.DecisionRow, str]]) -> None:
         return
     print(
         f"  {'account':8} {'ticker':6} {'class':22} {'qty':>4} "
-        f"{'entry':>8} {'stop':>8} {'target':>8} {'conv':>4} {'status':9} thesis_1liner"
+        f"{'entry':>8} {'stop':>8} {'target':>8} {'conv':>4} {'status':9} accumulation_plan"
     )
     print(
         f"  {'-'*8} {'-'*6} {'-'*22} {'-'*4} {'-'*8} {'-'*8} {'-'*8} "
-        f"{'-'*4} {'-'*9} {'-'*40}"
+        f"{'-'*4} {'-'*9} {'-'*60}"
     )
     for r, cls in pairs:
-        # qty is canonically encoded in the thesis_1liner ("starter Nsh —")
-        # — extract it for display rather than re-deriving (FX makes the
-        # cash_required/entry shortcut wrong for Sarah).
-        qty_str = ""
-        try:
-            seg = r.thesis_1liner.split("starter ", 1)[1]
-            qty_str = seg.split("sh", 1)[0]
-        except Exception:
-            qty_str = "?"
+        plan_disp = r.accumulation_plan or "(qty=0; price unknown)"
         print(
-            f"  {r.account:8} {r.ticker:6} {cls:22} {qty_str:>4} "
+            f"  {r.account:8} {r.ticker:6} {cls:22} {r.qty:>4} "
             f"{r.entry:>8.2f} {r.breakeven:>8.2f} {r.target:>8.2f} {r.conv:>4} "
-            f"{r.status:9} {r.thesis_1liner[:80]}"
+            f"{r.status:9} {plan_disp[:90]}"
         )
 
 

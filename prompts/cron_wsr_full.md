@@ -437,7 +437,9 @@ expiry / premium / delta / yield / breakeven / cash / IV rank.
       "iv_rank":           0,
       "thesis_confidence": 0.70,
       "thesis":            "<2-4 sentence brain thesis: WHY this entry, WHY now (catalysts/levels), WHAT cancels (stop levels), WHAT to watch (news/data)>",
-      "source":            "wsr_full"
+      "source":            "wsr_full",
+      "qty":               100,
+      "accumulation_plan": "33sh now | 33sh in 30d | 34sh on -5% pullback to $79.80"
     },
     {
       "ticker":            "AAPL",
@@ -460,7 +462,9 @@ expiry / premium / delta / yield / breakeven / cash / IV rank.
       "iv_rank":           28,
       "thesis_confidence": 0.65,
       "thesis":            "<brain thesis>",
-      "source":            "wsr_full"
+      "source":            "wsr_full",
+      "qty":               1,
+      "accumulation_plan": ""
     }
   ]
 }
@@ -475,6 +479,31 @@ rm /tmp/wsr_decisions.json
 **Upsert key:** `(date, account, ticker, strategy, strike)`. This means you
 CAN emit BOTH a `BUY_DIP MDT` row AND a `CSP MDT $80P` row in the same week
 without one clobbering the other — strategy + strike differentiate them.
+
+**🟢 ACCUMULATION-PLAN RULE (share entries — non-negotiable)**: Every
+share-entry recommendation (`strategy: BUY_DIP` or `TRIM`) MUST carry both
+`qty` (total planned shares as integer) AND `accumulation_plan` (pipe-
+separated tranche string). The plan answers two questions explicitly:
+**how many shares total** and **how to phase the buys**. You may NOT emit
+a share rec with `qty: 0` or empty `accumulation_plan` — if you can't
+specify size, the rec doesn't belong in the queue.
+
+Tranche format — pipe-separated segments, each `<N>sh <when>`:
+- Calendar trigger: `5sh now`, `5sh in 30d`, `5sh in 60d`
+- Conditional trigger: `5sh on -5% pullback to $79.20`, `5sh on TV daily=BUY confirm`, `5sh on NEW_ENTRY_ALLOWED`
+- Combined: `5sh in 60d or on -5% to $79.20`
+- Single tranche (qty<3 or watching status): `2sh now`, or `0sh now (watching) | 5sh on regime improvement`
+
+Tranche philosophy by conviction × class:
+- conv 4-5 + defensive class (bond/gold/vol): front-load 50/30/20 — hedge can't wait
+- conv 4-5 + growth class: balanced 33/33/34
+- conv 3: 33% now / 33% on confirm / 34% +60d or -5%
+- conv 1-2: toehold 25% / 50% on confirm / 25% on -8%
+- status=watching (CASH_PRIORITY equity): `0sh now` first, then conditional triggers
+
+For OPTION entries (CSP/CC/PMCC/LONG_CALL/LONG_PUT): set `qty` = number of
+contracts (typically 1) and leave `accumulation_plan` empty. Options aren't
+phased — you write the contract or you don't.
 
 **Status values:** `pending` (live entry, ready to act), `watching` (price
 not yet in zone), `filled` (already executed), `killed` (thesis broken),

@@ -338,7 +338,9 @@ WSR Full §6c, but with `"source": "wsr_lite"`.
       "iv_rank":           0,
       "thesis_confidence": 0.70,
       "thesis":            "<2-4 sentence brain thesis updated for mid-week price action>",
-      "source":            "wsr_lite"
+      "source":            "wsr_lite",
+      "qty":               100,
+      "accumulation_plan": "0sh now (watching pullback) | 50sh on $84 retest | 50sh +30d after T2 fills"
     },
     {
       "ticker":            "AAPL",
@@ -361,7 +363,9 @@ WSR Full §6c, but with `"source": "wsr_lite"`.
       "iv_rank":           26,
       "thesis_confidence": 0.70,
       "thesis":            "<mid-week reality — proximity, IV change, DTE remaining, what to do at expiry>",
-      "source":            "wsr_lite"
+      "source":            "wsr_lite",
+      "qty":               1,
+      "accumulation_plan": ""
     }
   ]
 }
@@ -377,6 +381,22 @@ rm /tmp/wsr_lite_decisions.json
 re-emits the same week's entries with refreshed thesis — re-running
 overwrites by design. You CAN emit BOTH a `BUY_DIP MDT` AND a `CSP MDT
 $80P` in the same week without collision.
+
+**🟢 ACCUMULATION-PLAN RULE (share entries — non-negotiable)**: Every
+share-entry recommendation (`strategy: BUY_DIP` or `TRIM`) MUST carry both
+`qty` (total planned shares as integer) AND `accumulation_plan` (pipe-
+separated tranche string). Mid-week lite re-emits — UPDATE the plan to
+reflect what's already filled vs still pending. Example after a 33sh tranche
+filled on Tue: `"qty": 100, "accumulation_plan": "33sh FILLED Tue | 33sh in 30d | 34sh on -5% to $79.80"`.
+
+Tranche format — pipe-separated `<N>sh <when>`:
+- Calendar: `5sh now`, `5sh in 30d`
+- Conditional: `5sh on -5% pullback to $79.20`, `5sh on TV daily=BUY confirm`
+- Combined: `5sh in 60d or on -5% to $79.20`
+- Single tranche (qty<3): `2sh now`
+
+For OPTION entries (CSP/CC/PMCC/LONG_CALL/LONG_PUT): `qty` = number of
+contracts (typically 1), `accumulation_plan` empty.
 
 **Status values:** `pending` / `watching` / `filled` / `killed` /
 `expired`. Use `filled` for currently-held option positions whose thesis

@@ -35,7 +35,10 @@ Input JSON shape (stdin or --json-file):
           "iv_rank":           0,
           "thesis_confidence": 0.70,
           "thesis":            "<long-form brain thesis>",
-          "source":            "wsr_full"   // "" / "wsr_full" / "wsr_lite" / "manual"
+          "source":            "wsr_full",  // "" / "wsr_full" / "wsr_lite" / "manual" / "risk_parity"
+          // --- accumulation extension (Phase 5b) — phased entries for share recs ---
+          "qty":               15,          // total planned shares (int); 0 if N/A
+          "accumulation_plan": "5sh now | 5sh in 30d | 5sh on -5% pullback to $79.20"
         },
         ...
       ]
@@ -48,9 +51,10 @@ Behaviour:
     (strategy="", strike=0) the key collapses naturally to
     (date, account, ticker, "", "0.00").
   - Different dates accumulate (history preserved).
-  - Backward-compat: legacy rows in the sheet with only 9 columns are
-    pad-read to the new 22-col HEADERS — gspread returns shorter lists
-    for short rows, so we defensively index past length.
+  - Backward-compat: legacy rows in the sheet with fewer columns are
+    pad-read to the current HEADERS (24 cols as of Phase 5b) — gspread
+    returns shorter lists for short rows, so we defensively index past
+    length.
 
 Usage:
   cat decisions.json | python scripts/push_decisions.py
@@ -150,6 +154,8 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
                 thesis_confidence=float(d.get("thesis_confidence", 0) or 0),
                 thesis=(d.get("thesis", "") or "").strip(),
                 source=(d.get("source", "") or "").strip(),
+                qty=int(d.get("qty", 0) or 0),
+                accumulation_plan=(d.get("accumulation_plan", "") or "").strip(),
             )
             if not row.ticker:
                 continue

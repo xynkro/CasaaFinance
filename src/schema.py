@@ -122,7 +122,13 @@ class DecisionRow:
         "iv_rank",             # 0 if not applicable (0-100 scale)
         "thesis_confidence",   # 0.0 - 1.0 (brain analytic signal, separate from gut-feel `conv`)
         "thesis",              # full multi-sentence brain thesis (separate from thesis_1liner)
-        "source",              # "" | "wsr_full" | "wsr_lite" | "manual"
+        "source",              # "" | "wsr_full" | "wsr_lite" | "manual" | "risk_parity"
+        # --- accumulation extension (Phase 5b — Risk Parity tranche plans) ---
+        # Both fields appended at END so existing index-based access in
+        # push_decisions / risk_parity_recommend (which reads r[9]=strategy,
+        # r[11]=strike for upsert keys) is preserved.
+        "qty",                 # planned total share/contract count (int as string; 0 if unknown)
+        "accumulation_plan",   # pipe-separated tranches: "5sh now | 5sh +30d | 5sh on -5% pullback to $79.20"
     ]
 
     date: str
@@ -148,6 +154,9 @@ class DecisionRow:
     thesis_confidence: float = 0.0
     thesis: str = ""
     source: str = ""
+    # --- accumulation extension (Phase 5b) ---
+    qty: int = 0
+    accumulation_plan: str = ""
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
@@ -160,6 +169,8 @@ class DecisionRow:
             _num(self.annual_yield_pct, 2), _num(self.breakeven, 2),
             _num(self.cash_required, 2), _num(self.iv_rank, 0),
             _num(self.thesis_confidence, 2), self.thesis, self.source,
+            str(int(self.qty)) if self.qty else "",
+            self.accumulation_plan,
         ]
 
 
@@ -1262,5 +1273,7 @@ def decisions_from_ledger(ledger: dict, date: str) -> List[DecisionRow]:
             thesis_confidence=float(d.get("thesis_confidence", 0) or 0),
             thesis=(str(d.get("thesis", "") or "")).strip(),
             source=(str(d.get("source", "") or "")).strip(),
+            qty=int(d.get("qty", 0) or 0),
+            accumulation_plan=(str(d.get("accumulation_plan", "") or "")).strip(),
         ))
     return out
