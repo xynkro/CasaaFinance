@@ -1,10 +1,14 @@
-name: Yahoo Grab — Hourly Portfolio Prices
+name: Yahoo Grab — 15-min Portfolio Prices
 
 on:
   schedule:
-    # Every hour at :07 (off-minute to avoid fleet contention).
-    # 24 runs/day × 30s = ~12 min/day = ~360 min/month — well within free tier.
-    - cron: "7 * * * *"
+    # Every 15 min (at :07/:22/:37/:52 — off-minutes to avoid fleet
+    # contention). 96 runs/day × ~30s = ~48 min/day = ~24h/month — well
+    # within the 2000-min GH Actions free tier. Bumped from hourly so the
+    # PWA Portfolio shows near-live prices during US market hours;
+    # off-hours runs are mostly idempotent (prices barely move) but cheap
+    # enough to leave running.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       dry:
