@@ -130,18 +130,26 @@ function ConvictionDots({ level }: { level: number }) {
 }
 
 /**
- * Phased buy plan row — shows total qty + tranche breakdown for share recs.
- * Hidden when both qty and accumulation_plan are absent (option strategies
- * don't phase, so they leave both empty).
+ * Phased deployment plan row — shows total qty + tranche breakdown for any rec.
+ * Works for both share strategies (qty=shares, "5sh now | 5sh +30d") and
+ * option strategies (qty=contracts, "1 CSP @ $250P 35DTE now | 1 CSP +14d").
+ * Hidden when both qty and accumulation_plan are absent.
  *
- * The plan is pipe-separated ("5sh now | 5sh in 30d | 5sh on -5% pullback");
- * we render each tranche on its own line with a Tn label so the user can
- * scan the schedule at a glance instead of parsing one long string.
+ * The plan is pipe-separated; we render each tranche on its own line with
+ * a Tn label so the schedule is scannable at a glance.
+ *
+ * Header label switches between "Accumulation" (shares — building up) and
+ * "Deployment" (options — laddering contracts), and the total uses "sh" vs
+ * "contracts" so the unit is unambiguous.
  */
 function AccumulationPlanRow({ decision }: { decision: DecisionRow }) {
   const planRaw = decision.accumulation_plan?.trim();
   const qty = Number(decision.qty) || 0;
   if (!planRaw && !qty) return null;
+
+  const isOption = OPTIONS_STRATEGIES.includes(decision.strategy ?? "");
+  const headerLabel = isOption ? "Deployment" : "Accumulation";
+  const unitLabel = isOption ? (qty === 1 ? "contract" : "contracts") : "sh";
 
   const tranches = planRaw
     ? planRaw.split("|").map((s) => s.trim()).filter(Boolean)
@@ -159,11 +167,11 @@ function AccumulationPlanRow({ decision }: { decision: DecisionRow }) {
     >
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[length:var(--t-2xs)] uppercase font-semibold tracking-wider" style={{ color: "#a5b4fc" }}>
-          Accumulation
+          {headerLabel}
         </span>
         {qty > 0 && (
           <span className="text-[length:var(--t-xs)] tabular-nums text-slate-300">
-            <span className="text-slate-500">total </span>{qty}sh
+            <span className="text-slate-500">total </span>{qty} {unitLabel}
           </span>
         )}
       </div>
@@ -178,7 +186,7 @@ function AccumulationPlanRow({ decision }: { decision: DecisionRow }) {
         </div>
       ) : (
         <div className="text-[length:var(--t-xs)] text-slate-500">
-          {qty}sh — single tranche
+          {qty} {unitLabel} — single tranche
         </div>
       )}
     </div>

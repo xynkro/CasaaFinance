@@ -463,8 +463,8 @@ expiry / premium / delta / yield / breakeven / cash / IV rank.
       "thesis_confidence": 0.65,
       "thesis":            "<brain thesis>",
       "source":            "wsr_full",
-      "qty":               1,
-      "accumulation_plan": ""
+      "qty":               3,
+      "accumulation_plan": "1 CSP @ $250P 35DTE now | 1 CSP @ $245P if AAPL pulls to $255 | 1 CSP +14d at next expiry if IV stays >25"
     }
   ]
 }
@@ -480,30 +480,43 @@ rm /tmp/wsr_decisions.json
 CAN emit BOTH a `BUY_DIP MDT` row AND a `CSP MDT $80P` row in the same week
 without one clobbering the other — strategy + strike differentiate them.
 
-**🟢 ACCUMULATION-PLAN RULE (share entries — non-negotiable)**: Every
-share-entry recommendation (`strategy: BUY_DIP` or `TRIM`) MUST carry both
-`qty` (total planned shares as integer) AND `accumulation_plan` (pipe-
-separated tranche string). The plan answers two questions explicitly:
-**how many shares total** and **how to phase the buys**. You may NOT emit
-a share rec with `qty: 0` or empty `accumulation_plan` — if you can't
-specify size, the rec doesn't belong in the queue.
+**🟢 ACCUMULATION-PLAN RULE (every entry — non-negotiable)**: EVERY
+recommendation (share OR option) MUST carry both `qty` (total planned
+shares-or-contracts as integer) AND `accumulation_plan` (pipe-separated
+tranche string). The plan answers two questions explicitly: **how much
+to deploy total** and **how to phase the deployment**. You may NOT emit
+ANY rec with `qty: 0` or empty `accumulation_plan` — if you can't
+specify size and timing, the rec doesn't belong in the queue.
 
-Tranche format — pipe-separated segments, each `<N>sh <when>`:
-- Calendar trigger: `5sh now`, `5sh in 30d`, `5sh in 60d`
-- Conditional trigger: `5sh on -5% pullback to $79.20`, `5sh on TV daily=BUY confirm`, `5sh on NEW_ENTRY_ALLOWED`
-- Combined: `5sh in 60d or on -5% to $79.20`
-- Single tranche (qty<3 or watching status): `2sh now`, or `0sh now (watching) | 5sh on regime improvement`
+Tranche format — pipe-separated segments. Use the right unit per strategy:
+- **Share strategies (BUY_DIP / TRIM)**: `<N>sh <when>`
+  - Calendar: `5sh now`, `5sh in 30d`, `5sh in 60d`
+  - Conditional: `5sh on -5% pullback to $79.20`, `5sh on TV daily=BUY confirm`, `5sh on NEW_ENTRY_ALLOWED`
+  - Combined: `5sh in 60d or on -5% to $79.20`
+  - Watching/CASH_PRIORITY equity: `0sh now (watching) | Nsh on NEW_ENTRY_ALLOWED at $X | Nsh +30d after T2 fills`
+  - Single tranche (qty<3): `2sh now`
+- **Option strategies (CSP / CC / PMCC / LONG_CALL / LONG_PUT)**: `<N> <strategy> @ $<strike><right> <DTE>DTE <when>`
+  - Single contract: `1 CSP @ $250P 35DTE now`
+  - Laddered by spot: `1 CSP @ $250P 35DTE now | 1 CSP @ $245P if AAPL -2% to $255`
+  - Laddered by time: `1 CC @ $90C 30DTE now | 1 CC +30d at next expiry if T1 expires worthless`
+  - Laddered by IV: `1 CSP now | 1 CSP +14d if IV stays >25`
+  - Wheel-stacking when shares-on-hand allow N CCs: `2 CCs @ $32C 30DTE now` (deploy max immediately if conviction high)
 
-Tranche philosophy by conviction × class:
-- conv 4-5 + defensive class (bond/gold/vol): front-load 50/30/20 — hedge can't wait
-- conv 4-5 + growth class: balanced 33/33/34
-- conv 3: 33% now / 33% on confirm / 34% +60d or -5%
-- conv 1-2: toehold 25% / 50% on confirm / 25% on -8%
-- status=watching (CASH_PRIORITY equity): `0sh now` first, then conditional triggers
+Tranche philosophy:
+- **Shares — conv 4-5 + defensive class (bond/gold/vol)**: front-load 50/30/20 — hedge can't wait
+- **Shares — conv 4-5 + growth class**: balanced 33/33/34
+- **Shares — conv 3**: 33% now / 33% on confirm / 34% +60d or -5%
+- **Shares — conv 1-2**: toehold 25% / 50% on confirm / 25% on -8%
+- **Shares — status=watching (CASH_PRIORITY equity)**: `0sh now` first, then conditional triggers
+- **Options — conv 4-5**: deploy 50% now, ladder remainder on spot/time/IV triggers
+- **Options — conv 3**: deploy 33% now, ladder on confirmation
+- **Options — conv 1-2**: 1 contract now (toehold), wait for confirmation before adding
+- **Options — status=filled** (already-held position being refreshed mid-week): keep `qty` = current contract count, plan = "FILLED — current ladder" or describe what to do at expiry
 
-For OPTION entries (CSP/CC/PMCC/LONG_CALL/LONG_PUT): set `qty` = number of
-contracts (typically 1) and leave `accumulation_plan` empty. Options aren't
-phased — you write the contract or you don't.
+NEVER set `qty: 1, accumulation_plan: ""` on a multi-contract opportunity
+— if conviction is high and the user has the cash/shares to write 2-3
+contracts, ladder them. The default for low-conviction options is `qty:
+1, accumulation_plan: "1 contract now"` (single tranche).
 
 **Status values:** `pending` (live entry, ready to act), `watching` (price
 not yet in zone), `filled` (already executed), `killed` (thesis broken),

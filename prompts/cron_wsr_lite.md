@@ -365,7 +365,7 @@ WSR Full §6c, but with `"source": "wsr_lite"`.
       "thesis":            "<mid-week reality — proximity, IV change, DTE remaining, what to do at expiry>",
       "source":            "wsr_lite",
       "qty":               1,
-      "accumulation_plan": ""
+      "accumulation_plan": "1 CSP @ $250P 35DTE FILLED Mon — let expire OR roll +14d on -2% test"
     }
   ]
 }
@@ -382,21 +382,25 @@ re-emits the same week's entries with refreshed thesis — re-running
 overwrites by design. You CAN emit BOTH a `BUY_DIP MDT` AND a `CSP MDT
 $80P` in the same week without collision.
 
-**🟢 ACCUMULATION-PLAN RULE (share entries — non-negotiable)**: Every
-share-entry recommendation (`strategy: BUY_DIP` or `TRIM`) MUST carry both
-`qty` (total planned shares as integer) AND `accumulation_plan` (pipe-
-separated tranche string). Mid-week lite re-emits — UPDATE the plan to
-reflect what's already filled vs still pending. Example after a 33sh tranche
-filled on Tue: `"qty": 100, "accumulation_plan": "33sh FILLED Tue | 33sh in 30d | 34sh on -5% to $79.80"`.
+**🟢 ACCUMULATION-PLAN RULE (every entry — non-negotiable)**: EVERY
+recommendation (share OR option) MUST carry both `qty` (total planned
+shares-or-contracts) AND `accumulation_plan` (pipe-separated tranche
+string). Mid-week lite re-emits — UPDATE the plan to mark what's already
+FILLED vs still pending.
 
-Tranche format — pipe-separated `<N>sh <when>`:
-- Calendar: `5sh now`, `5sh in 30d`
-- Conditional: `5sh on -5% pullback to $79.20`, `5sh on TV daily=BUY confirm`
-- Combined: `5sh in 60d or on -5% to $79.20`
-- Single tranche (qty<3): `2sh now`
+Examples:
+- After 33sh tranche filled Tue: `"qty": 100, "accumulation_plan": "33sh FILLED Tue | 33sh in 30d | 34sh on -5% to $79.80"`
+- Held CSP being refreshed: `"qty": 1, "accumulation_plan": "1 CSP @ $250P 35DTE FILLED Mon — let expire OR roll +14d on -2% test"`
+- Wheel CC deployed: `"qty": 2, "accumulation_plan": "2 CCs @ $32C 30DTE FILLED Mon — let expire if SCHD <$32 | roll up if assignment risk >50%"`
 
-For OPTION entries (CSP/CC/PMCC/LONG_CALL/LONG_PUT): `qty` = number of
-contracts (typically 1), `accumulation_plan` empty.
+Tranche format:
+- **Share strategies (BUY_DIP / TRIM)**: `<N>sh <when>` — `5sh now`, `5sh in 30d`, `5sh on -5% to $79.20`, `5sh on TV daily=BUY confirm`
+- **Option strategies (CSP / CC / PMCC / LONG_CALL / LONG_PUT)**: `<N> <strategy> @ $<strike><right> <DTE>DTE <when>` — `1 CSP @ $250P 35DTE now`, `1 CSP @ $245P if AAPL -2%`, `1 CC +30d at next expiry`
+- Single tranche (qty=1): `1 contract now` or `1 CSP @ $250P 35DTE now`
+
+For ALREADY-FILLED options (status=filled), describe the EXIT/MANAGEMENT
+plan rather than the entry plan: "let expire | roll +14d on -2% test |
+close at 50% profit capture".
 
 **Status values:** `pending` / `watching` / `filled` / `killed` /
 `expired`. Use `filled` for currently-held option positions whose thesis
