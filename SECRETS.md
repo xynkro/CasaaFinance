@@ -157,6 +157,7 @@ files for UTC values.
 | `regime-signals.yml` | Mon-Fri 22:00 UTC (06:00 SGT next day) | Regime indicators (breadth + ftd + dist-day + macro) → exposure posture |
 | `screen-candidates.yml` | Sun 11:00 UTC (19:00 SGT) | Weekly fresh tickers (vcp + canslim) before WSR Full |
 | `tv-signals.yml` | Mon-Fri 22:30 UTC (06:30 SGT next day) | TradingView 26-indicator consensus (1d + 1W) for active universe |
+| `risk-parity-audit.yml` | Mon-Fri 22:45 UTC (06:45 SGT next day) | Risk Parity LITE — 8 asset classes × 2 accounts = 16 diversification-hygiene rows |
 
 ---
 

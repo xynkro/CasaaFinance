@@ -1,0 +1,64 @@
+name: Risk Parity Audit — Daily
+
+# Daily diversification hygiene check. Reads latest snapshots + positions +
+# options for both accounts, buckets every holding into one of 8 canonical
+# asset classes (equity_us / equity_us_dividend / equity_intl / bond_long /
+# bond_intermediate / gold / commodities_broad / vol_long), compares against
+# per-account targets in `config/risk_parity_targets.yaml`, and writes one
+# row per (account, asset_class) to the `risk_parity_audit` sheet tab.
+#
+# 8 classes × 2 accounts = 16 rows per run.
+#
+# Why 22:45 UTC?
+#   - 22:00 UTC: regime-signals.yml writes regime_signals
+#   - 22:30 UTC: tv-signals.yml writes tv_signals
+#   - 22:45 UTC: this — runs *after* both, so any future enhancement that
+#     pulls per-class realized vol from tv_signals will see fresh rows.
+#
+# Mon-Fri only — bonds (TLT/IEF) don't move on weekends, so weekend writes
+# would just duplicate Friday's audit.
+#
+# No FMP_API_KEY needed. No claude-code action needed. Pure portfolio math
+# + a static vol-by-class lookup table. Works day-1.
+
+on:
+  schedule:
+    # 22:45 UTC = 06:45 SGT next day. Mon-Fri only.
+    - cron: "45 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: risk-parity-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Run risk_parity_audit
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/risk_parity_audit.py $ARGS

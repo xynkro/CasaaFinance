@@ -897,6 +897,63 @@ class OptionsYieldCandidateRow:
 
 
 @dataclass
+class RiskParityAuditRow:
+    """
+    Daily diversification hygiene check — Risk Parity LITE.
+
+    For each (account, asset_class), records the current capital
+    allocation, an estimated annualised vol, the implied risk
+    contribution, the configured target weight, and a rebalance
+    suggestion. 8 asset classes × 2 accounts = 16 rows per run.
+
+    Read by the brain prompts (Agent 2) to require at least one
+    underweight-class proposal per WSR run, and surfaced in the PWA
+    Risk Parity LITE panel.
+
+    Targets live in `config/risk_parity_targets.yaml` — equity stays
+    dominant (this is a wheel-strategy book) but bonds/gold/vol are
+    held to a non-zero floor for diversification.
+    """
+    TAB_NAME = "risk_parity_audit"
+    HEADERS = [
+        "date", "account",                  # "caspar" | "sarah"
+        "asset_class",                      # one of 8 canonical values
+        "capital_pct",                      # % of NLV in this class (capital weight)
+        "vol_pct",                          # estimated annualized vol of holdings in this class
+        "risk_contribution_pct",            # capital_pct × vol_pct, normalized so total = 100%
+        "target_pct",                       # configured target (per-account)
+        "delta_pct",                        # capital_pct - target_pct (positive = over)
+        "rebalance_action",                 # "OVERWEIGHT" | "UNDERWEIGHT" | "ON_TARGET"
+        "rebalance_amount_usd",             # $ amount to shift to hit target
+        "rationale",                        # 1-line explanation
+    ]
+
+    date: str
+    account: str               # "caspar" | "sarah"
+    asset_class: str           # one of CANONICAL_ASSET_CLASSES
+    capital_pct: float         # 0-100
+    vol_pct: float             # 0-100 (annualized)
+    risk_contribution_pct: float  # 0-100, normalized
+    target_pct: float          # 0-100
+    delta_pct: float           # signed
+    rebalance_action: str      # "OVERWEIGHT" | "UNDERWEIGHT" | "ON_TARGET"
+    rebalance_amount_usd: float
+    rationale: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [
+            d, self.account, self.asset_class,
+            _num(self.capital_pct, 2), _num(self.vol_pct, 2),
+            _num(self.risk_contribution_pct, 2),
+            _num(self.target_pct, 2), _num(self.delta_pct, 2),
+            self.rebalance_action,
+            _num(self.rebalance_amount_usd, 2),
+            self.rationale,
+        ]
+
+
+@dataclass
 class TradeRow:
     """Individual trade/execution from IBKR."""
     TAB_NAME = "trades"

@@ -180,3 +180,59 @@ def flatten(universe: dict[str, list[str]]) -> list[str]:
         for t in tickers:
             s.add(t)
     return sorted(s)
+
+
+# --- asset-class taxonomy (Risk Parity LITE) ------------------------------
+
+# Cache the parsed `asset_classes:` map so repeated calls don't re-read YAML.
+_ASSET_CLASS_CACHE: dict[str, str] | None = None
+
+
+def _load_asset_classes() -> dict[str, str]:
+    """Load the `asset_classes:` map from watchlist.yaml. Cached after first call."""
+    global _ASSET_CLASS_CACHE
+    if _ASSET_CLASS_CACHE is not None:
+        return _ASSET_CLASS_CACHE
+    try:
+        config = _load_yaml()
+    except FileNotFoundError:
+        _ASSET_CLASS_CACHE = {}
+        return _ASSET_CLASS_CACHE
+    raw = config.get("asset_classes") or {}
+    # Normalise — uppercase keys, str values.
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        if not k or not v:
+            continue
+        out[str(k).strip().upper()] = str(v).strip()
+    _ASSET_CLASS_CACHE = out
+    return out
+
+
+# Canonical asset-class values — single source of truth. Other modules
+# (schema.py, risk_parity_audit.py) can import this for validation.
+CANONICAL_ASSET_CLASSES = (
+    "equity_us",
+    "equity_us_dividend",
+    "equity_intl",
+    "bond_long",
+    "bond_intermediate",
+    "gold",
+    "commodities_broad",
+    "vol_long",
+)
+
+
+def get_asset_class(ticker: str) -> str:
+    """
+    Return the asset_class for a ticker, defaulting to 'equity_us' if absent.
+
+    Reads `asset_classes:` map from prompts/watchlist.yaml. Lookup is
+    case-insensitive on the ticker. Unknown tickers default to 'equity_us'
+    — the conservative choice for an equity-anchored book that would rather
+    over-attribute to the dominant class than under-count it.
+    """
+    if not ticker:
+        return "equity_us"
+    m = _load_asset_classes()
+    return m.get(str(ticker).strip().upper(), "equity_us")

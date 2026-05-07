@@ -15,6 +15,9 @@
 #   - prompts/cron_wsr_full.md §2 + §5 and prompts/cron_wsr_lite.md §3 →
 #     brain reads this file to know which categories to sweep when
 #     proposing fresh ideas, conditioned on regime
+#   - scripts/risk_parity_audit.py → asset-class diversification check,
+#     reads `asset_classes:` map below to bucket every held ticker into
+#     one of 8 canonical classes
 #
 # Sentinel values:
 #   __from_sheets__ — read holding tickers from positions_caspar +
@@ -45,9 +48,19 @@ universe:
     description: Sector defensives — held high-quality ballast (regime hedge)
     tickers: [XLV, XLP, XLU, VHT, VDC, VPU, ITA, KRE]
 
+  bond_long:
+    description: Long-duration treasuries — diversification floor for risk-parity
+    tickers: [TLT, EDV, ZROZ, VGLT]
+    notes: Long-bond ETFs — TLT (20+y), EDV (extended), ZROZ (25+y zero-coupon), VGLT (long-term gov)
+
+  bond_intermediate:
+    description: Intermediate-duration treasuries / aggregate bond ETFs
+    tickers: [IEF, IEI, BIV, AGG]
+    notes: 7-10y treasury (IEF), 3-7y (IEI), intermediate bond (BIV), aggregate (AGG)
+
   commodity:
     description: Hard assets + ag/energy hedges
-    tickers: [GLD, SLV, GDX, GDXJ, USO, UNG, DBA, CPER]
+    tickers: [GLD, GLDM, IAU, SLV, GDX, GDXJ, USO, UNG, DBA, DBC, CPER]
 
   volatility:
     description: Volatility products — VIX is spot-only; UVXY/SVXY tradeable
@@ -66,3 +79,132 @@ universe:
   high_iv_wheel_targets:
     description: Names that historically offer juicy CSP/CC premiums
     tickers: [F, T, BAC, WFC, INTC, MU, PYPL, U, RBLX, SOFI]
+
+
+# ---------------------------------------------------------------------------
+# Asset-class taxonomy — Risk Parity LITE
+# ---------------------------------------------------------------------------
+# Maps every ticker the books touch to one of 8 canonical asset classes.
+# Read by `src/watchlist.get_asset_class()` and used by
+# `scripts/risk_parity_audit.py` for diversification hygiene.
+#
+# Canonical values (use exactly these strings):
+#   equity_us           — broad US equity (AAPL, NVDA, etc.)
+#   equity_us_dividend  — dividend-anchored US (SCHD, KO, JNJ)
+#   equity_intl         — non-US equity (SGX C6L/G3B/ES3)
+#   bond_long           — 20+yr treasury (TLT, EDV, ZROZ, VGLT)
+#   bond_intermediate   — 3-10yr treasury / aggregate (IEF, IEI, BIV, AGG)
+#   gold                — gold + gold miners (GLD, GLDM, IAU, GDX, GDXJ)
+#   commodities_broad   — broad commodity / energy / ag / silver (DBC, USO,
+#                         UNG, DBA, CPER, SLV — silver as commodity hedge)
+#   vol_long            — long volatility (VIXM, UVXY — NOT SVXY which is
+#                         short vol; SVXY is omitted from the map and
+#                         defaults to equity_us via get_asset_class())
+#
+# Tickers absent from this map default to `equity_us` in get_asset_class().
+
+asset_classes:
+  # ---- equity_us (broad US equity, momentum/growth/value) ----
+  AAPL: equity_us
+  AMD: equity_us
+  AMZN: equity_us
+  AFRM: equity_us
+  BBAI: equity_us
+  BTBT: equity_us
+  BYND: equity_us
+  COIN: equity_us
+  CRWD: equity_us
+  GOOGL: equity_us
+  GOOG: equity_us
+  HIMS: equity_us
+  HON: equity_us
+  INTC: equity_us
+  MA: equity_us
+  MDLZ: equity_us
+  MDT: equity_us
+  META: equity_us
+  MSFT: equity_us
+  MU: equity_us
+  NFLX: equity_us
+  NVDA: equity_us
+  OPEN: equity_us
+  PEP: equity_us
+  PLTR: equity_us
+  PM: equity_us
+  PYPL: equity_us
+  QQQ: equity_us
+  RBLX: equity_us
+  RCAT: equity_us
+  RDDT: equity_us
+  RIVN: equity_us
+  SBET: equity_us
+  SHOP: equity_us
+  SOFI: equity_us
+  SPY: equity_us
+  SQ: equity_us
+  SSO: equity_us       # 2x S&P leveraged — still equity_us bucket
+  TQQQ: equity_us      # 3x QQQ leveraged — still equity_us bucket
+  TSLA: equity_us
+  U: equity_us
+  UNH: equity_us
+  V: equity_us
+  WIX: equity_us
+  AMC: equity_us
+  BAC: equity_us
+  F: equity_us
+  T: equity_us
+  WFC: equity_us
+  XLV: equity_us       # sector ETF — defensive but US equity exposure
+  XLP: equity_us
+  XLU: equity_us
+  VHT: equity_us
+  VDC: equity_us
+  VPU: equity_us
+  ITA: equity_us
+  KRE: equity_us
+
+  # ---- equity_us_dividend (dividend-anchored US) ----
+  SCHD: equity_us_dividend
+  KO: equity_us_dividend
+  JNJ: equity_us_dividend
+  PG: equity_us_dividend
+  JPM: equity_us_dividend
+  # NOTE: V, MA classified as equity_us above (mega-cap compounders, not div-anchored)
+
+  # ---- equity_intl (SGX names + non-US) ----
+  C6L: equity_intl     # Singapore Airlines (SGX)
+  G3B: equity_intl     # Nikko AM STI ETF (SGX)
+  ES3: equity_intl     # SPDR STI ETF (SGX)
+
+  # ---- bond_long (20+yr treasury) ----
+  TLT: bond_long       # iShares 20+ Year Treasury Bond
+  EDV: bond_long       # Vanguard Extended Duration Treasury
+  ZROZ: bond_long      # PIMCO 25+ Year Zero Coupon US Treasury
+  VGLT: bond_long      # Vanguard Long-Term Treasury
+
+  # ---- bond_intermediate (3-10yr / aggregate) ----
+  IEF: bond_intermediate    # iShares 7-10 Year Treasury Bond
+  IEI: bond_intermediate    # iShares 3-7 Year Treasury Bond
+  BIV: bond_intermediate    # Vanguard Intermediate-Term Bond
+  AGG: bond_intermediate    # iShares Core US Aggregate Bond
+
+  # ---- gold (physical gold + miners) ----
+  GLD: gold
+  GLDM: gold
+  IAU: gold
+  GDX: gold
+  GDXJ: gold
+
+  # ---- commodities_broad (broad commodity, energy, ag, silver-as-hedge) ----
+  DBC: commodities_broad   # Invesco DB Commodity Index
+  USO: commodities_broad   # United States Oil Fund
+  UNG: commodities_broad   # United States Natural Gas Fund
+  DBA: commodities_broad   # Invesco DB Agriculture Fund
+  CPER: commodities_broad  # United States Copper Index
+  SLV: commodities_broad   # Silver as commodity hedge (not gold-class)
+
+  # ---- vol_long (long volatility — insurance products) ----
+  VIXM: vol_long       # ProShares VIX Mid-Term Futures
+  UVXY: vol_long       # ProShares Ultra VIX Short-Term Futures
+  # NOTE: SVXY is SHORT vol — intentionally omitted; defaults to equity_us
+  # NOTE: VIX is spot index, not tradeable; omitted from this map

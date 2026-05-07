@@ -1,0 +1,39 @@
+# Risk Parity LITE targets — wheel-strategy-friendly, NOT pure 30/40/15/7.5/7.5.
+#
+# Both accounts trade equity-anchored wheel strategies (CSP / CC) with options
+# on US single names. Pure Risk Parity (long bonds-dominant) doesn't fit. This
+# config keeps EQUITY DOMINANT but enforces a non-zero bond/gold/vol floor as a
+# diversification hygiene check.
+#
+# Each account's targets sum to 100. Read by `scripts/risk_parity_audit.py`
+# which writes per-(account, asset_class) rebalance suggestions to the
+# `risk_parity_audit` Google Sheet tab.
+#
+# Asset class values must match the 8 canonical labels in
+# `src/watchlist.CANONICAL_ASSET_CLASSES` (kept in sync via the YAML's
+# `asset_classes:` map).
+#
+# Tweak strategy:
+#   - Caspar: smaller account ($7.4k NLV), more aggressive equity tilt
+#   - Sarah: larger account (S$59k NLV), more balanced — SCHD anchor pulls
+#     equity_us_dividend higher
+
+caspar:
+  equity_us: 50          # primary risk asset
+  equity_us_dividend: 5
+  equity_intl: 5         # SGX C6L / G3B currently here
+  bond_long: 15          # TLT / EDV (currently 0% — biggest underweight)
+  bond_intermediate: 8   # IEF
+  gold: 6                # GLDM / GLD (currently 0% — underweight)
+  commodities_broad: 6   # DBC / USO / SLV
+  vol_long: 5            # UVXY / VIXM (insurance, never zero)
+
+sarah:
+  equity_us: 45
+  equity_us_dividend: 15  # SCHD-anchored
+  equity_intl: 8
+  bond_long: 12
+  bond_intermediate: 8
+  gold: 6
+  commodities_broad: 4
+  vol_long: 2
