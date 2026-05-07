@@ -134,6 +134,7 @@ function Dashboard() {
             macroHistory={data?.macroHistory ?? []}
             archive={data?.archive ?? []}
             dailyHistory={data?.dailyHistory ?? []}
+            riskParityAudit={data?.riskParityAudit ?? []}
           />
         );
       case 5:

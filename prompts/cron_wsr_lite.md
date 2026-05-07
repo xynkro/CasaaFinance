@@ -52,6 +52,8 @@ Also pull positions, options, exit_plans, decision_queue, scan_results, technica
 # - tv_signals (LATEST per ticker, both 1d and 1W intervals — TradingView's
 #     26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL plus
 #     all underlying indicator values)
+# - risk_parity_audit (LATEST 16 rows — Risk Parity LITE diversification
+#     check; quota rule fires here too)
 ```
 
 The `options` tab is refreshed every 30 minutes during US market hours by the cloud `options-refresh.yml` workflow (moneyness, DTE, assignment_risk, trend_risk, momentum_5d, sigma, RSI, SMAs all yfinance-derivable). The latest snapshot is the freshest you'll have, regardless of whether the Mac is on. New positions still get added nightly via Mac ibkr-grab.
@@ -104,6 +106,19 @@ weak — wait for confluence."
 For swing-trading entry/exit pattern recognition, see `prompts/swing_playbook.md`.
 Cite the named pattern in your thesis when applicable (e.g. "Pullback to 20EMA",
 "VCP", "Liquidity sweep", "Breakout retest").
+
+**Risk Parity LITE check (lighter, NEW):**
+
+Read latest `risk_parity_audit` rows. Apply two rules:
+
+1. Cite the single most-overweight class per account in `redteam_summary`
+   if delta > 10pp (concentration alarm).
+2. Per-WSR-run quota: at least ONE proposed entry per account in an
+   UNDERWEIGHT class (or explicit skip with reason — see WSR Full §5
+   for the format).
+
+Mid-week pulse — keep it tight. The Sunday WSR Full does the deeper
+allocation reasoning.
 
 **Universe expansion (forced):** sweep `prompts/watchlist.yaml`
 categories that match the current regime — defensive_etfs + commodity

@@ -34,6 +34,10 @@ const GIDS: Record<string, string> = {
   // One row per (ticker, interval) — both 1d and 1W. The DecisionCard reads
   // the latest 1d + 1W row per ticker for the consensus chip.
   tv_signals: "1954107259",
+  // Risk Parity LITE — diversification hygiene audit. Written daily at
+  // 22:45 UTC by risk-parity-audit.yml. 8 asset classes × 2 accounts =
+  // 16 rows per run. Live GID resolved via gspread on 2026-05-07.
+  risk_parity_audit: "1398209766",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -452,6 +456,27 @@ export interface TvConsensus {
 }
 
 /**
+ * Risk Parity LITE audit row — written daily at 22:45 UTC by
+ * `risk-parity-audit.yml`. 16 rows per run = 8 asset classes
+ * (equity_us, equity_us_dividend, equity_intl, bond_long,
+ * bond_intermediate, gold, commodities_broad, vol_long) × 2 accounts
+ * (caspar, sarah). The PWA RiskAllocationCard consumes the latest run.
+ */
+export interface RiskParityAuditRow {
+  date: string;
+  account: string;                  // "caspar" | "sarah"
+  asset_class: string;              // see 8-class taxonomy above
+  capital_pct: string;              // 0-100 — share of NLV
+  vol_pct: string;                  // annualized vol of the class
+  risk_contribution_pct: string;    // 0-100 — share of portfolio risk
+  target_pct: string;               // 0-100 — configured target
+  delta_pct: string;                // capital_pct - target_pct (signed)
+  rebalance_action: string;         // "OVERWEIGHT" | "UNDERWEIGHT" | "ON_TARGET"
+  rebalance_amount_usd: string;     // suggested $ shift to close gap
+  rationale: string;                // brain-readable note per row
+}
+
+/**
  * Build a per-ticker map: ticker -> { daily, weekly } using only the LATEST
  * row per (ticker, interval). The cron writes one row per ticker per day
  * per interval, so the latest row is the source of truth.
@@ -477,6 +502,43 @@ export function lookupTvConsensusMap(rows: TvSignalRow[]): Map<string, TvConsens
     else if (interval === "1W") entry.weekly = row;
   }
   return out;
+}
+
+/**
+ * lookupRiskParity — group an audit-row list by account.
+ *
+ * Returns:
+ *   - byClass:  Map<asset_class, RiskParityAuditRow> for the requested account
+ *   - topOver:  rows where rebalance_action == OVERWEIGHT, sorted by
+ *               delta_pct DESC (largest positive first), max 3
+ *   - topUnder: rows where rebalance_action == UNDERWEIGHT, sorted by
+ *               delta_pct ASC (most negative first), max 3
+ *
+ * The signals.ts helpers consume this to build the brain prompt's
+ * `risk_parity` regime_anchor sub-object and the PWA card uses it for the
+ * 8-bar layout. Empty input → empty maps + arrays.
+ */
+export function lookupRiskParity(
+  account: string,
+  rows: RiskParityAuditRow[],
+): { byClass: Map<string, RiskParityAuditRow>; topOver: RiskParityAuditRow[]; topUnder: RiskParityAuditRow[] } {
+  const accLower = account.toLowerCase();
+  const byClass = new Map<string, RiskParityAuditRow>();
+  const over: RiskParityAuditRow[] = [];
+  const under: RiskParityAuditRow[] = [];
+
+  for (const r of rows) {
+    if ((r.account ?? "").toLowerCase() !== accLower) continue;
+    if (r.asset_class && !byClass.has(r.asset_class)) byClass.set(r.asset_class, r);
+    const action = (r.rebalance_action ?? "").toUpperCase();
+    if (action === "OVERWEIGHT") over.push(r);
+    else if (action === "UNDERWEIGHT") under.push(r);
+  }
+
+  over.sort((a, b) => numeric(b.delta_pct) - numeric(a.delta_pct));
+  under.sort((a, b) => numeric(a.delta_pct) - numeric(b.delta_pct));
+
+  return { byClass, topOver: over.slice(0, 3), topUnder: under.slice(0, 3) };
 }
 
 // ---------- aggregate fetch ----------
@@ -512,6 +574,8 @@ export interface DashboardData {
   screenCandidates: ScreenCandidateRow[];                // last 30d, both sources
   // TradingView consensus chip data — keyed by upper-cased ticker.
   tvSignals: Map<string, TvConsensus>;
+  // Risk Parity LITE audit — latest day only (16 rows: 8 classes × 2 accounts).
+  riskParityAudit: RiskParityAuditRow[];
   error: string | null;
 }
 
@@ -542,7 +606,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, scanRows, optRecRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows, regimeRows, postureRows, screenRows, tvRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, scanRows, optRecRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows, regimeRows, postureRows, screenRows, tvRows, riskParityRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
@@ -568,6 +632,9 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<ScreenCandidateRow>("screen_candidates").catch(() => [] as ScreenCandidateRow[]),
         // TradingView 26-indicator consensus (1d + 1W per ticker).
         fetchTab<TvSignalRow>("tv_signals").catch(() => [] as TvSignalRow[]),
+        // Risk Parity LITE audit (Agent 1 backend). Placeholder GID
+        // until first cron run lands; catch keeps PWA alive meanwhile.
+        fetchTab<RiskParityAuditRow>("risk_parity_audit").catch(() => [] as RiskParityAuditRow[]),
       ]);
     const casparRows = normalizeSnapshot(casparRaw);
     const sarahRows = normalizeSnapshot(sarahRaw);
@@ -627,6 +694,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       exposurePosture: latest(postureRows),
       screenCandidates: sortByDate(screenRows),
       tvSignals: lookupTvConsensusMap(tvRows),
+      riskParityAudit: latestGroup(riskParityRows),
       error: null,
     };
   } catch (e) {
@@ -642,6 +710,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       exposurePosture: null,
       screenCandidates: [],
       tvSignals: new Map(),
+      riskParityAudit: [],
       error: String(e),
     };
   }

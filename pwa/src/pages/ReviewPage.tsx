@@ -5,11 +5,13 @@ import type {
   MacroRow,
   ArchiveRow,
   DailyBriefRow,
+  RiskParityAuditRow,
 } from "../data";
 import { Card } from "../cards/Card";
 import { StickyTabs } from "../components/StickyTabs";
 import { ClosedDecisionsCard } from "../cards/ClosedDecisionsCard";
 import { RiskMetricsCard } from "../cards/RiskMetricsCard";
+import { RiskAllocationCard } from "../cards/RiskAllocationCard";
 import { ArchivePage } from "./ArchivePage";
 import { LineChart, BarChart3, FileText } from "lucide-react";
 
@@ -55,6 +57,7 @@ export function ReviewPage({
   macroHistory,
   archive,
   dailyHistory,
+  riskParityAudit,
 }: {
   decisionsAll: DecisionRow[];
   casparHistory: SnapshotRow[];
@@ -62,6 +65,7 @@ export function ReviewPage({
   macroHistory: MacroRow[];
   archive: ArchiveRow[];
   dailyHistory: DailyBriefRow[];
+  riskParityAudit: RiskParityAuditRow[];
 }) {
   const [sub, setSub] = useState<ReviewSubTab>(loadLastSub);
 
@@ -104,13 +108,16 @@ export function ReviewPage({
 
       {sub === "numbers" && (
         <div className="-mx-4 pt-3">
-          {/* Risk metrics on top, then charts (lazy) */}
+          {/* Risk metrics on top, then risk-parity allocation, then charts (lazy) */}
           <div className="px-4 pb-4 fade-up fade-up-1">
             <RiskMetricsCard
               casparHistory={casparHistory}
               sarahHistory={sarahHistory}
               macroHistory={macroHistory}
             />
+          </div>
+          <div className="px-4 pb-4 fade-up fade-up-2">
+            <RiskAllocationCard riskParityAudit={riskParityAudit} />
           </div>
           <Suspense fallback={<HistorySkeleton />}>
             <HistoryPage

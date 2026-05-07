@@ -53,6 +53,9 @@ ss = sh._open_sheet(client)
 # - tv_signals (LATEST per ticker, both 1d and 1W intervals — TradingView's
 #     26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL plus
 #     all underlying indicator values)
+# - risk_parity_audit (LATEST 16 — asset class diversification check
+#     for both accounts: capital_pct, vol_pct, risk_contribution_pct,
+#     target_pct, delta_pct, rebalance_action, rebalance_amount_usd)
 # - watchlist universe: read prompts/watchlist.yaml — categorized
 #     ticker pool the brain should consider beyond just held + queue.
 #     Categories: held, stock_positions_sarah, decision_queue_active,
@@ -158,6 +161,67 @@ Per-WSR-run minimum: at least ONE new CSP or CC candidate must be
 proposed (or explicitly skipped with a reason). The brain has been
 limiting itself to refreshing existing positions — this rule forces
 fresh option-strategy proposals.
+
+**Risk Parity LITE hygiene check (NEW, REQUIRED):**
+
+Read the latest `risk_parity_audit` rows for both accounts (16 rows
+total, 8 asset classes × 2 accounts). Surface in your synthesis:
+
+- Cite the TOP 2 OVERWEIGHT asset classes per account (delta > 5pp,
+  most positive deltas first) in `redteam_summary` as concentration
+  risk. Use the format:
+  "Caspar concentration: equity_us_dividend +37pp ($2,793 over target —
+   SCHD 42% of NLV alone)."
+
+- Cite the TOP 2 UNDERWEIGHT asset classes per account (delta < -5pp,
+  most negative deltas first) in `action_summary`. These are
+  diversification gaps the wheel strategy is hiding. Format:
+  "Caspar gap: bond_long 0% vs 15% target (-$1,118 starter add)."
+
+**HARD RULE — Underweight class proposal quota:**
+
+For each account, at least ONE proposed entry per WSR run must be
+in an UNDERWEIGHT asset class — preferably the most underweight one.
+This is the "Risk Parity LITE quota."
+
+Allowed forms:
+- Stock BUY_DIP in the underweight class (e.g. TLT 5sh starter)
+- CSP/CC on a ticker in the underweight class
+- An aggressive-watch entry with explicit re-entry trigger if regime
+  blocks new entries
+
+If you genuinely cannot propose anything in any underweight class for
+a given account (e.g. all classes have no good candidate this week),
+you MUST emit a row with `status: watching`, `bucket: <underweight_class>`,
+`thesis: "Risk-parity quota waived — no quality candidate in <class>
+this week. Re-evaluate next WSR."` This is the explicit-skip path.
+
+**Sizing guidance:**
+
+The audit's `rebalance_amount_usd` column is the THEORETICAL full-fill
+to hit target. Don't propose that full amount in one shot. Use it as
+a UPPER BOUND. Propose 25-50% of that as a starter position — leaves
+room to scale into the position if regime confirms.
+
+**Allocation > stock-picking:**
+
+When asset class A is underweight by 15pp and asset class B is
+underweight by 3pp, prefer a candidate in A even if the B candidate
+looks like a "better" stock. Diversification beats stock-picking when
+correlation is the problem. Risk parity is a correlation/concentration
+check, not a return-maximizer.
+
+**Update `regime_anchor` JSON to include risk parity status:**
+
+Add this field to your `regime_anchor` object:
+"risk_parity": {
+  "caspar_top_overweight": "equity_us_dividend +37pp",
+  "caspar_top_underweight": "bond_long -15pp",
+  "sarah_top_overweight": "equity_us +30pp",
+  "sarah_top_underweight": "bond_long -12pp"
+}
+
+This forces an explicit read during Sonnet's format step.
 
 **Universe expansion (forced):** before synthesizing, sweep the
 watchlist categories from `prompts/watchlist.yaml` that match the
@@ -278,12 +342,18 @@ with trigger, etc.).
     "ftd_label": "NO_SIGNAL",
     "macro_regime": "Concentration",
     "exposure_ceiling": 50,
-    "exposure_recommendation": "REDUCE_ONLY"
+    "exposure_recommendation": "REDUCE_ONLY",
+    "risk_parity": {
+      "caspar_top_overweight": "equity_us_dividend +37pp",
+      "caspar_top_underweight": "bond_long -15pp",
+      "sarah_top_overweight": "equity_us +30pp",
+      "sarah_top_underweight": "bond_long -12pp"
+    }
   }
 }
 ```
 
-Pull each field from the latest `regime_signals` and `exposure_posture` rows. If a source hasn't reported (sheet empty or cron not yet run), emit `null` for that field — Sonnet renders "—" for nulls.
+Pull each field from the latest `regime_signals`, `exposure_posture`, and `risk_parity_audit` rows. If a source hasn't reported (sheet empty or cron not yet run), emit `null` for that field — Sonnet renders "—" for nulls. The `risk_parity` sub-object is the diversification hygiene summary: per account, the `top_overweight` and `top_underweight` are formatted `"<asset_class> <signed_delta>pp"` strings pulled from the audit's max +delta_pct and min -delta_pct rows.
 
 ### 6. Format and push (TWO writes — markdown + unified decision queue)
 
