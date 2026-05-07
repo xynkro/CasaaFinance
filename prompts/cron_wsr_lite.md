@@ -474,6 +474,29 @@ plan. See `cc_eligible_buckets` in the trading rules dict.
 
 CSP on those names IS appropriate — paid to maybe acquire the compounder.
 
+**🔴 ACCOUNT-CAPITAL CHECK (non-negotiable, applies to every option entry):**
+
+Before emitting ANY option recommendation (CSP/CC/PMCC/LONG_CALL/LONG_PUT),
+calculate `cash_required` against the **target account's** NLV:
+- caspar NLV in USD (latest `snapshot_caspar.net_liq_usd`).
+- sarah NLV in SGD (latest `snapshot_sarah.net_liq_sgd`); convert via
+  `usd_sgd` from latest `macro` row.
+
+For CSPs: `cash_required = strike × 100 × num_contracts`.
+For CCs: cash 0 (covered) — but verify shares ARE held in target account.
+For LONG_CALL/LONG_PUT: `cash_required = premium × 100 × num_contracts`.
+
+**Hard rule (applies to all status values incl. watching):**
+- `cash_required > 50% of target NLV` → re-allocate to other account, or
+  shrink contract count, or skip.
+- `cash_required > 80% of target NLV` → NEVER emit. No thesis justifies
+  betting the whole account on one trade.
+- If neither account fits → skip the option, propose a cheaper-strike
+  alternative or a LONG_CALL/PUT with lower premium outlay.
+
+Cite the sizing math in `thesis`: "Cash $19k on sarah NLV $46k (40%) —
+fits cap; caspar's $7.5k NLV cannot."
+
 **🔴 EXPOSURE CONSTRAINT (graduated):**
 
 Read the latest `exposure_posture` row before proposing any decisions.

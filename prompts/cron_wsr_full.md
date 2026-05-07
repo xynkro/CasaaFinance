@@ -598,6 +598,34 @@ If you find yourself drafting a CC on SCHD / SPY / VOO / QQQ / VTI /
 AAPL / MSFT etc., STOP and revise. Suggest CSP instead, OR no options
 trade and accumulation only.
 
+**🔴 ACCOUNT-CAPITAL CHECK (non-negotiable, applies to every option entry):**
+
+Before emitting ANY option recommendation (CSP/CC/PMCC/LONG_CALL/LONG_PUT),
+calculate `cash_required` against the **target account's** NLV:
+- caspar NLV is in USD (read latest `snapshot_caspar.net_liq_usd`).
+- sarah NLV is in SGD (read latest `snapshot_sarah.net_liq_sgd`); convert
+  to USD using `usd_sgd` from latest `macro` row before comparing.
+
+For CSPs: `cash_required = strike × 100 × num_contracts` (USD).
+For CCs: `cash_required = 0` (covered by held shares — but verify shares
+are actually held in the target account first).
+For LONG_CALL/LONG_PUT: `cash_required = premium × 100 × num_contracts`.
+
+**Hard rule:**
+- If `cash_required > 50% of target NLV (USD)`: re-evaluate. Either
+  (a) re-allocate to the OTHER account if it has capital, (b) reduce
+  contract count / pick a lower strike, or (c) skip the rec.
+- If `cash_required > 80% of target NLV`: NEVER emit — skip the rec
+  entirely. No high-conviction thesis justifies betting the whole
+  account on one trade.
+- If a name is too big for both accounts (e.g. NVDA $190P at $19k
+  collateral when caspar=$7k and sarah-headroom is exhausted): skip
+  the CSP, propose alternatives (e.g. cheaper-strike CSP that fits,
+  or LONG_CALL with smaller premium outlay).
+
+Cite the sizing math in `thesis`: e.g. "Cash $19k on sarah NLV $46k
+(40% allocation) — fits 50% cap; caspar's $7.5k NLV cannot."
+
 **🔴 EXPOSURE CONSTRAINT (graduated):**
 
 Read the latest `exposure_posture` row before proposing any decisions.
