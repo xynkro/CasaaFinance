@@ -402,6 +402,15 @@ For ALREADY-FILLED options (status=filled), describe the EXIT/MANAGEMENT
 plan rather than the entry plan: "let expire | roll +14d on -2% test |
 close at 50% profit capture".
 
+**Milestone-reached share positions** (e.g. SCHD already at 100sh target,
+BTC core position at full size): If you're tracking a held share position
+to flag the next DCA pulse, set `qty` = NEXT-tranche size (not the held
+size, not zero), `status` = `watching`, and the plan describes the held
+position FIRST then the next tranche conditions. Example:
+`"qty": 10, "accumulation_plan": "100sh @ $29.40 FILLED (milestone reached) | 10sh on SCHD <$31 OR scheduled monthly DCA"`.
+NEVER emit qty='' on a share row — every share rec has a quantifiable
+next action even if it's "0sh now (waiting)".
+
 **Status values:** `pending` / `watching` / `filled` / `killed` /
 `expired`. Use `filled` for currently-held option positions whose thesis
 you're refreshing for mid-week.

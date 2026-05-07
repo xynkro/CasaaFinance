@@ -518,6 +518,15 @@ NEVER set `qty: 1, accumulation_plan: ""` on a multi-contract opportunity
 contracts, ladder them. The default for low-conviction options is `qty:
 1, accumulation_plan: "1 contract now"` (single tranche).
 
+**Milestone-reached share positions** (e.g. SCHD already at 100sh target,
+BTC core position at full size): If you're tracking a held share position
+to flag the next DCA pulse, set `qty` = NEXT-tranche size (not the held
+size, not zero), `status` = `watching`, and the plan describes the held
+position FIRST then the next tranche conditions. Example:
+`"qty": 10, "accumulation_plan": "100sh @ $29.40 FILLED (milestone reached) | 10sh on SCHD <$31 OR scheduled monthly DCA"`.
+NEVER emit `qty: ""` (empty) on a share row — every share rec has a
+quantifiable next action even if it's "0sh now (waiting on regime)".
+
 **Status values:** `pending` (live entry, ready to act), `watching` (price
 not yet in zone), `filled` (already executed), `killed` (thesis broken),
 `expired` (DTE elapsed without action).
