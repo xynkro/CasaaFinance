@@ -360,29 +360,56 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
             return 0
 
         # --- Sheets ---
+        # Per-account "this account is actually connected" gate. If TWS is
+        # only logged into one of the two accounts, the IBKR API returns
+        # NLV=0 + zero positions for the disconnected account. Writing that
+        # to the sheet pollutes the latest-snapshot lookup the PWA does
+        # ("Portfolio shows $0 because the latest snapshot row is $0"). Gate
+        # each account's writes on `net_liq > 0 OR has positions/options`.
+        caspar_ok = (snap_c.net_liq_usd > 0) or bool(pos_c) or bool(opts_c)
+        sarah_ok  = (snap_s.net_liq_sgd > 0) or bool(pos_s) or bool(opts_s)
         try:
             client = sh.authenticate()
 
-            sh.ensure_headers(client, S.SnapshotCaspar.TAB_NAME, S.SnapshotCaspar.HEADERS)
-            sh.append_row(client, S.SnapshotCaspar.TAB_NAME, snap_c.to_row())
-            result.rows_written[S.SnapshotCaspar.TAB_NAME] = 1
+            if caspar_ok:
+                sh.ensure_headers(client, S.SnapshotCaspar.TAB_NAME, S.SnapshotCaspar.HEADERS)
+                sh.append_row(client, S.SnapshotCaspar.TAB_NAME, snap_c.to_row())
+                result.rows_written[S.SnapshotCaspar.TAB_NAME] = 1
 
-            sh.ensure_headers(client, "positions_caspar", S.PositionRow.HEADERS)
-            n = sh.append_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
-            result.rows_written["positions_caspar"] = n
+                sh.ensure_headers(client, "positions_caspar", S.PositionRow.HEADERS)
+                n = sh.append_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
+                result.rows_written["positions_caspar"] = n
+            else:
+                logger.warning(
+                    "caspar SKIPPED — TWS reports net_liq=0 with no positions/options "
+                    "(account not connected). Sheet preserves prior snapshot."
+                )
 
-            sh.ensure_headers(client, S.SnapshotSarah.TAB_NAME, S.SnapshotSarah.HEADERS)
-            sh.append_row(client, S.SnapshotSarah.TAB_NAME, snap_s.to_row())
-            result.rows_written[S.SnapshotSarah.TAB_NAME] = 1
+            if sarah_ok:
+                sh.ensure_headers(client, S.SnapshotSarah.TAB_NAME, S.SnapshotSarah.HEADERS)
+                sh.append_row(client, S.SnapshotSarah.TAB_NAME, snap_s.to_row())
+                result.rows_written[S.SnapshotSarah.TAB_NAME] = 1
 
-            sh.ensure_headers(client, "positions_sarah", S.PositionRow.HEADERS)
-            n = sh.append_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
-            result.rows_written["positions_sarah"] = n
+                sh.ensure_headers(client, "positions_sarah", S.PositionRow.HEADERS)
+                n = sh.append_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
+                result.rows_written["positions_sarah"] = n
+            else:
+                logger.warning(
+                    "sarah SKIPPED — TWS reports net_liq=0 with no positions/options "
+                    "(account not connected). Sheet preserves prior snapshot."
+                )
 
-            # Options for both accounts -> unified `options` tab. IBKR-known
-            # fields populated; cloud options-refresh fills derived fields
-            # within 30 min, daily_tracker fills Mac-tethered fields at 06:00 SGT.
-            opt_rows = [o.to_row() for o in (opts_c + opts_s)]
+            # Options for both accounts -> unified `options` tab. Only
+            # append rows for accounts that returned data — otherwise we'd
+            # write a misleading "options closed" signal for the
+            # disconnected side. IBKR-known fields populated; cloud
+            # options-refresh fills derived fields within 30 min,
+            # daily_tracker fills Mac-tethered fields at 06:00 SGT.
+            opt_rows: list = []
+            if caspar_ok:
+                opt_rows.extend(o.to_row() for o in opts_c)
+            if sarah_ok:
+                opt_rows.extend(o.to_row() for o in opts_s)
             if opt_rows:
                 sh.ensure_headers(client, S.OptionRow.TAB_NAME, S.OptionRow.HEADERS)
                 n = sh.append_rows(client, S.OptionRow.TAB_NAME, opt_rows)

@@ -31,11 +31,17 @@ cd "$REPO"
 case "${1:-help}" in
 
   ibkr)
+    # --merge: if TWS has only ONE account live (caspar OR sarah), the
+    # disconnected account would grab as net_liq=0 + empty positions;
+    # --merge backfills it from today's already-saved JSON so the sheet
+    # doesn't get clobbered. Combined with sync.py's $0-snapshot guard,
+    # this keeps both accounts visible in the PWA even on single-login
+    # TWS sessions.
     echo "→ ibkr-grab — needs TWS running on localhost:7497 + logged in"
     echo "  press Ctrl+C now if TWS isn't open."
     sleep 1
     source .venv/bin/activate
-    python src/ibkr_grab.py --sync
+    python src/ibkr_grab.py --merge --sync
     ;;
 
   grab)
