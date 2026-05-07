@@ -36,7 +36,11 @@ ss = sh._open_sheet(client)
 # - scan_results (latest IBKR scan if TWS was on)
 # - exit_plans (latest)
 # - options_defense (latest)
-# - decision_queue (latest)
+# - decision_queue (latest — INCLUDES auto-generated rows with
+#     source="risk_parity" emitted by scripts/risk_parity_recommend.py
+#     for every UNDERWEIGHT asset_class. Treat these as proposals to
+#     VALIDATE / REFINE; you may upgrade or downgrade conviction by 1
+#     and rewrite thesis prose.)
 # - technical_scores (latest)
 # - daily_brief_latest (last 5 rows for week lookback)
 # - wsr_summary (last full WSR for thesis-carry-over)
@@ -189,6 +193,17 @@ Allowed forms:
 - CSP/CC on a ticker in the underweight class
 - An aggressive-watch entry with explicit re-entry trigger if regime
   blocks new entries
+
+The `risk_parity_recommend` script auto-generates specific
+`decision_queue` rows with `source="risk_parity"` for every
+underweight class. When you synthesize the WSR, READ those
+auto-generated rows first and:
+- Confirm or refine the conviction (you may upgrade/downgrade by 1)
+- Refine the thesis prose to be more precise
+- Cross-check against your current TV signals + regime view
+- The "REQUIRED at least one underweight-class proposal" rule is now
+  AUTOMATICALLY satisfied — you just need to validate (or override
+  with a kill reason) the auto-generated rows.
 
 If you genuinely cannot propose anything in any underweight class for
 a given account (e.g. all classes have no good candidate this week),

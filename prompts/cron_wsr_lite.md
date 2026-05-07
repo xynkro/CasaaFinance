@@ -36,7 +36,7 @@ if full_rows:
 "
 ```
 
-Also pull positions, options, exit_plans, decision_queue, scan_results, technical_scores, latest macro, and option_recommendations — same pattern as the daily brief.
+Also pull positions, options, exit_plans, decision_queue (which now INCLUDES auto-generated rows with `source="risk_parity"` from `scripts/risk_parity_recommend.py` — treat as proposals to VALIDATE/REFINE), scan_results, technical_scores, latest macro, and option_recommendations — same pattern as the daily brief.
 
 ```python
 # Additional regime tabs (Agent 1's regime cron output):
@@ -116,6 +116,17 @@ Read latest `risk_parity_audit` rows. Apply two rules:
 2. Per-WSR-run quota: at least ONE proposed entry per account in an
    UNDERWEIGHT class (or explicit skip with reason — see WSR Full §5
    for the format).
+
+The `risk_parity_recommend` script auto-generates specific
+`decision_queue` rows with `source="risk_parity"` for every
+underweight class. When you synthesize the WSR, READ those
+auto-generated rows and:
+- Confirm or refine the conviction (you may upgrade/downgrade by 1)
+- Refine the thesis prose to be more precise
+- Cross-check against your current TV signals + regime view
+- The "REQUIRED at least one underweight-class proposal" rule is now
+  AUTOMATICALLY satisfied — you just need to validate (or override
+  with kill reason) the auto-generated rows.
 
 Mid-week pulse — keep it tight. The Sunday WSR Full does the deeper
 allocation reasoning.

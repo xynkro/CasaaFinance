@@ -130,6 +130,12 @@ print(f'  {\"TOTAL UNIQUE\":30} {total_unique}')
     gh workflow run risk-parity-audit.yml --repo "$GH_REPO"
     ;;
 
+  rp-recs|risk-parity-recs)
+    echo "→ risk_parity_recommend (local) — generate buy recommendations from audit"
+    source .venv/bin/activate
+    python scripts/risk_parity_recommend.py
+    ;;
+
   tv)
     echo "→ tv-signals (cloud cron, manual trigger — daily TV 26-indicator pull)"
     gh workflow run tv-signals.yml --repo "$GH_REPO"
@@ -211,6 +217,7 @@ REGIME / EXPOSURE / SCREEN
   yield           cloud options-yield-screener (CSP + CC candidates by yield)
   tv              cloud tv-signals (TradingView 26-indicator consensus, 1d + 1W)
   risk-parity     cloud risk-parity-audit (asset-class diversification check)
+  rp-recs         local risk_parity_recommend (rebalance buy candidates → decision_queue)
 
 BRAIN
   brief           daily brief (cloud, Opus)

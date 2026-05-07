@@ -62,3 +62,9 @@ jobs:
           ARGS=""
           if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
           python scripts/risk_parity_audit.py $ARGS
+
+      - name: Generate rebalance recommendations
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/risk_parity_recommend.py $ARGS
