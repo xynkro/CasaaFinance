@@ -38,6 +38,11 @@ const GIDS: Record<string, string> = {
   // 22:45 UTC by risk-parity-audit.yml. 8 asset classes × 2 accounts =
   // 16 rows per run. Live GID resolved via gspread on 2026-05-07.
   risk_parity_audit: "1398209766",
+  // Live price feed — written every 5 min by tv-prices.yml using
+  // TradingView's public scanner endpoint. UPSERT semantics, one row
+  // per portfolio ticker. PWA Portfolio overlays this on positions for
+  // near-realtime mkt_val/UPL display.
+  live_prices: "666282627",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -469,6 +474,44 @@ export interface TvConsensus {
  * bond_intermediate, gold, commodities_broad, vol_long) × 2 accounts
  * (caspar, sarah). The PWA RiskAllocationCard consumes the latest run.
  */
+/**
+ * Live-price feed row — one upserted row per portfolio ticker. Written
+ * every 5 min by `tv-prices.yml` (TradingView public scanner endpoint).
+ * The PWA Portfolio overlays `last` onto position rows for near-realtime
+ * mkt_val/UPL display, and `updated_at` powers the freshness chip.
+ */
+export interface LivePriceRow {
+  ticker: string;
+  exchange: string;       // "NASDAQ" | "NYSE" | "AMEX" | "SGX"
+  last: string;           // current price (string from CSV; parse via numeric())
+  change_pct: string;     // day-over-day % change
+  volume: string;
+  updated_at: string;     // SGT-anchored "YYYY-MM-DDTHHMMSS"
+  source: string;         // "tv" | "yahoo"
+}
+
+/**
+ * Build a ticker→LivePriceRow map for fast lookup. Empty/missing ticker
+ * rows skipped. The map's `latest_updated_at` returns the most recent
+ * timestamp across all rows (for the freshness chip).
+ */
+export function indexLivePrices(rows: LivePriceRow[]): {
+  byTicker: Map<string, LivePriceRow>;
+  latestUpdatedAt: string;
+} {
+  const byTicker = new Map<string, LivePriceRow>();
+  let latestUpdatedAt = "";
+  for (const r of rows) {
+    const t = (r.ticker || "").toUpperCase();
+    if (!t) continue;
+    byTicker.set(t, r);
+    if (r.updated_at && r.updated_at > latestUpdatedAt) {
+      latestUpdatedAt = r.updated_at;
+    }
+  }
+  return { byTicker, latestUpdatedAt };
+}
+
 export interface RiskParityAuditRow {
   date: string;
   account: string;                  // "caspar" | "sarah"
@@ -583,6 +626,10 @@ export interface DashboardData {
   tvSignals: Map<string, TvConsensus>;
   // Risk Parity LITE audit — latest day only (16 rows: 8 classes × 2 accounts).
   riskParityAudit: RiskParityAuditRow[];
+  // Live price feed (TV scanner, 5-min refresh). PWA Portfolio overlays
+  // these onto positions for near-realtime mkt_val/UPL.
+  livePrices: Map<string, LivePriceRow>;
+  livePricesUpdatedAt: string;
   error: string | null;
 }
 
@@ -643,6 +690,12 @@ export async function fetchDashboard(): Promise<DashboardData> {
         // until first cron run lands; catch keeps PWA alive meanwhile.
         fetchTab<RiskParityAuditRow>("risk_parity_audit").catch(() => [] as RiskParityAuditRow[]),
       ]);
+    // Live prices fetched separately so a temporary failure doesn't blow up
+    // the whole dashboard load (the rest of the data is still useful).
+    const livePriceRows = await fetchTab<LivePriceRow>("live_prices").catch(
+      () => [] as LivePriceRow[],
+    );
+    const liveIdx = indexLivePrices(livePriceRows);
     const casparRows = normalizeSnapshot(casparRaw);
     const sarahRows = normalizeSnapshot(sarahRaw);
 
@@ -702,6 +755,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
       screenCandidates: sortByDate(screenRows),
       tvSignals: lookupTvConsensusMap(tvRows),
       riskParityAudit: latestGroup(riskParityRows),
+      livePrices: liveIdx.byTicker,
+      livePricesUpdatedAt: liveIdx.latestUpdatedAt,
       error: null,
     };
   } catch (e) {
@@ -718,6 +773,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
       screenCandidates: [],
       tvSignals: new Map(),
       riskParityAudit: [],
+      livePrices: new Map(),
+      livePricesUpdatedAt: "",
       error: String(e),
     };
   }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PositionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
+import type { PositionRow, TechnicalScoreRow, ExitPlanRow, LivePriceRow } from "../data";
 import { StockDetail } from "./StockDetail";
 import { ExitStatusBadge } from "./ExitPlanPanel";
 import { ChevronRight } from "lucide-react";
@@ -26,6 +26,7 @@ export function PositionsTable({
   technicalScoresHistory,
   exitPlans,
   account,
+  livePrices,
 }: {
   positions: PositionRow[];
   currency: "USD" | "SGD";
@@ -33,7 +34,25 @@ export function PositionsTable({
   technicalScoresHistory?: TechnicalScoreRow[];
   exitPlans?: ExitPlanRow[];
   account?: "caspar" | "sarah";
+  livePrices?: Map<string, LivePriceRow>;
 }) {
+  // Helper: live mkt_val for a position. Falls back to grab-time mkt_val
+  // when there's no live price (e.g. SGX symbol TV doesn't quote).
+  const liveMktVal = (pos: PositionRow): number => {
+    const lp = livePrices?.get((pos.ticker || "").toUpperCase());
+    if (lp && Number(lp.last) > 0) {
+      return Number(pos.qty || 0) * Number(lp.last);
+    }
+    return Number(pos.mkt_val || 0);
+  };
+  // Helper: live UPL.
+  const liveUpl = (pos: PositionRow): number => {
+    const lp = livePrices?.get((pos.ticker || "").toUpperCase());
+    if (lp && Number(lp.last) > 0) {
+      return Number(pos.qty || 0) * (Number(lp.last) - Number(pos.avg_cost || 0));
+    }
+    return Number(pos.upl || 0);
+  };
   const [selected, setSelected] = useState<PositionRow | null>(null);
   const prefix = currency === "SGD" ? "S$" : "$";
   const techByTicker = new Map<string, TechnicalScoreRow>();
@@ -53,7 +72,12 @@ export function PositionsTable({
     );
   }
 
-  const sorted = [...positions].sort((a, b) => Number(b.mkt_val) - Number(a.mkt_val));
+  // Sort by LIVE mkt_val so today's biggest mover floats up. Falls back to
+  // grab-time when no live price (preserves existing UX for SGX positions).
+  const sorted = [...positions].sort((a, b) => liveMktVal(b) - liveMktVal(a));
+  // Total live mkt_val — used to recompute weight % so the % column reflects
+  // current allocation rather than stale grab-time weight.
+  const totalLiveMktVal = sorted.reduce((s, p) => s + liveMktVal(p), 0);
 
   return (
     <>
@@ -65,8 +89,10 @@ export function PositionsTable({
 
         <div className="divide-y divide-white/5">
           {sorted.map((pos) => {
-            const upl = Number(pos.upl);
-            const weight = pctFmt(pos.weight);
+            const upl = liveUpl(pos);
+            const mv = liveMktVal(pos);
+            const weightPct = totalLiveMktVal > 0 ? mv / totalLiveMktVal : Number(pos.weight);
+            const weight = pctFmt(String(weightPct));
             const isUp = upl >= 0;
             const exitPlan = exitByTicker.get(pos.ticker);
 
@@ -98,11 +124,11 @@ export function PositionsTable({
                 <div className="flex items-center gap-2 shrink-0 ml-3">
                   <div className="text-right">
                     <div className="text-[length:var(--t-sm)] font-semibold text-slate-100 font-tabular">
-                      {fmt(pos.mkt_val, prefix)}
+                      {fmt(String(mv), prefix)}
                     </div>
                     <div className="flex items-center justify-end gap-2">
                       <span className={`text-[length:var(--t-xs)] font-medium font-tabular ${isUp ? "text-emerald-400" : "text-red-400"}`}>
-                        {isUp ? "+" : ""}{fmt(pos.upl, "")}
+                        {isUp ? "+" : ""}{fmt(String(upl), "")}
                       </span>
                       <span className="text-[length:var(--t-2xs)] text-slate-500 font-tabular">
                         {weight.text}

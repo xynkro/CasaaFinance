@@ -3,6 +3,7 @@ import type {
   PositionRow,
   TechnicalScoreRow,
   ExitPlanRow,
+  LivePriceRow,
 } from "../data";
 import { PnlCard } from "../cards/PnlCard";
 import { PositionsTable } from "../components/PositionsTable";
@@ -37,6 +38,8 @@ export function PortfolioPage({
   technicalScores,
   technicalScoresHistory,
   exitPlans,
+  livePrices,
+  livePricesUpdatedAt,
   loading,
 }: {
   casparSnapshot: SnapshotRow | null;
@@ -46,6 +49,8 @@ export function PortfolioPage({
   technicalScores: TechnicalScoreRow[];
   technicalScoresHistory: TechnicalScoreRow[];
   exitPlans: ExitPlanRow[];
+  livePrices: Map<string, LivePriceRow>;
+  livePricesUpdatedAt: string;
   loading: boolean;
 }) {
   const CasparPanel = (
@@ -56,6 +61,8 @@ export function PortfolioPage({
           currency="USD"
           snapshot={casparSnapshot}
           positions={casparPositions}
+          livePrices={livePrices}
+          livePricesUpdatedAt={livePricesUpdatedAt}
           loading={loading}
         />
       </div>
@@ -67,6 +74,7 @@ export function PortfolioPage({
           technicalScores={technicalScores}
           technicalScoresHistory={technicalScoresHistory}
           exitPlans={exitPlans}
+          livePrices={livePrices}
         />
       </div>
     </div>
@@ -80,6 +88,8 @@ export function PortfolioPage({
           currency="SGD"
           snapshot={sarahSnapshot}
           positions={sarahPositions}
+          livePrices={livePrices}
+          livePricesUpdatedAt={livePricesUpdatedAt}
           loading={loading}
         />
       </div>
@@ -91,6 +101,7 @@ export function PortfolioPage({
           technicalScores={technicalScores}
           technicalScoresHistory={technicalScoresHistory}
           exitPlans={exitPlans}
+          livePrices={livePrices}
         />
       </div>
     </div>

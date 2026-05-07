@@ -1,4 +1,4 @@
-import type { SnapshotRow, PositionRow } from "../data";
+import type { SnapshotRow, PositionRow, LivePriceRow } from "../data";
 import { Card } from "./Card";
 import { TrendingUp, TrendingDown, Wallet } from "lucide-react";
 
@@ -107,12 +107,16 @@ export function PnlCard({
   currency,
   snapshot,
   positions,
+  livePrices,
+  livePricesUpdatedAt,
   loading,
 }: {
   label: string;
   currency: "USD" | "SGD";
   snapshot: SnapshotRow | null;
   positions?: PositionRow[];
+  livePrices?: Map<string, LivePriceRow>;
+  livePricesUpdatedAt?: string;
   loading?: boolean;
 }) {
   if (loading) return <Skeleton />;
@@ -129,23 +133,70 @@ export function PnlCard({
   }
 
   const prefix = currency === "SGD" ? "S$" : "$";
-  const uplPct = pct(snapshot.upl_pct);
-  const Icon = uplPct.positive ? TrendingUp : TrendingDown;
-  const posCount = positions?.length ?? 0;
-  const totalMktVal = positions?.reduce((sum, p) => sum + Number(p.mkt_val || 0), 0) ?? 0;
   const positiveColor = "#34d399";
   const negativeColor = "#f87171";
-  const pnlColor = uplPct.positive ? positiveColor : negativeColor;
 
-  const ts = fmtRelative(snapshot.date);
-  // Highlight stale data. >30 min during US-market window suggests yahoo-grab
-  // missed a beat; >2h during off-hours is normal. Coloring uses the same
-  // green/red palette as the rest of the card so it doesn't look bolted on.
+  // Live-price overlay (per-position) — when we have a TV-refreshed price
+  // for a stock, recompute its mkt_val using current price. The grand-total
+  // NLV stays authoritative from `snapshot.net_liq` (IBKR's number, which
+  // includes options + FX conversion); we only use the live overlay to
+  // SHIFT it by the delta between grab-time stock value and live stock
+  // value. This avoids double-counting options or losing FX precision for
+  // Sarah's mixed-currency book.
+  const posCount = positions?.length ?? 0;
+  const grabStockMktVal = positions?.reduce((sum, p) => sum + Number(p.mkt_val || 0), 0) ?? 0;
+  const liveStockMktVal = positions?.reduce((sum, p) => {
+    const t = (p.ticker || "").toUpperCase();
+    const lp = livePrices?.get(t);
+    if (lp && Number(lp.last) > 0) {
+      return sum + Number(p.qty || 0) * Number(lp.last);
+    }
+    return sum + Number(p.mkt_val || 0);
+  }, 0) ?? 0;
+  const stockDelta = liveStockMktVal - grabStockMktVal;
+
+  // Authoritative NLV from IBKR snapshot, shifted by the live stock delta.
+  // For Sarah (SGD account), the price delta is in USD (TV prices for US
+  // stocks). Convert via the snapshot's implied FX rate (snapshot.net_liq /
+  // total stocks-in-SGD ratio approximates well enough). Acceptably noisy —
+  // the per-position cards show the truly accurate live mkt_val, while
+  // this top-line is "snapshot ± live drift".
+  const snapshotNlv = Number(snapshot.net_liq || 0);
+  const liveNlv = snapshotNlv + stockDelta;
+  // Prefer live UPL when we have it; otherwise the snapshot's UPL.
+  const liveUpl = positions?.reduce((sum, p) => {
+    const t = (p.ticker || "").toUpperCase();
+    const lp = livePrices?.get(t);
+    if (lp && Number(lp.last) > 0) {
+      const qty = Number(p.qty || 0);
+      const cost = Number(p.avg_cost || 0);
+      return sum + qty * (Number(lp.last) - cost);
+    }
+    return sum + Number(p.upl || 0);
+  }, 0) ?? 0;
+  const uplPctVal = liveNlv > 0 ? liveUpl / liveNlv : Number(snapshot.upl_pct || 0);
+  const uplPct = {
+    text: `${uplPctVal >= 0 ? "+" : ""}${(uplPctVal * 100).toFixed(2)}%`,
+    positive: uplPctVal >= 0,
+  };
+  const Icon = uplPct.positive ? TrendingUp : TrendingDown;
+  const pnlColor = uplPct.positive ? positiveColor : negativeColor;
+  // Market Value tile shows the live stock-only number for clarity. (Day
+  // UPL stays on snapshot.upl which is IBKR-authoritative.)
+  const liveMktVal = liveStockMktVal || grabStockMktVal;
+
+  // Freshness chip prefers the live-price feed timestamp over the snapshot
+  // timestamp (since live is much fresher — 5min vs 15min).
+  const tsSource = livePricesUpdatedAt && livePrices && livePrices.size > 0
+    ? livePricesUpdatedAt
+    : snapshot.date;
+  const ts = fmtRelative(tsSource);
   const ageMin = (() => {
-    const d = parseSgtAudit(snapshot.date ?? "");
+    const d = parseSgtAudit(tsSource ?? "");
     return d ? Math.round((Date.now() - d.getTime()) / 60000) : -1;
   })();
-  const stale = ageMin > 30; // 15min cron + slack
+  // Threshold tuned to live-price cadence (5min cron). >10min → amber.
+  const stale = ageMin > 10;
 
   return (
     <Card>
@@ -170,10 +221,10 @@ export function PnlCard({
         </time>
       </div>
 
-      {/* Big NLV number */}
+      {/* Big NLV number — live-overlay computed from cash + Σ(qty × live_price). */}
       <div className="mb-1">
         <span className="text-[length:var(--t-hero)] font-bold tracking-[-0.03em] text-white font-tabular leading-none">
-          {fmt(snapshot.net_liq, prefix)}
+          {fmt(liveNlv, prefix)}
         </span>
       </div>
 
@@ -190,14 +241,16 @@ export function PnlCard({
           {uplPct.text}
         </span>
         <span className="text-[length:var(--t-xs)] font-tabular" style={{ color: "rgb(100 116 139)" }}>
-          UPL {fmt(snapshot.upl, prefix)}
+          UPL {fmt(liveUpl, prefix)}
         </span>
       </div>
 
-      {/* Stats grid */}
+      {/* Stats grid — Market Value uses live overlay; Day UPL retains
+          the snapshot's UnrealizedPnL (a separate IBKR figure that's
+          today-only-realized vs our live total UPL). */}
       <div className="grid grid-cols-2 gap-2">
         <StatTile label="Cash"         value={fmt(snapshot.cash, prefix)} />
-        <StatTile label="Market Value" value={fmtCompact(totalMktVal, prefix)} />
+        <StatTile label="Market Value" value={fmtCompact(liveMktVal, prefix)} />
         <StatTile label="Positions"    value={posCount > 0 ? `${posCount} holdings` : "—"} />
         <StatTile label="Day UPL"      value={fmt(snapshot.upl, prefix)} /></div>
     </Card>

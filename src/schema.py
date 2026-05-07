@@ -965,6 +965,56 @@ class RiskParityAuditRow:
 
 
 @dataclass
+class LivePriceRow:
+    """
+    Near-realtime price feed — one upserted row per portfolio ticker.
+
+    Refreshed every 5 minutes by `scripts/tv_price_refresh.py` using
+    TradingView's public scanner endpoint (the same data source as
+    `tv_signals_run.py`). The PWA Portfolio overlays this onto the
+    positions tabs so `mkt_val` / `upl` reflect the current price, not
+    the last-grab price (which can be 15+ min stale).
+
+    UPSERT semantics: keyed by `ticker` only. Each refresh replaces the
+    row for any returned ticker, otherwise appends. The tab stays tiny
+    (~30 rows total — one per active portfolio ticker).
+
+    Why TradingView, not Yahoo?
+      - Already used for tv_signals daily (consistency)
+      - More reliable than Yahoo (no IP throttling/CORS)
+      - Faster: single batched POST returns all tickers
+      - Updates near-realtime during US market hours
+    """
+    TAB_NAME = "live_prices"
+    HEADERS = [
+        "ticker",          # key (no exchange prefix)
+        "exchange",        # "NASDAQ" | "NYSE" | "AMEX" | "SGX"
+        "last",            # current price
+        "change_pct",      # day-over-day % change
+        "volume",          # day's volume
+        "updated_at",      # SGT-anchored ISO "YYYY-MM-DDTHHMMSS"
+        "source",          # "tv" | "yahoo" (which feed wrote this row)
+    ]
+
+    ticker: str
+    exchange: str
+    last: float
+    change_pct: float
+    volume: int
+    updated_at: str        # SGT iso
+    source: str = "tv"
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [
+            self.ticker, self.exchange,
+            _num(self.last, 4), _num(self.change_pct, 4),
+            str(int(self.volume)) if self.volume else "0",
+            self.updated_at,
+            self.source,
+        ]
+
+
+@dataclass
 class TradeRow:
     """Individual trade/execution from IBKR."""
     TAB_NAME = "trades"

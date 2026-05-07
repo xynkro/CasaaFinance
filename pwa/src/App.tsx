@@ -90,6 +90,8 @@ function Dashboard() {
             technicalScores={data?.technicalScores ?? []}
             technicalScoresHistory={data?.technicalScoresHistory ?? []}
             exitPlans={data?.exitPlans ?? []}
+            livePrices={data?.livePrices ?? new Map()}
+            livePricesUpdatedAt={data?.livePricesUpdatedAt ?? ""}
             loading={loading && !data}
           />
         );
