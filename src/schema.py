@@ -1084,6 +1084,29 @@ class TriggerAlertRow:
 
 
 @dataclass
+class TelegramOffsetRow:
+    """
+    Single-row tracker for Telegram getUpdates offset.
+
+    The portfolio responder cron polls getUpdates every N min; offset is
+    the highest update_id we've already processed + 1, so subsequent
+    polls skip over already-handled messages. Survives across GH Actions
+    runs because GH cron containers are ephemeral.
+
+    Always exactly one data row (key="last") — UPSERT on every run.
+    """
+    TAB_NAME = "telegram_offset"
+    HEADERS = ["key", "last_update_id", "updated_at"]
+
+    key: str
+    last_update_id: int
+    updated_at: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [self.key, str(self.last_update_id), self.updated_at]
+
+
+@dataclass
 class MacroAlertStateRow:
     """
     Per-event ledger for macro Telegram pings — used by `scripts/trigger_alerts.py`

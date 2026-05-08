@@ -141,6 +141,22 @@ case "${1:-help}" in
     fi
     ;;
 
+  portfolio-respond|tg-respond|respond)
+    # Telegram Portfolio Ping responder. Polls the "Portfolio Ping"
+    # topic in Finance & Trading group for `~/portfolio` commands and
+    # replies with the sender's account snapshot. Cron runs every 2 min
+    # during waking hours; this command runs once locally.
+    echo "→ telegram_portfolio_responder (poll once)"
+    source .venv/bin/activate
+    if [ "${2:-}" = "dry" ]; then
+      python scripts/telegram_portfolio_responder.py --dry
+    elif [ "${2:-}" = "reset" ]; then
+      python scripts/telegram_portfolio_responder.py --reset
+    else
+      python scripts/telegram_portfolio_responder.py
+    fi
+    ;;
+
   watchlist|wl)
     # Show or edit the curated universe (`prompts/watchlist.yaml`).
     # The brain reads this to know which categories to sweep when
