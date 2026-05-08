@@ -1,0 +1,46 @@
+name: Finnhub Calendars — Daily Earnings + Economic
+
+on:
+  schedule:
+    # Daily 13:00 UTC = 21:00 SGT — ahead of WSR Lite (Wed/Fri 19:33 SGT)
+    # so the brain reads fresh calendars when synthesizing. Earnings rarely
+    # shift mid-day; once-daily refresh is enough.
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finnhub-calendars
+  cancel-in-progress: true
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+      FINNHUB_API_KEY:  ${{ secrets.FINNHUB_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Pull Finnhub calendars
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.dry }}" = "true" ]; then
+            python scripts/finnhub_calendars.py --dry
+          else
+            python scripts/finnhub_calendars.py
+          fi

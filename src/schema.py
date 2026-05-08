@@ -965,6 +965,111 @@ class RiskParityAuditRow:
 
 
 @dataclass
+class EarningsRow:
+    """
+    Earnings calendar entry — one row per (ticker, quarter). Refreshed
+    daily by `scripts/finnhub_calendars.py` from Finnhub's
+    `calendar/earnings` endpoint.
+
+    The brain reads this in:
+      - Daily Brief: "today's earnings" section (companies reporting BMO/AMC)
+      - WSR Lite: "Friday earnings preview" + "DTE-inside earnings" warnings
+      - WSR Full: "earnings within 14 days" table per portfolio + watchlist
+
+    PWA shows an earnings badge ("ER 5/15") on Decision cards when the
+    ticker has earnings inside the option DTE — flags assignment-risk.
+
+    UPSERT key: (ticker, year, quarter). Re-pulls overwrite the same
+    row when actual EPS/revenue land post-print.
+    """
+    TAB_NAME = "earnings_calendar"
+    HEADERS = [
+        "date",            # earnings date YYYY-MM-DD
+        "ticker",
+        "hour",            # "bmo" (before mkt open) | "amc" (after mkt close) | "dmh" (during)
+        "year", "quarter",
+        "eps_estimate", "eps_actual",
+        "revenue_estimate", "revenue_actual",
+        "surprise_pct",    # ((actual - estimate) / abs(estimate)) × 100; "" if not yet reported
+        "updated_at",      # SGT iso "YYYY-MM-DDTHHMMSS"
+    ]
+
+    date: str
+    ticker: str
+    hour: str
+    year: int
+    quarter: int
+    eps_estimate: float | None
+    eps_actual: float | None
+    revenue_estimate: float | None
+    revenue_actual: float | None
+    surprise_pct: float | None
+    updated_at: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [
+            self.date, self.ticker, self.hour,
+            str(self.year), str(self.quarter),
+            _num(self.eps_estimate, 4) if self.eps_estimate is not None else "",
+            _num(self.eps_actual, 4) if self.eps_actual is not None else "",
+            _num(self.revenue_estimate, 0) if self.revenue_estimate is not None else "",
+            _num(self.revenue_actual, 0) if self.revenue_actual is not None else "",
+            _num(self.surprise_pct, 2) if self.surprise_pct is not None else "",
+            self.updated_at,
+        ]
+
+
+@dataclass
+class EconomicEventRow:
+    """
+    Economic event calendar — macro releases (CPI/NFP/FOMC/GDP) for the
+    next 14 days. Refreshed daily by `scripts/finnhub_calendars.py`.
+
+    The brain reads this in:
+      - Daily Brief: "today's macro events" section with importance flag
+      - WSR Lite: "next 72-hour catalyst window" warnings
+      - WSR Full: "macro week-ahead" table
+
+    PWA shows a "Macro this week" widget on Home for the next 7 days of
+    HIGH-importance events.
+
+    UPSERT key: (date, time, country, event). Same event re-pulled for
+    forecast/actual updates without duplication.
+    """
+    TAB_NAME = "economic_calendar"
+    HEADERS = [
+        "date",          # YYYY-MM-DD
+        "time",          # HH:MM (local — UTC if Finnhub doesn't specify)
+        "country",       # ISO-2 e.g. "US" | "EU" | "CN"
+        "event",         # human label e.g. "CPI MoM"
+        "impact",        # "low" | "medium" | "high"
+        "forecast",
+        "actual",
+        "previous",
+        "unit",          # "%" | "K" | "B" etc.
+        "updated_at",
+    ]
+
+    date: str
+    time: str
+    country: str
+    event: str
+    impact: str
+    forecast: str
+    actual: str
+    previous: str
+    unit: str
+    updated_at: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [
+            self.date, self.time, self.country, self.event, self.impact,
+            self.forecast, self.actual, self.previous, self.unit,
+            self.updated_at,
+        ]
+
+
+@dataclass
 class LivePriceRow:
     """
     Near-realtime price feed — one upserted row per portfolio ticker.

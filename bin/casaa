@@ -89,6 +89,14 @@ case "${1:-help}" in
     gh workflow run market-scan.yml --repo "$GH_REPO"
     ;;
 
+  finnhub|calendars)
+    # Finnhub daily pull — earnings + economic calendars. Filtered to our
+    # portfolio + watchlist universe and US/EU/CN/JP+SG countries
+    # respectively. Brain reads these for "today's catalysts" sections.
+    echo "→ finnhub-calendars (cloud cron, manual trigger)"
+    gh workflow run finnhub-calendars.yml --repo "$GH_REPO"
+    ;;
+
   watchlist|wl)
     # Show or edit the curated universe (`prompts/watchlist.yaml`).
     # The brain reads this to know which categories to sweep when
