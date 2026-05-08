@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Settings } from "../settings";
-import { LogOut, DollarSign, LayoutGrid, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check } from "lucide-react";
+import { LogOut, DollarSign, LayoutGrid, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check, Clock, Eye, CheckCircle, XCircle, AlertTriangle, Info } from "lucide-react";
 
 const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Review", "Settings"];
 
@@ -125,6 +125,145 @@ function BuildChip() {
           <Copy size={12} className="text-slate-500" />
         )}
       </button>
+    </div>
+  );
+}
+
+/**
+ * Decision Status Glossary — explains the 5 status values the brain
+ * emits on every decision_queue row. Shown in Settings as a reference
+ * card so a new user (or a future-you who forgot) can decode the
+ * Decisions tab without context-switching to the prompt source.
+ *
+ * Status values are kept in sync with `prompts/cron_wsr_full.md` §6c
+ * "Status values" comment block. If a new status is added there,
+ * update this glossary too.
+ */
+function DecisionStatusGlossary() {
+  const items: Array<{
+    icon: React.ComponentType<{ size?: number; className?: string }>;
+    label: string;
+    color: string;
+    bg: string;
+    short: string;
+    body: string;
+  }> = [
+    {
+      icon: Clock,
+      label: "Pending",
+      color: "#fbbf24",
+      bg: "rgba(251,191,36,0.10)",
+      short: "Actionable this week",
+      body:
+        "The brain wants you to ACT on this row in the next few days. " +
+        "Entry zone is live, capital fits the exposure cap, and the " +
+        "thesis is intact. Pending share entries usually carry a " +
+        '"buy now" tranche in the Accumulation panel; pending option ' +
+        "entries are CSPs or CCs the brain wants written this cycle.",
+    },
+    {
+      icon: Eye,
+      label: "Watching",
+      color: "#60a5fa",
+      bg: "rgba(96,165,250,0.10)",
+      short: "Awaiting trigger — don't act yet",
+      body:
+        "The thesis is valid but a precondition isn't met yet. Could be " +
+        "a price level (\"100sh @ $155 LMT when SPY pulls back\"), a " +
+        "regime gate (\"on NEW_ENTRY_ALLOWED\"), an event (\"after AMD " +
+        "Q1 earnings 5/13\"), or a confirmation (\"on TV daily=BUY\"). " +
+        "Read the accumulation plan for the exact trigger. No capital " +
+        "is allocated until something flips it to Pending.",
+    },
+    {
+      icon: CheckCircle,
+      label: "Filled",
+      color: "#34d399",
+      bg: "rgba(52,211,153,0.10)",
+      short: "Already executed — managing now",
+      body:
+        "You already wrote the option or bought the shares; this row is " +
+        "the brain's mid-cycle thesis update. For options, the plan " +
+        'describes EXIT/MANAGEMENT ("let expire | roll +14d on -2% | ' +
+        'close at 50% profit"). Mid-week WSR Lite re-emits Filled rows ' +
+        "with refreshed proximity / IV / DTE context.",
+    },
+    {
+      icon: XCircle,
+      label: "Killed",
+      color: "#f87171",
+      bg: "rgba(248,113,113,0.10)",
+      short: "Thesis broken — do not act",
+      body:
+        'The brain explicitly retracted this idea. Reasons vary: anchor ' +
+        "support broke, fundamentals changed (earnings miss / " +
+        "downgrade), regime shifted into CASH_PRIORITY, or a sizing " +
+        "constraint made it infeasible. Killed rows stay visible for " +
+        "audit (so you can see what was on the table and why it died) " +
+        "but the PWA filters them out of the active Pending/Watching " +
+        "lists.",
+    },
+    {
+      icon: AlertTriangle,
+      label: "Expired",
+      color: "#94a3b8",
+      bg: "rgba(148,163,184,0.10)",
+      short: "DTE elapsed without action",
+      body:
+        "Option DTE passed and the position resolved on its own (let " +
+        "expire worthless / assigned). Or a watching share entry sat " +
+        "past its time stop without triggering. Historical only — the " +
+        "Review tab shows expired rows in the closed-decisions roll-up " +
+        "so you can audit hit rate.",
+    },
+  ];
+
+  return (
+    <div className="glass rounded-2xl p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider">
+          Decision Status Glossary
+        </h3>
+        <Info size={14} className="text-slate-600" />
+      </div>
+      <p className="text-[length:var(--t-xs)] text-slate-500 mb-4 leading-relaxed">
+        Every row in the Decisions tab carries one of five status values.
+        The brain (Opus, on Mon/Wed/Fri/Sun crons) sets the status when
+        it writes the row; you don't change it manually.
+      </p>
+      <div className="flex flex-col gap-3">
+        {items.map((it) => {
+          const Icon = it.icon;
+          return (
+            <div
+              key={it.label}
+              className="rounded-xl p-3"
+              style={{ background: it.bg, border: `1px solid ${it.color}22` }}
+            >
+              <div className="flex items-center gap-2 mb-1.5">
+                <div
+                  className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+                  style={{ background: `${it.color}1a`, color: it.color }}
+                >
+                  <Icon size={14} />
+                </div>
+                <span
+                  className="text-[length:var(--t-sm)] font-bold uppercase tracking-wide"
+                  style={{ color: it.color }}
+                >
+                  {it.label}
+                </span>
+                <span className="text-[length:var(--t-xs)] text-slate-400">
+                  — {it.short}
+                </span>
+              </div>
+              <p className="text-[length:var(--t-xs)] text-slate-400 leading-relaxed pl-9">
+                {it.body}
+              </p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -258,6 +397,9 @@ export function SettingsPage({
           </SettingRow>
         </div>
       </div>
+
+      {/* Reference glossary — what the 5 decision_queue status values mean */}
+      <DecisionStatusGlossary />
 
       {/* Account */}
       <div className="glass rounded-2xl p-5">
