@@ -461,8 +461,9 @@ export interface TvSignalRow {
   cci20: string;
 }
 
-/** Latest 1d + 1W TV signal for one ticker. */
+/** Latest TV signals across the timeframes we pull (1h + 1d + 1W). */
 export interface TvConsensus {
+  hourly?: TvSignalRow;   // intraday confluence — flags 1d/1h divergence
   daily?: TvSignalRow;
   weekly?: TvSignalRow;
 }
@@ -548,7 +549,8 @@ export function lookupTvConsensusMap(rows: TvSignalRow[]): Map<string, TvConsens
     const [ticker, interval] = key.split("|");
     if (!out.has(ticker)) out.set(ticker, {});
     const entry = out.get(ticker)!;
-    if (interval === "1d") entry.daily = row;
+    if (interval === "1h") entry.hourly = row;
+    else if (interval === "1d") entry.daily = row;
     else if (interval === "1W") entry.weekly = row;
   }
   return out;

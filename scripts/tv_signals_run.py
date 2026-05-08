@@ -35,7 +35,7 @@ on failure (status_code "ok" but no data row), retry on NYSE.
 
 Throttling: 0.5s sleep between batch calls. With the wider watchlist
 universe (~80-90 tickers) at batch=20, the run hits ~5 batches per
-interval × 2 intervals = ~10 primary batches, plus fallback retries
+interval × 3 intervals (1h + 1d + 1W) = ~15 primary batches, plus fallback retries
 on alternate exchanges. Total wall clock typically 30-60s. On any
 HTTP 429: sleep 60s, retry once, then surrender.
 
@@ -127,11 +127,19 @@ TV_COLUMNS = [
 NUM_COLUMNS = len(TV_COLUMNS)
 
 # TradingView interval suffixes per the scanner API. "" = 1d (default).
+# 1h added Phase 4 — gives the brain 3-timeframe confluence (1h + 1d + 1W)
+# instead of 2-TF, so when 1d says BUY but 1h says SELL we can flag an
+# intraday trap before recommending entry.
 INTERVAL_SUFFIX = {
+    "1h": "|60",
     "1d": "",
     "1W": "|1W",
     "1M": "|1M",
 }
+
+# Which intervals tv_signals_run.py actually pulls each run. 1h adds one
+# more sweep over the universe but the cost is fine (~30s per pass).
+RUN_INTERVALS = ("1h", "1d", "1W")
 
 # Approximate indicator counts (matching tradingview-ta library structure).
 # 15 MA-based indicators contribute BUY/SELL only (no NEUTRAL by their rule).
@@ -429,8 +437,9 @@ def _error_row(date: str, ticker: str, interval: str, reason: str) -> S.TvSignal
 def pull_signals(tickers: list[str], date: str, logger: logging.Logger,
                   batch_size: int = 20, sleep_between: float = 0.5) -> list[S.TvSignalRow]:
     """
-    For each ticker × interval ∈ {1d, 1W}, hit the TV scanner endpoint in
-    batches of `batch_size`. Returns the full list of TvSignalRow rows.
+    For each ticker × interval ∈ RUN_INTERVALS (1h + 1d + 1W), hit the TV
+    scanner endpoint in batches of `batch_size`. Returns the full list of
+    TvSignalRow rows.
     """
     cache = _load_cache()
     rows: list[S.TvSignalRow] = []
@@ -441,7 +450,7 @@ def pull_signals(tickers: list[str], date: str, logger: logging.Logger,
         ex = _resolve_exchange(t, cache)
         symbol_for[t] = f"{ex}:{t}"
 
-    for interval in ("1d", "1W"):
+    for interval in RUN_INTERVALS:
         # Track which tickers are still missing data after primary attempt.
         unresolved: list[str] = []
         # Batch primary calls
@@ -555,7 +564,8 @@ def main() -> int:
 
     n_ok = sum(1 for r in rows if not r.recommendation.startswith("ERROR"))
     n_err = sum(1 for r in rows if r.recommendation.startswith("ERROR"))
-    logger.info(f"pulled {len(universe)} tickers x 2 intervals = {len(rows)} rows. "
+    logger.info(f"pulled {len(universe)} tickers x {len(RUN_INTERVALS)} intervals "
+                f"({'+'.join(RUN_INTERVALS)}) = {len(rows)} rows. "
                 f"{n_ok} OK, {n_err} errors. {elapsed:.1f}s")
 
     if args.dry:
