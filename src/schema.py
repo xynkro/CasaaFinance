@@ -1084,6 +1084,46 @@ class TriggerAlertRow:
 
 
 @dataclass
+class MacroAlertStateRow:
+    """
+    Per-event ledger for macro Telegram pings — used by `scripts/trigger_alerts.py`
+    to ensure EACH event fires exactly once, regardless of how many cron
+    runs straddle its window.
+
+    Two event types share this sheet:
+      - blackout : a high-impact US event entering the ±15min window.
+                   event_key = ISO-time of the event itself (deterministic).
+      - hot_news : a Finnhub general-news headline matching HOT_KEYWORDS.
+                   event_key = Finnhub news ID (deterministic).
+
+    Older-than-7-days rows are pruned on every write so the sheet
+    doesn't grow unbounded.
+    """
+    TAB_NAME = "macro_alerts_state"
+    HEADERS = [
+        "event_key",       # UPSERT key — "blackout:NFP-2026-05-08T13:30Z" / "news:12345"
+        "event_type",      # "blackout" | "hot_news"
+        "event_summary",   # human-readable for debugging
+        "event_time",      # SGT iso of the event itself (or news datetime)
+        "alerted_at",      # SGT iso when the Telegram fired
+        "updated_at",      # SGT iso of the last cron pass that touched this row
+    ]
+
+    event_key: str
+    event_type: str
+    event_summary: str
+    event_time: str
+    alerted_at: str
+    updated_at: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [
+            self.event_key, self.event_type, self.event_summary,
+            self.event_time, self.alerted_at, self.updated_at,
+        ]
+
+
+@dataclass
 class EarningsRow:
     """
     Earnings calendar entry — one row per (ticker, quarter). Refreshed

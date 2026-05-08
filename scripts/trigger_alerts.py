@@ -420,6 +420,75 @@ def load_alert_state(client) -> dict[str, dict]:
     return out
 
 
+def load_macro_alert_state(client) -> dict[str, dict]:
+    """Existing macro_alerts_state rows keyed by event_key.
+
+    Empty dict when sheet is missing — the next write will auto-create
+    via ensure_headers.
+    """
+    sh.ensure_headers(client, S.MacroAlertStateRow.TAB_NAME, S.MacroAlertStateRow.HEADERS)
+    ss = sh._open_sheet(client)
+    ws = ss.worksheet(S.MacroAlertStateRow.TAB_NAME)
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return {}
+    hdr = rows[0]
+    out: dict[str, dict] = {}
+    for r in rows[1:]:
+        if not r:
+            continue
+        rec = {hdr[i]: (r[i] if i < len(r) else "") for i in range(len(hdr))}
+        key = rec.get("event_key", "")
+        if key:
+            out[key] = rec
+    return out
+
+
+def upsert_macro_alert_state(
+    client,
+    new_rows: list[S.MacroAlertStateRow],
+    logger: logging.Logger,
+) -> int:
+    """UPSERT keyed by event_key. Drops rows older than 7 days on
+    every write to keep the sheet bounded.
+    """
+    if not new_rows:
+        return 0
+    sh.ensure_headers(client, S.MacroAlertStateRow.TAB_NAME, S.MacroAlertStateRow.HEADERS)
+    ss = sh._open_sheet(client)
+    ws = ss.worksheet(S.MacroAlertStateRow.TAB_NAME)
+    existing = ws.get_all_values()
+    hdr = existing[0] if existing else list(S.MacroAlertStateRow.HEADERS)
+
+    # Cutoff: drop any row whose event_time is older than 7 days from now.
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H%M%S")
+
+    new_keys = {r.event_key for r in new_rows}
+    keep: list[list[str]] = [hdr]
+    pruned = 0
+    for r in existing[1:]:
+        if not r:
+            continue
+        if r[0] in new_keys:
+            continue  # being replaced
+        # Prune by event_time (col 3) being older than cutoff.
+        try:
+            event_time = r[3] if len(r) > 3 else ""
+            if event_time and event_time < cutoff:
+                pruned += 1
+                continue
+        except (IndexError, TypeError):
+            pass
+        keep.append(r)
+    keep.extend(r.to_row() for r in new_rows)
+
+    ws.clear()
+    ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+    logger.info(f"✓ macro_alerts_state upserted: {len(new_rows)} (pruned {pruned} >7d old)")
+    return len(new_rows)
+
+
 def upsert_alert_state(client, rows: list[S.TriggerAlertRow], logger: logging.Logger) -> int:
     """UPSERT keyed by decision_key. Mirror of api_usage_scrape pattern."""
     sh.ensure_headers(client, S.TriggerAlertRow.TAB_NAME, S.TriggerAlertRow.HEADERS)
@@ -474,6 +543,7 @@ def main() -> int:
     macro = MacroFeed.fetch()
     in_blackout, blackout_event = macro.in_blackout_window()
     next_hi = macro.next_high_impact(within_hours=24)
+    prior_macro_alerts = load_macro_alert_state(client)
 
     logger.info(
         f"Context: live_prices={len(live_prices)}  exposure={exposure_rec or '?'}  "
@@ -589,12 +659,58 @@ def main() -> int:
         + (f"; {len(soft_fires)} close-state soft fire(s)" if include_close else f"; close-state alerts disabled (set TRIGGER_ALERTS_INCLUDE_CLOSE=true to enable, would have fired {len(soft_fires)})")
     )
 
+    # ────────────────────────────────────────────────────────────────
+    # Plan macro-news lane (computed pre-dry-return so previews work):
+    # 1) Blackout edge trigger — if in window and not already alerted.
+    # 2) Hot-news edge trigger — top 3 not-yet-alerted hot headlines.
+    # ────────────────────────────────────────────────────────────────
+    # Caps protecting against floods:
+    #   - HOT_NEWS_PING_CAP    : max pings per cron run
+    #   - HOT_NEWS_FRESH_MIN   : recency window — only ping news younger
+    #     than this. The Finnhub cache holds 24h of news but alerting on
+    #     hour-old headlines is just spam. 60min keeps pings actionable.
+    HOT_NEWS_PING_CAP = 3
+    HOT_NEWS_FRESH_MIN = 60
+
+    macro_blackout_plan: tuple[str, dict] | None = None
+    if in_blackout and blackout_event:
+        bo_event_time = blackout_event.get("_t_iso", "")
+        bo_key = f"blackout:{(blackout_event.get('event') or 'unknown')}-{bo_event_time}"
+        if bo_key not in prior_macro_alerts:
+            macro_blackout_plan = (bo_key, blackout_event)
+
+    # Recency cutoff for news — ISO timestamps from MacroFeed are UTC.
+    from datetime import datetime, timedelta, timezone as _tz
+    fresh_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=HOT_NEWS_FRESH_MIN)).isoformat()
+
+    macro_news_plan: list[dict] = [
+        n for n in macro.news
+        if n.get("hot")
+        and n.get("id")
+        and (n.get("datetime") or "") >= fresh_cutoff
+        and f"news:{n['id']}" not in prior_macro_alerts
+    ][:HOT_NEWS_PING_CAP]
+
+    logger.info(
+        f"Macro plan: blackout={'YES' if macro_blackout_plan else 'no'} | "
+        f"news={len(macro_news_plan)} of {sum(1 for n in macro.news if n.get('hot'))} hot "
+        f"({sum(1 for n in macro.news if n.get('hot') and (n.get('datetime') or '') >= fresh_cutoff)} fresh, "
+        f"{len(prior_macro_alerts)} already alerted)"
+    )
+
     if args.dry:
         for d, ev, cur in fires:
             logger.info(f"  [DRY] would fire ACT_NOW: {d.ticker} {d.account} entry=${d.entry:.2f} → cur=${cur:.2f}  ({ev.direction})")
         for d, ev, cur in soft_fires:
             tag = "would fire CLOSE" if include_close else "would-have-fired CLOSE (gated)"
             logger.info(f"  [DRY] {tag}: {d.ticker} {d.account} entry=${d.entry:.2f} → cur=${cur:.2f}  ({ev.pct_to_trigger:+.1%})")
+        if macro_blackout_plan:
+            _, ev = macro_blackout_plan
+            logger.info(f"  [DRY] would fire BLACKOUT: {ev.get('event')} ({ev.get('_minutes_until')}min)")
+        for n in macro_news_plan:
+            logger.info(f"  [DRY] would fire NEWS: [{n.get('source','?')}] {n.get('headline','')[:80]}")
+        if not macro_blackout_plan and not macro_news_plan:
+            logger.info("  [DRY] no macro pings queued")
         return 0
 
     # Persist state regardless of whether any fired (so dormant→close
@@ -656,10 +772,67 @@ def main() -> int:
         except Exception as e:
             logger.warning(f"  ✗ CLOSE failed: {d.ticker} {d.account}: {e}")
 
+    # ────────────────────────────────────────────────────────────────
+    # Execute the macro-news plan computed above (live mode only).
+    # Both event types are deduped via macro_alerts_state sheet so
+    # subsequent cron runs don't re-fire the same alert.
+    # ────────────────────────────────────────────────────────────────
+    macro_state_rows: list[S.MacroAlertStateRow] = []
+    macro_pinged = 0
+
+    if macro_blackout_plan:
+        bo_key, ev = macro_blackout_plan
+        try:
+            tg.ping_macro_blackout(
+                event_name=ev.get("event", "Unknown event"),
+                minutes_until=ev.get("_minutes_until", 0),
+                impact=ev.get("impact", "high"),
+                pwa_url=PWA_URL,
+            )
+            macro_pinged += 1
+            logger.info(f"  ✓ sent BLACKOUT: {ev.get('event')}")
+        except Exception as e:
+            logger.warning(f"  ✗ BLACKOUT failed: {e}")
+        macro_state_rows.append(S.MacroAlertStateRow(
+            event_key=bo_key,
+            event_type="blackout",
+            event_summary=ev.get("event", ""),
+            event_time=ev.get("_t_iso", ""),
+            alerted_at=now_iso,
+            updated_at=now_iso,
+        ))
+    elif in_blackout and blackout_event:
+        logger.info(f"  · BLACKOUT already alerted: {blackout_event.get('event')}")
+
+    for n in macro_news_plan:
+        news_key = f"news:{n['id']}"
+        try:
+            tg.ping_macro_news(
+                headline=n.get("headline", ""),
+                source=n.get("source", ""),
+                url=n.get("url", ""),
+            )
+            macro_pinged += 1
+            logger.info(f"  ✓ sent NEWS: {n.get('headline', '')[:60]}")
+        except Exception as e:
+            logger.warning(f"  ✗ NEWS failed: {e}")
+        macro_state_rows.append(S.MacroAlertStateRow(
+            event_key=news_key,
+            event_type="hot_news",
+            event_summary=n.get("headline", "")[:200],
+            event_time=n.get("datetime", now_iso),
+            alerted_at=now_iso,
+            updated_at=now_iso,
+        ))
+
+    if macro_state_rows:
+        upsert_macro_alert_state(client, macro_state_rows, logger)
+
     total_deferred = deferred + soft_deferred
     logger.info(
         f"trigger_alerts done — sent {sent}/{len(fires)} act_now"
         + (f", {soft_sent}/{len(soft_fires)} close" if include_close else "")
+        + (f", {macro_pinged} macro" if macro_pinged else "")
         + (f"; {total_deferred} deferred by macro blackout" if total_deferred else "")
     )
     return 0
