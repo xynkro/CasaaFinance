@@ -54,33 +54,73 @@ ss = sh._open_sheet(client)
 #     by annualized yield, IV rank, and spread quality. Sunday cron at
 #     12:00 UTC writes a fresh batch every week. Read these to propose
 #     NEW CSP/CC entries — not just refresh existing positions.)
-# - tv_signals (LATEST per ticker, both 1d and 1W intervals — TradingView's
-#     26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL plus
-#     all underlying indicator values)
+# - tv_signals (LATEST per ticker, ALL THREE intervals — 1h + 1d + 1W —
+#     TradingView's 26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/
+#     STRONG_SELL plus all underlying indicator values. Use 1h to flag
+#     intraday traps when 1d says BUY but 1h says SELL.)
 # - risk_parity_audit (LATEST 16 — asset class diversification check
 #     for both accounts: capital_pct, vol_pct, risk_contribution_pct,
 #     target_pct, delta_pct, rebalance_action, rebalance_amount_usd)
+# - earnings_calendar (NEXT 30 DAYS, FILTERED TO PORTFOLIO + WATCHLIST —
+#     date, ticker, hour BMO/AMC/DMH, eps_estimate, eps_actual,
+#     surprise_pct. Read this BEFORE proposing CSPs/CCs — earnings
+#     inside option DTE = HARD veto unless you explicitly accept the
+#     gamma risk. Brain MUST cite earnings date in thesis when
+#     proposing options on a ticker reporting in DTE.)
+# - economic_calendar (NEXT 14 DAYS, MEDIUM+HIGH IMPACT, US/EU/CN/JP/SG —
+#     date, time, country, event, impact, forecast, actual. Use to
+#     anchor week-ahead macro section + flag risk-off windows like
+#     CPI/NFP/FOMC days.)
+# - news_sentiment (LAST 14 DAYS PER TICKER — id, datetime, ticker,
+#     headline, summary, sentiment_score, sentiment_label, source,
+#     url. Brain reads to detect sentiment shifts since last WSR. The
+#     score is a heuristic — TRUST YOUR OWN SEMANTIC READING of the
+#     headline + summary over the score.)
+# - insider_transactions (LAST 90 DAYS PER TICKER — date, ticker, name,
+#     side buy/sell/grant/exercise, shares, value_usd. Aggregate per
+#     ticker per side over last 7 days; flag any ticker with net side=buy
+#     >$1M or net side=sell >$5M.)
+# - analyst_consensus (LATEST per ticker — strong_buy/buy/hold/sell/
+#     strong_sell counts, consensus_score [-2..+2], consensus_label.
+#     Use as a Wall St anchor in Decision thesis: "Wall St 42-buy/4-hold/
+#     1-sell consensus BUY" gives the user a quick "vs consensus"
+#     reference. Compare against last WSR to detect upgrades/downgrades.)
 # - watchlist universe: read prompts/watchlist.yaml — categorized
 #     ticker pool the brain should consider beyond just held + queue.
 #     Categories: held, stock_positions_sarah, decision_queue_active,
 #     defensive_etfs, commodity, volatility, blue_chip_dividend,
 #     speculative_growth, high_iv_wheel_targets. Use src.watchlist
 #     get_universe(client) to resolve the live ticker lists; tv_signals
-#     should already cover all of these on the 1d + 1W consensus.
+#     should already cover all of these on the 1h + 1d + 1W consensus.
 ```
 
-### 3. Web research — week's macro & news
+### 3. Web research — supplement only
 
-Search broadly for:
-- Week's SPX/NDX/RUT moves and 50/200 SMA position
-- Earnings calendar next 5 days for major names
-- Fed events: FOMC, speakers, dot-plot updates
-- Geopolitics: Iran/Hormuz, China/Taiwan, US-China trade
-- Commodity macro: oil OPEC actions, gold/silver narrative
-- Sector rotation: which sectors lead/lag last week
-- Yields curve: 2Y/10Y/30Y movement
+Most of what you used to web-search now lives in structured Sheet tabs.
+Use `WebSearch` to fill ONLY the narrative gaps:
 
-Look up specific tickers on the decision queue + watchlist for week-defining catalysts (earnings, FDA dates, regulatory).
+- Week's SPX/NDX/RUT moves and 50/200 SMA position (interpretation, not
+  fact-finding — facts in `macro` + `tv_signals` 1W rows)
+- Geopolitics: Iran/Hormuz, China/Taiwan, US-China trade — never in our
+  feeds
+- Commodity macro: oil OPEC actions, gold/silver narrative — narrative
+  layer over the macro row prices
+- Sector rotation read (the underlying sector ETFs are in tv_signals
+  1d + 1W; web-search just for the narrative)
+- Pre-FOMC dot-plot expectations or pre-CPI consensus (narrative; the
+  date itself is in `economic_calendar`)
+
+**Do NOT** web-search for:
+- Earnings dates → `earnings_calendar` has them
+- FOMC/CPI/NFP dates → `economic_calendar` has them
+- Per-ticker headlines → `news_sentiment` has them
+- Insider buying/selling → `insider_transactions` has them
+- Analyst targets → `analyst_consensus` has them
+- TV indicator values → `tv_signals` has them across 1h + 1d + 1W
+
+This is non-negotiable. Web-searching for data we already have in
+sheets makes the brain SLOW and INCONSISTENT (web pages may lag
+reality by minutes; structured pulls are guaranteed-fresh).
 
 ### 4. Apply trading rules
 
@@ -653,6 +693,61 @@ REDUCE_ONLY for trim".
 call on a quality name with low IV rank, consider proposing a PMCC over
 a naked CSP for capital efficiency. Use `strategy: "PMCC"` with the
 long-call leg's strike.
+
+**🔴 EARNINGS-IN-DTE CHECK (non-negotiable for option recs):**
+
+Before emitting any CSP/CC/PMCC, look up the ticker in
+`earnings_calendar`. If the next earnings date falls INSIDE the option's
+DTE window (entry → expiry), one of two paths:
+
+- **Skip the trade** (default). Earnings IV crush works against CSPs;
+  earnings gaps work against CCs. The risk-adjusted yield isn't worth
+  the gamma exposure.
+- **Accept the risk explicitly** — only when (a) IV rank > 60 (juicy
+  premium compensates for gamma), (b) you cite the earnings date in
+  the thesis, AND (c) you set `thesis_confidence` ≤ 0.5. Brain must
+  EXPLAIN why this earnings setup is worth taking.
+
+Cite earnings status in thesis: "ER 5/20 AMC inside DTE — accepted
+because IV rank 68, AAPL 22% OTM provides cushion."
+
+For BUY_DIP share recs: earnings inside the next 5 days = WAIT signal
+unless thesis is "buying the post-earnings dip" with explicit dip
+trigger. Pre-earnings adds are reckless.
+
+**🔴 INSIDER-FLOW CONFIRMATION (soft rule, pre WSR):**
+
+Before adding a NEW high-conviction (conv ≥ 4) BUY_DIP, check
+`insider_transactions` for the ticker over the last 7 days:
+- Net side=buy >$1M last 7d → bullish confirm; ok to elevate conv
+- Net side=sell >$5M last 7d → yellow flag; downgrade conv by 1 OR
+  cite the selling in the thesis as "insider pressure offset by [X]"
+- No insider activity → neutral, no impact
+
+Aggregate by name × side over 7d window. The brain reads
+`insider_transactions` and sums signed `value_usd` to get the net flow.
+
+**🔴 NEWS-SENTIMENT FILTER (soft rule, pre WSR):**
+
+Before proposing a BUY_DIP for a name with sentiment_score ≤ -0.5 in
+`news_sentiment` over last 14 days:
+- Read the headline + summary YOURSELF (don't trust the heuristic
+  score blindly — Opus is better at semantic context)
+- If the negative news is corporate stress (lawsuit/recall/layoffs/
+  bankruptcy), SKIP the rec
+- If it's market-wide noise that the heuristic misclassified, proceed
+  but cite "headline sentiment was misclassified — actual context is X"
+- If it's a one-time earnings miss already priced in, ok to proceed
+  with downgraded conv
+
+**🔴 ANALYST-CONSENSUS ANCHOR (informational, every Decision):**
+
+Pull the ticker from `analyst_consensus`. Cite the distribution in the
+`thesis_1liner` for share BUY_DIP recs:
+- "Wall St 42-buy / 4-hold / 1-sell consensus BUY"
+- If our conviction DIVERGES from consensus (we're conv=5 BUY but Wall
+  St is HOLD), explain WHY the brain disagrees — that's a stronger
+  thesis than just following consensus.
 
 **Thesis content rule:** the `thesis` field is what the user sees when
 they tap a Decisions card. It MUST be brain synthesis, not rule-filter

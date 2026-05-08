@@ -12,16 +12,22 @@ You are running on a schedule (every weekday 07:00 SGT). Generate today's market
 
 ### 2. Gather data (read from Sheets)
 
-Use the existing scripts to pull the latest state:
+Use the existing scripts to pull the latest state. **NEW** in this prompt:
+the brain now reads three Finnhub-powered tabs (earnings_calendar,
+economic_calendar, news_sentiment) + insider_transactions before doing
+any web search. Web search becomes a SUPPLEMENT, not the primary source —
+this is what makes the brief reliable instead of vibes.
 
 ```bash
 cd /Users/xynkro/Documents/Trading/FinancePWA && source .venv/bin/activate
 python3 -c "
 from src.sync import load_env
 from src import sheets as sh
+import datetime
 load_env()
 client = sh.authenticate()
 ss = sh._open_sheet(client)
+today = datetime.date.today().isoformat()
 
 # Latest macro
 macro = ss.worksheet('macro').get_all_values()[-1]
@@ -42,24 +48,77 @@ for tab in ('positions_caspar', 'positions_sarah'):
         print(f'{tab}: {len(latest)} rows on {latest_date}')
         for r in latest:
             print(f'  {r[1]} qty={r[2]} last={r[4]} upl={r[6]}')
+
+# Today's earnings — companies reporting BMO/AMC/DMH today (filter our tickers only)
+ec = ss.worksheet('earnings_calendar').get_all_values()
+print('TODAY EARNINGS:')
+for r in ec[1:]:
+    if r and r[0] == today:
+        print(f'  {r[1]:6} {r[2]} eps_est={r[5]} eps_act={r[6]} surprise%={r[9]}')
+
+# Earnings within 7 days — flag any portfolio ticker with ER inside option DTE
+print('EARNINGS NEXT 7 DAYS:')
+end_7d = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
+for r in ec[1:]:
+    if r and today <= r[0] <= end_7d:
+        print(f'  {r[0]} {r[1]:6} {r[2]} (est {r[5]})')
+
+# Today's macro events (medium+high impact only)
+ec2 = ss.worksheet('economic_calendar').get_all_values()
+print('TODAY MACRO:')
+for r in ec2[1:]:
+    if r and r[0] == today:
+        print(f'  {r[1]} {r[2]} [{r[4].upper():6}] {r[3]} (est {r[5]} prev {r[7]})')
+
+# News sentiment — yesterday + today, flag any rows with score <= -0.4 (negative)
+ns = ss.worksheet('news_sentiment').get_all_values()
+print('NEGATIVE NEWS LAST 24H (sentiment <= -0.4):')
+for r in ns[1:]:
+    if r and r[1][:10] >= today and len(r) > 7:
+        try:
+            score = float(r[7])
+            if score <= -0.4:
+                print(f'  {r[1]} {r[2]:6} score={score:+.2f} {r[3][:80]}')
+        except ValueError:
+            pass
+
+# Insider unusual activity — last 7 days, |value| > \$1M
+import datetime as dt
+seven_d = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+it = ss.worksheet('insider_transactions').get_all_values()
+print('INSIDER LAST 7 DAYS (|value| > \$1M):')
+for r in it[1:]:
+    if r and len(r) > 9 and r[1] >= seven_d:
+        try:
+            value = float(r[9] or 0)
+            if abs(value) > 1_000_000:
+                print(f'  {r[1]} {r[3]:6} {r[7]:8} sh={r[5]:>10} @${r[8]} value=${value:>12,.0f} ({r[4]})')
+        except ValueError:
+            pass
 "
 ```
 
-### 3. Web research — overnight news
+### 3. Web research — supplement only
 
-Use `WebSearch` to gather:
-- US market close (yesterday): SPX, Nasdaq, Russell 2000 — direction, % change, internals
-- Major after-hours earnings (top 10 by mkt cap)
-- Asia session today: Nikkei, Hang Seng, STI directions
-- Europe pre-market (futures)
-- Major macro: any Fed speakers, CPI/jobs/PMI prints in the last 24h
-- Geopolitics that move markets: Iran, China, Russia, OPEC
-- Commodity moves >2%: oil, gold, silver, copper
+The Finnhub tabs above already provide structured data. Use `WebSearch`
+to fill in the **narrative gaps** the structured data can't carry:
+
+- US market close color (was the move broad-based or narrow leadership?)
+- Geopolitics that move markets: Iran, China, Russia, OPEC (rarely in
+  the macro calendar but matters)
+- Commodity moves >2% if not already implied by macro (oil, gold,
+  silver, copper)
+- Any narrative theme that explains today's tape
+
+**Do NOT** web-search for:
+- Earnings dates (already in earnings_calendar)
+- CPI/NFP/FOMC dates (already in economic_calendar)
+- Insider buying/selling (already in insider_transactions)
+- Per-ticker headlines (already in news_sentiment)
 
 Search queries to fire (mix and match based on date):
 - `"SPX today" close OR "S&P 500 today close" {today}`
-- `"after hours earnings" major beat miss {yesterday}`
-- `Fed speaker today {today}`
+- `Asia close Hang Seng Nikkei {today}`
 - `oil price today move`
 - `US 10-year yield today`
 
@@ -70,7 +129,10 @@ Apply the trading rules from `src/trading_rules.py`:
 - Cross-reference position triggers (TQQQ $52, SSO $60) — flag if breached
 - Note CSP/CC roll candidates (delta hit thresholds)
 
-Produce a JSON object matching the daily brief schema:
+Produce a JSON object matching the daily brief schema. NEW fields
+`earnings_today`, `macro_today`, `negative_news`, `insider_alert` carry
+the Finnhub-derived structured data so the PWA can render them as
+distinct chips.
 
 ```json
 {
@@ -86,7 +148,12 @@ Produce a JSON object matching the daily brief schema:
   "commodities_bullets":["..."],
   "posture_change":     "string or empty",
   "watch_bullets":      ["TQQQ $52+ = trim trigger live", "..."],
-  "key_takeaways":      ["bullet 1", "bullet 2", "bullet 3"]
+  "key_takeaways":      ["bullet 1", "bullet 2", "bullet 3"],
+  "earnings_today":     ["NVDA AMC est $1.79", "WIX BMO est $1.26"],
+  "earnings_next_7d":   ["MDT 6/3 AMC", "..."],
+  "macro_today":        ["13:30 US CPI MoM est 0.3%", "Fed Cook 09:45 ET"],
+  "negative_news":      ["BYND -0.7 'Restructuring talks fail'", "..."],
+  "insider_alert":      ["NVDA Huang sold 50k @ $213 = $10.6M", "..."]
 }
 ```
 
@@ -95,6 +162,15 @@ Produce a JSON object matching the daily brief schema:
 - Be opinionated where you have evidence. Don't hedge ("could be either way") — pick a side.
 - Tag each non-trivial claim with confidence implicitly (e.g. "likely", "decisively", "preliminary").
 - The `watch_bullets` should be RULE-BASED triggers (price levels, RSI thresholds), not vibes.
+- The new structured fields (`earnings_today`, `macro_today`, etc.) should
+  be **terse one-liners** the PWA renders as chips — don't repeat them in
+  the prose bullets above.
+- `negative_news` should ONLY include items where (a) ticker is a
+  current portfolio holding OR active decision_queue entry AND (b)
+  sentiment_score ≤ -0.4. This filters noise.
+- `insider_alert` should ONLY include filings >$1M absolute value in last
+  7 days for portfolio + watchlist tickers. Heavy insider BUYING (side=buy)
+  is a bullish flag; heavy SELLING is a yellow flag.
 
 ### 5. Format and push
 

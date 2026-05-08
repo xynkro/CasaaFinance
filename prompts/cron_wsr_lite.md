@@ -49,11 +49,27 @@ Also pull positions, options, exit_plans, decision_queue (which now INCLUDES aut
 # - options_yield_candidates (LATEST 30 — top 20 ranked CSP/CC setups
 #     written Sundays by the options-yield-screener cron. Read these
 #     for fresh CSP/CC ideas to fold into mid-week proposals.)
-# - tv_signals (LATEST per ticker, both 1d and 1W intervals — TradingView's
-#     26-indicator consensus: STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL plus
-#     all underlying indicator values)
+# - tv_signals (LATEST per ticker, ALL THREE intervals — 1h + 1d + 1W —
+#     TradingView's 26-indicator consensus. Use 1h to flag intraday
+#     traps when 1d says BUY but 1h says SELL.)
 # - risk_parity_audit (LATEST 16 rows — Risk Parity LITE diversification
 #     check; quota rule fires here too)
+# - earnings_calendar (NEXT 30 DAYS, FILTERED TO PORTFOLIO + WATCHLIST —
+#     Friday earnings preview lives here. Pre-mid-week pulse, flag any
+#     Held position with earnings inside option DTE; Lite thesis must
+#     describe defensive plan if so.)
+# - economic_calendar (NEXT 14 DAYS, MEDIUM+HIGH IMPACT — surfaces the
+#     72-hour catalyst window from now: CPI/NFP/FOMC dates that matter
+#     for option DTE management.)
+# - news_sentiment (LAST 14 DAYS PER TICKER — read for sentiment shifts
+#     SINCE MONDAY WSR. The brain SHOULD note: "MDT sentiment turned
+#     negative Tuesday on FDA delay news (-0.6); recommend defensive
+#     monitor — re-enter only if support holds.")
+# - insider_transactions (LAST 90 DAYS — flag last 7d filings >$1M.
+#     Aggressive watch lane bonus for net side=buy >$1M on a watchlist
+#     ticker.)
+# - analyst_consensus (LATEST per ticker — Wall St anchor, cite in
+#     thesis for any new BUY_DIP / TRIM rec.)
 ```
 
 The `options` tab is refreshed every 30 minutes during US market hours by the cloud `options-refresh.yml` workflow (moneyness, DTE, assignment_risk, trend_risk, momentum_5d, sigma, RSI, SMAs all yfinance-derivable). The latest snapshot is the freshest you'll have, regardless of whether the Mac is on. New positions still get added nightly via Mac ibkr-grab.
@@ -496,6 +512,34 @@ For LONG_CALL/LONG_PUT: `cash_required = premium × 100 × num_contracts`.
 
 Cite the sizing math in `thesis`: "Cash $19k on sarah NLV $46k (40%) —
 fits cap; caspar's $7.5k NLV cannot."
+
+**🔴 EARNINGS-IN-DTE CHECK (non-negotiable for option recs):**
+
+Before emitting CSP/CC/PMCC, look up `earnings_calendar` for the
+ticker. If the next earnings date is INSIDE the option DTE window
+(today → expiry):
+- Default: SKIP the rec.
+- Exception: only when IV rank > 60 AND you cite the earnings date
+  in the thesis AND `thesis_confidence` ≤ 0.5. State the gamma risk
+  is accepted in exchange for premium.
+
+For FILLED options refreshed mid-week: if earnings now inside DTE
+that wasn't there at Monday WSR, the Lite plan MUST describe a
+defensive close plan ("close at 50% profit OR pre-print if conf
+>35%").
+
+**🔴 INSIDER + NEWS + ANALYST CHECKS (informational, every Decision):**
+
+Before proposing any new BUY_DIP / TRIM:
+- `insider_transactions`: aggregate net side=buy/sell × value_usd over
+  last 7d. Net buy >$1M is bullish confirm; net sell >$5M is yellow flag.
+- `news_sentiment`: read the headlines yourself for any rec where the
+  heuristic score ≤ -0.4. If the negative news is corporate stress
+  (lawsuit/recall/layoffs/bankruptcy), SKIP. If it's noise, proceed
+  with explanation.
+- `analyst_consensus`: cite distribution in `thesis_1liner` — "Wall St
+  42-buy / 4-hold / 1-sell consensus BUY". When the brain DIVERGES
+  from consensus, explain WHY in the thesis.
 
 **🔴 EXPOSURE CONSTRAINT (graduated):**
 
