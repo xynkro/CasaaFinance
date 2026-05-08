@@ -1,0 +1,66 @@
+name: API Usage Scrape — Daily
+
+# Daily Anthropic API cost ingestion. Walks `gh run` logs of the 4 brain
+# workflows (daily-brief / wsr-full / wsr-lite / market-scan) and parses
+# claude-code-action's result JSON into the `api_usage` sheet that the
+# PWA Settings tab reads (MTD spend + per-workflow breakdown + last-10).
+#
+# Why 23:30 UTC daily?
+#   - 23:03 UTC Mon-Fri: daily-brief.yml writes today's brief
+#   - 11:33 UTC Wed/Fri: wsr-lite finishes well before
+#   - 11:37 UTC Sun:     wsr-full finishes well before
+#   - 23:30 UTC: this — runs 27 min after daily-brief so today's spend
+#     is captured in the same calendar day's row.
+#
+# scrape is idempotent — UPSERT keyed by GH run_id — so re-running is safe.
+
+on:
+  schedule:
+    # 23:30 UTC daily = 07:30 SGT next day. Every day so weekend WSR Full
+    # runs are picked up too.
+    - cron: "30 23 * * *"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Per-workflow run-list cap"
+        type: string
+        default: "50"
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read    # needed for `gh run list` / `gh run view --log`
+
+concurrency:
+  group: api-usage-scrape
+  cancel-in-progress: true
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+      # gh CLI auto-uses GH_TOKEN; default GITHUB_TOKEN has actions:read
+      # which is enough for runs in the same repo.
+      GH_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Scrape API usage
+        run: |
+          ARGS="--limit ${{ inputs.limit || '50' }}"
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          python scripts/api_usage_scrape.py $ARGS

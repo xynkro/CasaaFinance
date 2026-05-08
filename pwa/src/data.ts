@@ -391,6 +391,11 @@ export interface DecisionRow {
   // recs; option recs leave it empty.
   qty?: string;
   accumulation_plan?: string;
+  // Phase 6 — structured gates. JSON-encoded array of gate strings
+  // (`["exposure:NEW_ENTRY_ALLOWED", "tv_daily:BUY"]`). Replaces the
+  // string-includes parsing of accumulation_plan in evaluateTrigger().
+  // Empty / missing = no gates.
+  gates?: string;
 }
 
 export interface ArchiveRow {
@@ -522,6 +527,80 @@ export interface TriggerEvaluation {
  * show "ACT NOW" the moment the conditions are met — instead of
  * waiting for the next WSR re-emission to flip status to pending.
  */
+/**
+ * Parse the gates JSON field on a decision row. Returns an empty array
+ * for empty / malformed input (the evaluator then falls back to the
+ * legacy accumulation_plan string parsing).
+ */
+function parseStructuredGates(gatesStr: string | undefined): string[] {
+  if (!gatesStr) return [];
+  try {
+    const parsed = JSON.parse(gatesStr);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((g): g is string => typeof g === "string" && g.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Evaluate a single gate against live data. Returns a non-empty string
+ * describing the block when the gate is NOT satisfied, or empty string
+ * when it passes. Unknown gate types pass through with a "manual gate"
+ * note so the user knows there's something to check.
+ *
+ * Recognised gate types:
+ *   - exposure:<value>      e.g. "exposure:NEW_ENTRY_ALLOWED"
+ *   - tv_daily:<value>      e.g. "tv_daily:BUY"   (matches BUY or STRONG_BUY)
+ *   - tv_weekly:<value>     same shape as tv_daily
+ *   - earnings_clear        no value; flagged manual (PWA doesn't have DTE-aware ticker map yet)
+ *   - regime_above:<score>  not yet wired — passes with note
+ */
+function evaluateGate(
+  gate: string,
+  exposurePosture: ExposurePostureRow | null,
+  tvConsensus: TvConsensus | undefined,
+): string {
+  const [rawType, ...rest] = gate.split(":");
+  const type = (rawType || "").trim().toLowerCase();
+  const required = rest.join(":").trim().toUpperCase();
+
+  if (type === "exposure") {
+    const rec = exposurePosture?.recommendation?.toUpperCase();
+    if (!rec) return `exposure unknown, need ${required}`;
+    if (rec !== required) return `exposure ${rec}, need ${required}`;
+    return "";
+  }
+  if (type === "tv_daily") {
+    const tvRec = (tvConsensus?.daily?.recommendation || "").toUpperCase();
+    if (!tvRec) return `TV daily unknown, need ${required}`;
+    // BUY required matches both BUY and STRONG_BUY; SELL matches both SELL forms.
+    const ok = required === "BUY"
+      ? tvRec.includes("BUY")
+      : required === "SELL"
+      ? tvRec.includes("SELL")
+      : tvRec === required;
+    return ok ? "" : `TV daily=${tvRec}, need ${required}`;
+  }
+  if (type === "tv_weekly") {
+    const tvRec = (tvConsensus?.weekly?.recommendation || "").toUpperCase();
+    if (!tvRec) return `TV weekly unknown, need ${required}`;
+    const ok = required === "BUY"
+      ? tvRec.includes("BUY")
+      : required === "SELL"
+      ? tvRec.includes("SELL")
+      : tvRec === required;
+    return ok ? "" : `TV weekly=${tvRec}, need ${required}`;
+  }
+  if (type === "earnings_clear") {
+    // Brain has already filtered DTE conflicts at decision-emit time;
+    // nothing to re-check client-side. Pass.
+    return "";
+  }
+  // Unknown gate — surface as manual check instead of silently passing.
+  return `manual gate: ${gate}`;
+}
+
 export function evaluateTrigger(
   decision: DecisionRow,
   currentPrice: number | undefined,
@@ -551,28 +630,41 @@ export function evaluateTrigger(
     ? (currentPrice - entry) / entry        // BUY: need price ≤ entry → 0 or negative when triggered
     : (entry - currentPrice) / entry;       // SELL: need price ≥ entry → 0 or negative when triggered
 
-  // Detect blocking gates in the accumulation plan
+  // Detect blocking gates. Prefer the structured `gates` JSON field
+  // (Phase 6 — brain emits a list[str] like ["exposure:NEW_ENTRY_ALLOWED",
+  // "tv_daily:BUY"]). Fall back to the legacy accumulation_plan string
+  // includes for rows written before the gates column existed.
   const gates: string[] = [];
-  const planLower = (decision.accumulation_plan || "").toLowerCase();
-  if (
-    planLower.includes("new_entry_allowed") ||
-    planLower.includes("cash_priority blocks") ||
-    planLower.includes("ceiling ≥") ||
-    planLower.includes("exposure_ceiling")
-  ) {
-    const rec = exposurePosture?.recommendation;
-    if (rec && rec !== "NEW_ENTRY_ALLOWED") {
-      gates.push(`exposure ${rec}, need NEW_ENTRY_ALLOWED`);
+  const structuredGates = parseStructuredGates(decision.gates);
+
+  if (structuredGates.length > 0) {
+    for (const g of structuredGates) {
+      const block = evaluateGate(g, exposurePosture, tvConsensus);
+      if (block) gates.push(block);
     }
-  }
-  if (
-    planLower.includes("tv daily=buy") ||
-    planLower.includes("tv daily flips") ||
-    planLower.includes("tv daily=str")
-  ) {
-    const tvRec = (tvConsensus?.daily?.recommendation || "").toUpperCase();
-    if (tvRec && !tvRec.includes("BUY")) {
-      gates.push(`TV daily=${tvRec}, need BUY`);
+  } else {
+    // Legacy fallback for pre-Phase-6 rows.
+    const planLower = (decision.accumulation_plan || "").toLowerCase();
+    if (
+      planLower.includes("new_entry_allowed") ||
+      planLower.includes("cash_priority blocks") ||
+      planLower.includes("ceiling ≥") ||
+      planLower.includes("exposure_ceiling")
+    ) {
+      const rec = exposurePosture?.recommendation;
+      if (rec && rec !== "NEW_ENTRY_ALLOWED") {
+        gates.push(`exposure ${rec}, need NEW_ENTRY_ALLOWED`);
+      }
+    }
+    if (
+      planLower.includes("tv daily=buy") ||
+      planLower.includes("tv daily flips") ||
+      planLower.includes("tv daily=str")
+    ) {
+      const tvRec = (tvConsensus?.daily?.recommendation || "").toUpperCase();
+      if (tvRec && !tvRec.includes("BUY")) {
+        gates.push(`TV daily=${tvRec}, need BUY`);
+      }
     }
   }
 

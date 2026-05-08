@@ -129,6 +129,7 @@ function Dashboard() {
             analystByTicker={data?.analystByTicker}
             newsByTicker={data?.newsByTicker}
             insiderByTicker={data?.insiderByTicker}
+            screenCandidates={data?.screenCandidates ?? []}
           />
         );
       case 4:
@@ -141,6 +142,7 @@ function Dashboard() {
             archive={data?.archive ?? []}
             dailyHistory={data?.dailyHistory ?? []}
             riskParityAudit={data?.riskParityAudit ?? []}
+            livePrices={data?.livePrices ?? new Map()}
           />
         );
       case 5:

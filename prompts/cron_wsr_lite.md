@@ -404,6 +404,14 @@ shares-or-contracts) AND `accumulation_plan` (pipe-separated tranche
 string). Mid-week lite re-emits — UPDATE the plan to mark what's already
 FILLED vs still pending.
 
+**🟢 GATES RULE (every WATCHING entry — non-negotiable)**: When a row's
+`status` is `"watching"`, you MUST emit a `gates` array enumerating the
+preconditions that must clear before the trigger fires. The PWA's
+TriggerBadge reads this list verbatim. Format: array of `"<type>:<value>"`
+strings. Recognised types: `exposure:NEW_ENTRY_ALLOWED`, `tv_daily:BUY`,
+`tv_daily:SELL`, `tv_weekly:BUY`, `earnings_clear`. For PENDING / FILLED /
+KILLED rows or unconditional acts, emit empty array `[]`.
+
 Examples:
 - After 33sh tranche filled Tue: `"qty": 100, "accumulation_plan": "33sh FILLED Tue | 33sh in 30d | 34sh on -5% to $79.80"`
 - Held CSP being refreshed: `"qty": 1, "accumulation_plan": "1 CSP @ $250P 35DTE FILLED Mon — let expire OR roll +14d on -2% test"`

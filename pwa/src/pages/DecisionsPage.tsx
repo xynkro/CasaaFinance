@@ -3,6 +3,7 @@ import type {
   DecisionRow,
   ExposurePostureRow,
   PositionRow,
+  ScreenCandidateRow,
   SnapshotRow,
   TechnicalScoreRow,
   OptionsDefenseRow,
@@ -16,6 +17,7 @@ import type {
 } from "../data";
 import { Card } from "../cards/Card";
 import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
+import { FreshIdeasCard } from "../cards/FreshIdeasCard";
 import { ActionQueueCard } from "../cards/ActionQueueCard";
 import { ExposureBudgetCard } from "../cards/ExposureBudgetCard";
 import {
@@ -26,6 +28,7 @@ import {
   TriggerBadge,
 } from "../cards/InfoChips";
 import { evaluateTrigger } from "../data";
+import { DecisionActionRow } from "../cards/DecisionActionRow";
 import { StockDetail } from "../components/StockDetail";
 import { daysAgo } from "../lib/dates";
 import {
@@ -724,6 +727,10 @@ function DecisionCard({
       <div className="flex items-center justify-end mt-2.5 pt-2.5 border-t border-white/5">
         <CardActions ticker={decision.ticker} />
       </div>
+
+      {/* Decision feedback loop — Filled / Killed / Defer.
+          Records to localStorage. Renders running P&L when filled. */}
+      <DecisionActionRow decision={decision} currentPrice={currentPrice} />
     </div>
   );
 }
@@ -786,6 +793,7 @@ export function DecisionsPage({
   analystByTicker,
   newsByTicker,
   insiderByTicker,
+  screenCandidates,
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
@@ -803,6 +811,7 @@ export function DecisionsPage({
   analystByTicker?: Map<string, AnalystConsensusRow>;
   newsByTicker?: Map<string, NewsSummary>;
   insiderByTicker?: Map<string, InsiderSummary>;
+  screenCandidates?: ScreenCandidateRow[];
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const techByTicker = new Map<string, TechnicalScoreRow>();
@@ -901,6 +910,17 @@ export function DecisionsPage({
             />
           </div>
         )}
+
+        {/* Fresh Ideas — weekly vcp + canslim screener output. Renders the
+            "no candidates yet" empty-state if the cron hasn't run; otherwise
+            shows top 8 per source. */}
+        <div className={nextFade()}>
+          <FreshIdeasCard
+            candidates={screenCandidates ?? []}
+            technicalScores={technicalScores ?? []}
+            technicalScoresHistory={technicalScoresHistory}
+          />
+        </div>
 
         {decisions.length > 0 ? (
           <>

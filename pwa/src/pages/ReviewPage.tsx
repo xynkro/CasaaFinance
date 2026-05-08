@@ -5,11 +5,13 @@ import type {
   MacroRow,
   ArchiveRow,
   DailyBriefRow,
+  LivePriceRow,
   RiskParityAuditRow,
 } from "../data";
 import { Card } from "../cards/Card";
 import { StickyTabs } from "../components/StickyTabs";
 import { ClosedDecisionsCard } from "../cards/ClosedDecisionsCard";
+import { DecisionJournalCard } from "../cards/DecisionJournalCard";
 import { RiskMetricsCard } from "../cards/RiskMetricsCard";
 import { RiskAllocationCard } from "../cards/RiskAllocationCard";
 import { ArchivePage } from "./ArchivePage";
@@ -58,6 +60,7 @@ export function ReviewPage({
   archive,
   dailyHistory,
   riskParityAudit,
+  livePrices,
 }: {
   decisionsAll: DecisionRow[];
   casparHistory: SnapshotRow[];
@@ -66,6 +69,7 @@ export function ReviewPage({
   archive: ArchiveRow[];
   dailyHistory: DailyBriefRow[];
   riskParityAudit: RiskParityAuditRow[];
+  livePrices: Map<string, LivePriceRow>;
 }) {
   const [sub, setSub] = useState<ReviewSubTab>(loadLastSub);
 
@@ -102,6 +106,11 @@ export function ReviewPage({
 
       {sub === "closed" && (
         <div className="-mx-4">
+          {/* Decision Journal — local action ledger w/ running P&L. Lives
+              above ClosedDecisionsCard which is brain-emitted closes only. */}
+          <div className="px-4 pt-3 pb-2 fade-up fade-up-1">
+            <DecisionJournalCard livePrices={livePrices} />
+          </div>
           <ClosedDecisionsCard decisionsAll={decisionsAll} />
         </div>
       )}

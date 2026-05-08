@@ -718,6 +718,14 @@ def build_recommendations(
             source="risk_parity",
             qty=qty,
             accumulation_plan=accumulation_plan,
+            # Risk-parity recs are watching-status hygiene buys gated on
+            # cash discipline. Emit the structured exposure gate so the
+            # PWA TriggerBadge fires only when CASH_PRIORITY clears.
+            gates=(
+                '["exposure:NEW_ENTRY_ALLOWED"]'
+                if (status or "").lower() == "watching"
+                else ""
+            ),
         )
         out.append((row, asset_class))
     return out

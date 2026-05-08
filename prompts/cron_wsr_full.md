@@ -479,7 +479,8 @@ expiry / premium / delta / yield / breakeven / cash / IV rank.
       "thesis":            "<2-4 sentence brain thesis: WHY this entry, WHY now (catalysts/levels), WHAT cancels (stop levels), WHAT to watch (news/data)>",
       "source":            "wsr_full",
       "qty":               100,
-      "accumulation_plan": "33sh now | 33sh in 30d | 34sh on -5% pullback to $79.80"
+      "accumulation_plan": "33sh now | 33sh in 30d | 34sh on -5% pullback to $79.80",
+      "gates":             ["exposure:NEW_ENTRY_ALLOWED"]
     },
     {
       "ticker":            "AAPL",
@@ -504,7 +505,8 @@ expiry / premium / delta / yield / breakeven / cash / IV rank.
       "thesis":            "<brain thesis>",
       "source":            "wsr_full",
       "qty":               3,
-      "accumulation_plan": "1 CSP @ $250P 35DTE now | 1 CSP @ $245P if AAPL pulls to $255 | 1 CSP +14d at next expiry if IV stays >25"
+      "accumulation_plan": "1 CSP @ $250P 35DTE now | 1 CSP @ $245P if AAPL pulls to $255 | 1 CSP +14d at next expiry if IV stays >25",
+      "gates":             ["exposure:NEW_ENTRY_ALLOWED", "tv_daily:BUY", "earnings_clear"]
     }
   ]
 }
@@ -527,6 +529,22 @@ tranche string). The plan answers two questions explicitly: **how much
 to deploy total** and **how to phase the deployment**. You may NOT emit
 ANY rec with `qty: 0` or empty `accumulation_plan` — if you can't
 specify size and timing, the rec doesn't belong in the queue.
+
+**🟢 GATES RULE (every WATCHING entry — non-negotiable)**: When a row's
+`status` is `"watching"`, you MUST emit a `gates` array enumerating
+EVERY precondition that must clear before the trigger fires. The PWA's
+TriggerBadge reads this list verbatim — leave anything out and the
+"ACT NOW" pill will fire prematurely. Format: array of `"<type>:<value>"`
+strings. Recognised types:
+
+  - `"exposure:NEW_ENTRY_ALLOWED"` — block until exposure_posture clears the cash-priority gate
+  - `"tv_daily:BUY"` — block until TV 1d consensus is BUY or STRONG_BUY (same for `tv_weekly:BUY`)
+  - `"tv_daily:SELL"` — for TRIM/CC entries — block until TV 1d flips bearish
+  - `"earnings_clear"` — informational marker that you've already filtered DTE conflicts (no further check)
+
+For PENDING / FILLED / KILLED rows, leave `gates` as an empty array `[]`
+(the queue uses these only for `watching` rows). For unconditional
+"act-immediately" recs, also emit `[]`.
 
 Tranche format — pipe-separated segments. Use the right unit per strategy:
 - **Share strategies (BUY_DIP / TRIM)**: `<N>sh <when>`

@@ -1,0 +1,70 @@
+name: Trigger Alerts — 10-min Telegram
+
+# Per-decision trigger evaluator. Polls decision_queue for WATCHING rows
+# every 10 min during US market hours and fires a Telegram push at the
+# instant a row transitions into "act_now" (price crossed entry AND all
+# gates clear). Mirrors the PWA's evaluateTrigger() so a user who only
+# opens the app once a day still gets paged.
+#
+# Dedup: writes per-decision state to the `trigger_alerts` sheet so the
+# same fire can't be sent twice — only NEW transitions into act_now
+# trigger a push.
+#
+# Schedule:
+#   Every 10 min during US cash session (13:30-21:00 UTC, Mon-Fri).
+#   Pre/post-market is excluded — live_prices feed is sparse outside
+#   regular hours and TV consensus doesn't shift much there anyway.
+#
+# Required secrets:
+#   - TELEGRAM_BOT_TOKEN
+#   - TELEGRAM_CHAT_ID  (optional — defaults to "922547929" in src/telegram.py)
+#   - OAUTH_TOKEN_JSON
+#   - SHEET_ID
+
+on:
+  schedule:
+    # */10 cron during US cash hours, Mon-Fri.
+    - cron: "*/10 13-21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+      force_resend:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trigger-alerts
+  cancel-in-progress: true
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OAUTH_TOKEN_JSON:    ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:            ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:     ${{ secrets.DRIVE_FOLDER_ID }}
+      TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Evaluate triggers
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          if [ "${{ inputs.force_resend }}" = "true" ]; then ARGS="$ARGS --force-resend"; fi
+          python scripts/trigger_alerts.py $ARGS

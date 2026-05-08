@@ -15,15 +15,6 @@ function fmtCompact(v: string | number | undefined, prefix = "$"): string {
   return fmt(v, prefix);
 }
 
-function pct(v: string | undefined): { text: string; positive: boolean } {
-  const n = Number(v);
-  if (isNaN(n)) return { text: "—", positive: true };
-  return {
-    text: `${n >= 0 ? "+" : ""}${(n * 100).toFixed(2)}%`,
-    positive: n >= 0,
-  };
-}
-
 /**
  * Parse a sheet audit timestamp like "2026-05-07T233619" or
  * "2026-05-07T23:36:19" → Date. Sheet writes use the SGT-anchored

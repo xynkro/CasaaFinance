@@ -58,6 +58,36 @@ def ping_wsr_ready(date: str, pwa_url: str | None = None) -> dict:
     return send("\n".join(lines), parse_mode="none")
 
 
+def ping_trigger_act_now(
+    ticker: str,
+    account: str,
+    strategy: str,
+    entry_price: float,
+    current_price: float,
+    direction: str,           # "buy" | "trim"
+    pwa_url: str | None = None,
+) -> dict:
+    """
+    Per-decision trigger alert. Fires when scripts/trigger_alerts.py
+    detects a transition into act_now (price crossed entry threshold AND
+    all gates clear).
+
+    Format kept short — Telegram pushes show ~3 lines on the lock screen.
+    """
+    # Direction emoji + verb
+    arrow = "🟢⬇️" if direction == "buy" else "🔴⬆️"
+    verb = "buy" if direction == "buy" else "trim"
+    diff_pct = ((current_price - entry_price) / entry_price * 100) if entry_price else 0
+    lines = [
+        f"{arrow} ACT NOW · {ticker} · {account.upper()}",
+        f"{verb} @ ${current_price:.2f} (entry ${entry_price:.2f}, {diff_pct:+.1f}%)",
+        f"strategy: {strategy or 'BUY_DIP'}",
+    ]
+    if pwa_url:
+        lines.append(f"📱 {pwa_url}")
+    return send("\n".join(lines), parse_mode="none")
+
+
 def ping_grab_ready(
     date: str,
     caspar_positions: int,

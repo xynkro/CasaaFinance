@@ -129,6 +129,16 @@ class DecisionRow:
         # r[11]=strike for upsert keys) is preserved.
         "qty",                 # planned total share/contract count (int as string; 0 if unknown)
         "accumulation_plan",   # pipe-separated tranches: "5sh now | 5sh +30d | 5sh on -5% pullback to $79.20"
+        # --- structured gates (Phase 6 — TriggerBadge reliability) ---
+        # JSON-encoded array of gate strings, format "<type>:<required>".
+        # Replaces brittle accumulation_plan string-parsing in the PWA's
+        # evaluateTrigger(). Recognised types: exposure, tv_daily, tv_weekly,
+        # earnings_clear (no required value), regime_above:<score>.
+        # Empty string = no gates → treat trigger as ungated.
+        # Examples:
+        #   '["exposure:NEW_ENTRY_ALLOWED", "tv_daily:BUY"]'
+        #   '["earnings_clear"]'
+        "gates",
     ]
 
     date: str
@@ -157,6 +167,11 @@ class DecisionRow:
     # --- accumulation extension (Phase 5b) ---
     qty: int = 0
     accumulation_plan: str = ""
+    # --- structured gates (Phase 6) ---
+    # JSON-encoded array of gate strings (or empty). The push_decisions
+    # script accepts either a pre-encoded string OR a list[str] and
+    # normalises to a JSON string before storing.
+    gates: str = ""
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
@@ -171,6 +186,7 @@ class DecisionRow:
             _num(self.thesis_confidence, 2), self.thesis, self.source,
             str(int(self.qty)) if self.qty else "",
             self.accumulation_plan,
+            self.gates,
         ]
 
 
@@ -1011,6 +1027,59 @@ class ApiUsageRow:
             self.date, self.run_id, self.workflow, self.model, self.status,
             str(self.num_turns), str(self.duration_ms),
             _num(self.total_cost_usd, 4), self.updated_at,
+        ]
+
+
+@dataclass
+class TriggerAlertRow:
+    """
+    Per-decision trigger-state ledger — used by `scripts/trigger_alerts.py`
+    to detect *transitions* into ACT_NOW so we don't fire the same
+    Telegram twice within a single trigger window.
+
+    One row per `decision_key` (`<date>|<account>|<ticker>|<strategy>|<strike>`).
+    UPSERT semantics: every trigger-alerts cron run rewrites the row's
+    `last_state` and `updated_at`; `last_alert_at` only updates when we
+    actually send a Telegram (so we can compare to detect re-fires).
+
+    Re-firing rule: an ACT_NOW transition is counted as new only if the
+    PREVIOUS row's `last_state` was NOT already act_now. Returning to
+    act_now after a brief dip back to "ready" or "close" within the
+    same calendar day still counts as the same fire (we suppress).
+    """
+    TAB_NAME = "trigger_alerts"
+    HEADERS = [
+        "decision_key",        # UPSERT key
+        "ticker",
+        "account",
+        "strategy",
+        "last_state",          # "dormant" | "close" | "ready" | "act_now"
+        "last_alert_state",    # state at last Telegram fire
+        "last_alert_at",       # SGT iso (only updates when we ACTUALLY send)
+        "current_price",
+        "entry_price",
+        "blocking_gates",      # pipe-separated, for the user's reference
+        "updated_at",          # SGT iso (always updates per cron run)
+    ]
+
+    decision_key: str
+    ticker: str
+    account: str
+    strategy: str
+    last_state: str
+    last_alert_state: str = ""
+    last_alert_at: str = ""
+    current_price: float = 0.0
+    entry_price: float = 0.0
+    blocking_gates: str = ""
+    updated_at: str = ""
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [
+            self.decision_key, self.ticker, self.account, self.strategy,
+            self.last_state, self.last_alert_state, self.last_alert_at,
+            _num(self.current_price, 4), _num(self.entry_price, 4),
+            self.blocking_gates, self.updated_at,
         ]
 
 

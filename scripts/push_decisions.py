@@ -84,6 +84,40 @@ def _setup_logging() -> logging.Logger:
     return logger
 
 
+def _normalise_gates(g: Any) -> str:
+    """Accept gates from brain JSON in either form:
+       - list[str]: ["exposure:NEW_ENTRY_ALLOWED", "tv_daily:BUY"]  (preferred)
+       - str: '["exposure:NEW_ENTRY_ALLOWED"]' or '' (already encoded)
+       - None / missing: ''
+    Always return a JSON-encoded string (or empty)."""
+    if not g:
+        return ""
+    if isinstance(g, list):
+        # Strip blanks, dedupe order-preserving, JSON-encode.
+        seen: set = set()
+        clean: list = []
+        for item in g:
+            s = str(item or "").strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            clean.append(s)
+        return json.dumps(clean) if clean else ""
+    if isinstance(g, str):
+        s = g.strip()
+        if not s:
+            return ""
+        # Validate it parses; if not, wrap as a single-element list.
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return s
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return json.dumps([s])
+    return ""
+
+
 def _decision_key(
     date_prefix: str,
     account: str,
@@ -156,6 +190,10 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
                 source=(d.get("source", "") or "").strip(),
                 qty=int(d.get("qty", 0) or 0),
                 accumulation_plan=(d.get("accumulation_plan", "") or "").strip(),
+                # gates: accept either a list[str] (preferred — brain emits
+                # JSON array) or a pre-encoded JSON string, normalise to a
+                # JSON string for the sheet.
+                gates=_normalise_gates(d.get("gates")),
             )
             if not row.ticker:
                 continue

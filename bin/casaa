@@ -118,10 +118,27 @@ case "${1:-help}" in
     # parsing claude-code-action's result JSON in the gh logs.
     # Populates the api_usage sheet that the Settings tab reads for
     # MTD spend + per-workflow breakdown.
+    # NOTE: also runs daily 23:30 UTC via api-usage.yml cron — this
+    # local command exists for ad-hoc backfills.
     echo "→ api_usage_scrape (local; queries gh + writes sheet)"
     source .venv/bin/activate
     LIMIT="${2:-50}"
     python scripts/api_usage_scrape.py --limit "$LIMIT"
+    ;;
+
+  triggers|alerts)
+    # Per-decision trigger evaluator. Reads decision_queue WATCHING rows,
+    # joins with live_prices + exposure_posture + tv_signals, fires
+    # Telegram on transitions into act_now. Cloud cron runs every 10 min
+    # during US market hours; this command is for manual force/dry runs.
+    echo "→ trigger_alerts (cloud cron, manual trigger)"
+    if [ "${2:-}" = "dry" ]; then
+      gh workflow run trigger-alerts.yml --repo "$GH_REPO" -f dry=true
+    elif [ "${2:-}" = "force" ]; then
+      gh workflow run trigger-alerts.yml --repo "$GH_REPO" -f force_resend=true
+    else
+      gh workflow run trigger-alerts.yml --repo "$GH_REPO"
+    fi
     ;;
 
   watchlist|wl)
@@ -259,6 +276,7 @@ REGIME / EXPOSURE / SCREEN
   tv              cloud tv-signals (TradingView 26-indicator consensus, 1d + 1W)
   risk-parity     cloud risk-parity-audit (asset-class diversification check)
   rp-recs         local risk_parity_recommend (rebalance buy candidates → decision_queue)
+  triggers [dry|force]  cloud trigger-alerts (every 10 min mkt hours; Telegram on act_now)
 
 BRAIN
   brief           daily brief (cloud, Opus)
