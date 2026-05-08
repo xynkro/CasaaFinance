@@ -12,6 +12,7 @@ import { Card } from "../cards/Card";
 import { StickyTabs } from "../components/StickyTabs";
 import { ClosedDecisionsCard } from "../cards/ClosedDecisionsCard";
 import { DecisionJournalCard } from "../cards/DecisionJournalCard";
+import { HitRateCard } from "../cards/HitRateCard";
 import { RiskMetricsCard } from "../cards/RiskMetricsCard";
 import { RiskAllocationCard } from "../cards/RiskAllocationCard";
 import { ArchivePage } from "./ArchivePage";
@@ -117,15 +118,21 @@ export function ReviewPage({
 
       {sub === "numbers" && (
         <div className="-mx-4 pt-3">
-          {/* Risk metrics on top, then risk-parity allocation, then charts (lazy) */}
+          {/* Hit-rate dashboard — uses Decision Journal + decisionsAll for
+              cohort-level performance. Renders "needs more data" until 3+
+              filled actions exist. */}
           <div className="px-4 pb-4 fade-up fade-up-1">
+            <HitRateCard decisionsAll={decisionsAll} livePrices={livePrices} />
+          </div>
+          {/* Risk metrics, then risk-parity allocation, then charts (lazy) */}
+          <div className="px-4 pb-4 fade-up fade-up-2">
             <RiskMetricsCard
               casparHistory={casparHistory}
               sarahHistory={sarahHistory}
               macroHistory={macroHistory}
             />
           </div>
-          <div className="px-4 pb-4 fade-up fade-up-2">
+          <div className="px-4 pb-4 fade-up fade-up-3">
             <RiskAllocationCard riskParityAudit={riskParityAudit} />
           </div>
           <Suspense fallback={<HistorySkeleton />}>

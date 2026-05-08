@@ -2,6 +2,7 @@ import { useState } from "react";
 import type {
   DecisionRow,
   ExposurePostureRow,
+  LivePriceRow,
   PositionRow,
   ScreenCandidateRow,
   SnapshotRow,
@@ -378,19 +379,37 @@ function AgeChip({ date }: { date: string }) {
 }
 
 /**
- * Resolve the live current price for a decision ticker.
- *   - First check positions (held tickers — most authoritative because IBKR-fed)
- *   - Fall back to technical_scores (catches anything in the daily scan)
- *   - Returns undefined if the ticker isn't anywhere — overlay then renders nothing.
+ * Resolve the live current price for a decision ticker. Priority order
+ * matches the freshness of each feed:
+ *
+ *   1. live_prices    (TV scanner, 5-min refresh — freshest)
+ *   2. positions      (yahoo-grab, 15-min refresh — only held tickers)
+ *   3. technical_scores (daily close — fallback for non-portfolio names)
+ *
+ * Before live_prices was wired here, the trigger evaluator could be 15 min
+ * stale (positions cron) which made "ACT NOW" lag the actual price cross.
+ * Now it lags 5 min at most — same as the underlying feed.
+ *
+ * Returns undefined if the ticker isn't anywhere — overlay then renders nothing.
  */
 function lookupCurrentPrice(
   ticker: string,
   casparPositions: PositionRow[],
   sarahPositions: PositionRow[],
   technicalScores: TechnicalScoreRow[],
+  livePrices: Map<string, LivePriceRow>,
 ): number | undefined {
   if (!ticker) return undefined;
   const t = ticker.toUpperCase();
+
+  // 1. Live prices — freshest source we have (5-min cron)
+  const live = livePrices.get(t);
+  if (live) {
+    const n = Number(live.last);
+    if (!isNaN(n) && n > 0) return n;
+  }
+
+  // 2. Position rows (yahoo-grab, 15-min)
   const fromPos = (rows: PositionRow[]) => rows.find((r) => r.ticker?.toUpperCase() === t);
   const cas = fromPos(casparPositions);
   if (cas) {
@@ -402,6 +421,8 @@ function lookupCurrentPrice(
     const n = Number(sar.last);
     if (!isNaN(n) && n > 0) return n;
   }
+
+  // 3. Technical scores (daily close)
   const tech = technicalScores.find((r) => r.ticker?.toUpperCase() === t);
   if (tech) {
     const n = Number(tech.close);
@@ -794,6 +815,7 @@ export function DecisionsPage({
   newsByTicker,
   insiderByTicker,
   screenCandidates,
+  livePrices,
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
@@ -812,6 +834,7 @@ export function DecisionsPage({
   newsByTicker?: Map<string, NewsSummary>;
   insiderByTicker?: Map<string, InsiderSummary>;
   screenCandidates?: ScreenCandidateRow[];
+  livePrices?: Map<string, LivePriceRow>;
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const techByTicker = new Map<string, TechnicalScoreRow>();
@@ -831,13 +854,15 @@ export function DecisionsPage({
     }
   }
 
-  // Resolve live price once per row (positions first, scores fallback).
+  // Resolve live price once per row. Priority: live_prices (5-min) →
+  // positions (15-min) → technical_scores (daily close).
   const priceFor = (ticker: string) =>
     lookupCurrentPrice(
       ticker,
       casparPositions ?? [],
       sarahPositions ?? [],
       technicalScores ?? [],
+      livePrices ?? new Map(),
     );
 
   // TV consensus lookup — case-insensitive on ticker.

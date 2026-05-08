@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -164,18 +165,40 @@ def evaluate_trigger(
     tv_daily_rec: str,
     tv_weekly_rec: str,
 ) -> TriggerEval | None:
-    """Mirror of pwa/src/data.ts evaluateTrigger()."""
+    """Mirror of pwa/src/data.ts evaluateTrigger().
+
+    Returns None when the decision is unevaluable. Callers should use
+    `evaluate_trigger_with_reason()` instead if they need to know WHY
+    something was skipped (for logging).
+    """
+    res = evaluate_trigger_with_reason(d, current_price, exposure_rec, tv_daily_rec, tv_weekly_rec)
+    return res[0]
+
+
+def evaluate_trigger_with_reason(
+    d: Decision,
+    current_price: float | None,
+    exposure_rec: str,
+    tv_daily_rec: str,
+    tv_weekly_rec: str,
+) -> tuple[TriggerEval | None, str]:
+    """Return (eval | None, skip_reason). Skip reason is empty when
+    the decision is evaluable. Used by the cron's per-row logging so
+    silent drops are now visible.
+    """
     if (d.status or "").lower() != "watching":
-        return None
+        return None, f"status={d.status or '?'} (not watching)"
     entry = float(d.entry or 0)
-    if not entry or not current_price:
-        return None
+    if not entry:
+        return None, "no entry price set"
+    if not current_price:
+        return None, "no live price available"
 
     strat = (d.strategy or "").upper()
     is_buy = strat in BUY_STRATEGIES
     is_sell = strat in SELL_STRATEGIES
     if not is_buy and not is_sell:
-        return None
+        return None, f"non-directional strategy '{strat or '(empty)'}'"
 
     pct = (current_price - entry) / entry if is_buy else (entry - current_price) / entry
 
@@ -210,11 +233,14 @@ def evaluate_trigger(
     else:
         state = "dormant"
 
-    return TriggerEval(
-        state=state,
-        direction="buy" if is_buy else "trim",
-        pct_to_trigger=pct,
-        blocking_gates=gates,
+    return (
+        TriggerEval(
+            state=state,
+            direction="buy" if is_buy else "trim",
+            pct_to_trigger=pct,
+            blocking_gates=gates,
+        ),
+        "",
     )
 
 
@@ -445,18 +471,27 @@ def main() -> int:
         f"tv_daily={len(tv_daily)}  tv_weekly={len(tv_weekly)}  prior_alerts={len(prior_alerts)}"
     )
 
+    # Soft-alert opt-in. When set to "true" (env var or workflow input),
+    # CLOSE-state transitions (within 3% of trigger but not crossed) will
+    # fire a distinct, lower-priority Telegram. Default off so existing
+    # behaviour is unchanged.
+    include_close = os.environ.get("TRIGGER_ALERTS_INCLUDE_CLOSE", "").lower() in ("true", "1", "yes")
+
     now_iso = S.now_sgt_iso()
     state_rows: list[S.TriggerAlertRow] = []
     fires: list[tuple[Decision, TriggerEval, float]] = []
+    soft_fires: list[tuple[Decision, TriggerEval, float]] = []
+    skipped: list[tuple[Decision, str]] = []
 
     for d in decisions:
         cur = live_prices.get(d.ticker.upper())
-        ev = evaluate_trigger(
+        ev, skip_reason = evaluate_trigger_with_reason(
             d, cur, exposure_rec,
             tv_daily.get(d.ticker.upper(), ""),
             tv_weekly.get(d.ticker.upper(), ""),
         )
         if ev is None:
+            skipped.append((d, skip_reason))
             continue
 
         key = decision_key(d)
@@ -464,7 +499,7 @@ def main() -> int:
         prior_state       = (prior.get("last_state") or "").lower()
         prior_alert_state = (prior.get("last_alert_state") or "").lower()
 
-        # Fire criteria: NEW transition into act_now.
+        # Hard-fire criteria: NEW transition into act_now.
         # - Skip if we already alerted on act_now for this row.
         # - Skip if prior_state was act_now too (same fire, just hovering).
         should_fire = (
@@ -473,8 +508,24 @@ def main() -> int:
             and prior_state != "act_now"
         ) or (args.force_resend and ev.state == "act_now")
 
-        new_alert_state = "act_now" if should_fire else (prior_alert_state or "")
-        new_alert_at    = now_iso     if should_fire else (prior.get("last_alert_at") or "")
+        # Soft-fire criteria (opt-in): NEW transition into close from
+        # dormant. Suppress repeats by checking prior_alert_state too,
+        # so a price hovering close→ready→close doesn't re-page.
+        should_soft_fire = include_close and (
+            ev.state == "close"
+            and prior_alert_state not in ("close", "act_now")
+            and prior_state not in ("close", "act_now")
+        )
+
+        if should_fire:
+            new_alert_state = "act_now"
+            new_alert_at    = now_iso
+        elif should_soft_fire:
+            new_alert_state = "close"
+            new_alert_at    = now_iso
+        else:
+            new_alert_state = prior_alert_state or ""
+            new_alert_at    = prior.get("last_alert_at") or ""
 
         state_rows.append(S.TriggerAlertRow(
             decision_key=key,
@@ -492,12 +543,39 @@ def main() -> int:
 
         if should_fire:
             fires.append((d, ev, cur or 0.0))
+        elif should_soft_fire:
+            soft_fires.append((d, ev, cur or 0.0))
 
-    logger.info(f"Evaluated {len(state_rows)} watching decisions; {len(fires)} act_now fires")
+    # Per-row visibility — was previously a silent count. Show every
+    # evaluated row's state + every skipped row's reason. Makes silent
+    # drops debuggable next time something fails to fire as expected.
+    logger.info(f"Evaluated {len(state_rows)} watching decisions:")
+    for row in state_rows:
+        gate_str = f"  blocked: {row.blocking_gates}" if row.blocking_gates else ""
+        pct_to_trigger = (
+            (row.current_price - row.entry_price) / row.entry_price
+            if row.entry_price else 0
+        )
+        logger.info(
+            f"  • {row.ticker:6} {row.account:7} {row.strategy:10} "
+            f"state={row.last_state:8} cur=${row.current_price:>7.2f} entry=${row.entry_price:>7.2f} "
+            f"({pct_to_trigger:+.1%}){gate_str}"
+        )
+    if skipped:
+        logger.info(f"Skipped {len(skipped)} unevaluable decisions:")
+        for d, reason in skipped:
+            logger.info(f"  · {d.ticker:6} {d.account:7} {d.strategy or '(no strat)':10}  {reason}")
+    logger.info(
+        f"Fires: {len(fires)} act_now transition(s)"
+        + (f"; {len(soft_fires)} close-state soft fire(s)" if include_close else f"; close-state alerts disabled (set TRIGGER_ALERTS_INCLUDE_CLOSE=true to enable, would have fired {len(soft_fires)})")
+    )
 
     if args.dry:
         for d, ev, cur in fires:
-            logger.info(f"  [DRY] would fire: {d.ticker} {d.account} entry=${d.entry:.2f} → cur=${cur:.2f}  ({ev.direction})")
+            logger.info(f"  [DRY] would fire ACT_NOW: {d.ticker} {d.account} entry=${d.entry:.2f} → cur=${cur:.2f}  ({ev.direction})")
+        for d, ev, cur in soft_fires:
+            tag = "would fire CLOSE" if include_close else "would-have-fired CLOSE (gated)"
+            logger.info(f"  [DRY] {tag}: {d.ticker} {d.account} entry=${d.entry:.2f} → cur=${cur:.2f}  ({ev.pct_to_trigger:+.1%})")
         return 0
 
     # Persist state regardless of whether any fired (so dormant→close
@@ -505,7 +583,7 @@ def main() -> int:
     if state_rows:
         upsert_alert_state(client, state_rows, logger)
 
-    # Send Telegrams
+    # Send Telegrams — hard fires (ACT NOW) first, then soft fires (CLOSE).
     sent = 0
     for d, ev, cur in fires:
         try:
@@ -519,11 +597,32 @@ def main() -> int:
                 pwa_url=PWA_URL,
             )
             sent += 1
-            logger.info(f"  ✓ sent telegram: {d.ticker} {d.account}")
+            logger.info(f"  ✓ sent ACT_NOW: {d.ticker} {d.account}")
         except Exception as e:
-            logger.warning(f"  ✗ telegram failed: {d.ticker} {d.account}: {e}")
+            logger.warning(f"  ✗ ACT_NOW failed: {d.ticker} {d.account}: {e}")
 
-    logger.info(f"trigger_alerts done — sent {sent}/{len(fires)} pushes")
+    soft_sent = 0
+    for d, ev, cur in soft_fires:
+        try:
+            tg.ping_trigger_close(
+                ticker=d.ticker.upper(),
+                account=d.account.lower(),
+                strategy=d.strategy.upper(),
+                entry_price=d.entry,
+                current_price=cur,
+                direction=ev.direction,
+                pct_to_trigger=ev.pct_to_trigger,
+                pwa_url=PWA_URL,
+            )
+            soft_sent += 1
+            logger.info(f"  ✓ sent CLOSE: {d.ticker} {d.account}")
+        except Exception as e:
+            logger.warning(f"  ✗ CLOSE failed: {d.ticker} {d.account}: {e}")
+
+    logger.info(
+        f"trigger_alerts done — sent {sent}/{len(fires)} act_now"
+        + (f", {soft_sent}/{len(soft_fires)} close" if include_close else "")
+    )
     return 0
 
 

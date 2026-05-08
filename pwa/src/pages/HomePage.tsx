@@ -7,6 +7,8 @@ import { SectorMixCard } from "../cards/SectorMixCard";
 import { WsrSummaryCard } from "../cards/WsrSummaryCard";
 import { WsrLiteCard } from "../cards/WsrLiteCard";
 import { UpcomingCalendarsCard } from "../cards/UpcomingCalendarsCard";
+import { ConcentrationCard } from "../cards/ConcentrationCard";
+import { TldrTodayCard } from "../cards/TldrTodayCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
 import { Activity } from "lucide-react";
@@ -39,7 +41,15 @@ function loadLastSub(): HomeSubTab {
   return "daily";
 }
 
-export function HomePage({ data, loading }: { data: DashboardData | null; loading: boolean }) {
+export function HomePage({
+  data,
+  loading,
+  onJumpTab,
+}: {
+  data: DashboardData | null;
+  loading: boolean;
+  onJumpTab?: (tabIndex: number) => void;
+}) {
   const [briefOpen, setBriefOpen] = useState(false);
   const [wsrOpen, setWsrOpen] = useState(false);
   const [liteOpen, setLiteOpen] = useState(false);
@@ -59,9 +69,31 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
 
   const liteFresh = wsrLite ? isWsrLiteFresh(wsrLite.date) : false;
 
+  // Tab indices: Decisions=3, Options=2 (matches TAB_TITLES in App.tsx).
+  const jumpDecisions = () => onJumpTab?.(3);
+  const jumpOptions = () => onJumpTab?.(2);
+
   return (
     <>
       <div className="flex flex-col px-4 pb-4">
+        {/* TL;DR Today — single-row "what matters now" strip. Renders null
+            on calm days. Lives ABOVE the StickyTabs so it's the first
+            thing visible when Home opens. */}
+        <div className="mb-2 fade-up fade-up-1">
+          <TldrTodayCard
+            decisions={data?.decisions ?? []}
+            optionsDefense={data?.optionsDefense ?? []}
+            earnings={data?.earnings ?? []}
+            livePrices={data?.livePrices ?? new Map()}
+            exposurePosture={data?.exposurePosture ?? null}
+            tvSignals={data?.tvSignals}
+            casparPositions={data?.casparPositions ?? []}
+            sarahPositions={data?.sarahPositions ?? []}
+            onJumpDecisions={jumpDecisions}
+            onJumpOptions={jumpOptions}
+          />
+        </div>
+
         {/* Sticky sub-tab selector */}
         <StickyTabs
           active={sub}
@@ -106,6 +138,19 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
 
         <div className="fade-up fade-up-2 mt-4">
           <RiskPulseCard macro={data?.macro ?? null} />
+        </div>
+
+        {/* Concentration alert — single-ticker over-exposure. Only renders
+            when at least one position crosses 30% of NLV. Risk parity audit
+            covers asset-class diversification; this catches the orthogonal
+            "all my equity_us is just NVDA" risk. */}
+        <div className="fade-up fade-up-2 mt-4">
+          <ConcentrationCard
+            casparPositions={data?.casparPositions ?? []}
+            sarahPositions={data?.sarahPositions ?? []}
+            casparSnapshot={data?.caspar ?? null}
+            sarahSnapshot={data?.sarah ?? null}
+          />
         </div>
 
         {/* Week-ahead earnings + macro events (Phase 6 — Finnhub-driven).

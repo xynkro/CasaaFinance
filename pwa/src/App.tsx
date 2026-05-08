@@ -79,7 +79,7 @@ function Dashboard() {
   const renderPage = () => {
     switch (tab) {
       case 0:
-        return <HomePage data={data} loading={loading} />;
+        return <HomePage data={data} loading={loading} onJumpTab={setTab} />;
       case 1:
         return (
           <PortfolioPage
@@ -130,6 +130,7 @@ function Dashboard() {
             newsByTicker={data?.newsByTicker}
             insiderByTicker={data?.insiderByTicker}
             screenCandidates={data?.screenCandidates ?? []}
+            livePrices={data?.livePrices ?? new Map()}
           />
         );
       case 4:

@@ -33,6 +33,10 @@ on:
       force_resend:
         type: boolean
         default: false
+      include_close:
+        description: "Also push for CLOSE-state transitions (softer alert)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -51,6 +55,10 @@ jobs:
       DRIVE_FOLDER_ID:     ${{ secrets.DRIVE_FOLDER_ID }}
       TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+      # Soft-alert opt-in. To enable cron-default close-state alerts, add
+      # repo variable TRIGGER_ALERTS_INCLUDE_CLOSE=true (Settings → Variables).
+      # workflow_dispatch input takes precedence for one-off manual runs.
+      TRIGGER_ALERTS_INCLUDE_CLOSE: ${{ inputs.include_close || vars.TRIGGER_ALERTS_INCLUDE_CLOSE }}
     steps:
       - uses: actions/checkout@v4
 

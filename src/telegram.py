@@ -58,6 +58,37 @@ def ping_wsr_ready(date: str, pwa_url: str | None = None) -> dict:
     return send("\n".join(lines), parse_mode="none")
 
 
+def ping_trigger_close(
+    ticker: str,
+    account: str,
+    strategy: str,
+    entry_price: float,
+    current_price: float,
+    direction: str,           # "buy" | "trim"
+    pct_to_trigger: float,    # signed: negative = past, positive = approaching
+    pwa_url: str | None = None,
+) -> dict:
+    """
+    Soft alert — fires when a watching decision enters CLOSE state
+    (within 3% of trigger). Less urgent than ping_trigger_act_now;
+    designed for "heads up, this is heating up" rather than "act".
+
+    Gated server-side by TRIGGER_ALERTS_INCLUDE_CLOSE env (default off)
+    so users who don't want softer alerts can opt out without code change.
+    """
+    arrow = "🟡⬇️" if direction == "buy" else "🟡⬆️"
+    verb = "approaching buy" if direction == "buy" else "approaching trim"
+    distance = abs(pct_to_trigger) * 100
+    lines = [
+        f"{arrow} CLOSE · {ticker} · {account.upper()}",
+        f"{verb} — {distance:.1f}% to entry ${entry_price:.2f} (cur ${current_price:.2f})",
+        f"strategy: {strategy or 'BUY_DIP'}",
+    ]
+    if pwa_url:
+        lines.append(f"📱 {pwa_url}")
+    return send("\n".join(lines), parse_mode="none")
+
+
 def ping_trigger_act_now(
     ticker: str,
     account: str,

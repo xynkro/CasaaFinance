@@ -1,6 +1,12 @@
 import type { EarningsRow, EconomicEventRow } from "../data";
 import { Card } from "./Card";
-import { Calendar, Globe2 } from "lucide-react";
+import { Calendar, Globe2, Download } from "lucide-react";
+import {
+  buildEarningsEntries,
+  buildIcs,
+  buildMacroEntries,
+  downloadIcs,
+} from "../lib/icalExport";
 
 /**
  * Upcoming Calendars card — shows the next 7 days of earnings (filtered
@@ -47,6 +53,20 @@ export function UpcomingCalendarsCard({
 
   if (erUpcoming.length === 0 && macroUpcoming.length === 0) return null;
 
+  // Export the visible 7-day window only — keeps the .ics small enough
+  // that re-imports don't accumulate noise. The user can re-tap weekly
+  // to refresh; UIDs are deterministic so duplicates dedupe in their
+  // calendar app.
+  const handleExport = () => {
+    const entries = [
+      ...buildEarningsEntries(erUpcoming),
+      ...buildMacroEntries(macroUpcoming),
+    ];
+    if (!entries.length) return;
+    const today = new Date().toISOString().slice(0, 10);
+    downloadIcs(`casaa-catalysts-${today}.ics`, buildIcs(entries));
+  };
+
   return (
     <Card>
       <div className="flex items-center justify-between mb-3">
@@ -56,7 +76,20 @@ export function UpcomingCalendarsCard({
             Week ahead
           </span>
         </div>
-        <span className="text-[length:var(--t-2xs)] text-slate-600">next 7 days</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[length:var(--t-2xs)] text-slate-600">next 7 days</span>
+          <button
+            type="button"
+            onClick={handleExport}
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-[length:var(--t-2xs)] font-medium text-slate-400 hover:text-amber-300 active:scale-95 transition"
+            style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+            title="Export to your calendar (.ics)"
+            aria-label="Export catalysts to calendar"
+          >
+            <Download size={10} />
+            <span>iCal</span>
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">

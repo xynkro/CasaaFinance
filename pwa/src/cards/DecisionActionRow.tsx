@@ -61,38 +61,83 @@ function Picker({
   const [mode, setMode] = useState<DecisionActionType | null>(null);
   const [fillPrice, setFillPrice] = useState<string>(decision.entry || "");
   const [qty, setQty] = useState<string>(decision.qty || "");
+  const [notes, setNotes] = useState<string>("");
 
-  if (mode === "filled") {
-    const isShare = SHORT_STRATS.includes(decision.strategy ?? "");
-    const qtyLabel = isShare ? "Shares" : "Contracts";
+  if (mode === "filled" || mode === "killed" || mode === "deferred") {
     return (
-      <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-white/5">
-        <span className="text-[length:var(--t-2xs)] uppercase tracking-wider text-emerald-400/80 font-semibold">
-          Mark Filled
-        </span>
-        <NumberField label="Fill $" value={fillPrice} onChange={setFillPrice} placeholder="731.56" />
-        <NumberField label={qtyLabel} value={qty} onChange={setQty} placeholder="10" />
-        <button
-          type="button"
-          className="px-3 py-1.5 rounded-lg text-[length:var(--t-2xs)] font-semibold bg-emerald-500/15 border border-emerald-500/25 text-emerald-300 active:scale-95 transition"
-          onClick={(e) => {
-            e.stopPropagation();
-            const fp = Number(fillPrice);
-            const q = Number(qty);
-            if (!fp || fp <= 0 || !q || q <= 0) return;
-            onPicked(buildFilled(decision, fp, q));
-            setMode(null);
-          }}
-        >
-          Confirm
-        </button>
-        <button
-          type="button"
-          className="px-3 py-1.5 rounded-lg text-[length:var(--t-2xs)] text-slate-400 active:scale-95 transition"
-          onClick={(e) => { e.stopPropagation(); setMode(null); }}
-        >
-          Cancel
-        </button>
+      <div
+        className="mt-3 pt-3 border-t border-white/5"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          <span
+            className="text-[length:var(--t-2xs)] uppercase tracking-wider font-semibold"
+            style={{ color: ACTION_CONFIG[mode].color }}
+          >
+            Mark {ACTION_CONFIG[mode].label}
+          </span>
+        </div>
+
+        {mode === "filled" && (
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <NumberField label="Fill $" value={fillPrice} onChange={setFillPrice} placeholder="731.56" />
+            <NumberField
+              label={SHORT_STRATS.includes(decision.strategy ?? "") ? "Shares" : "Contracts"}
+              value={qty}
+              onChange={setQty}
+              placeholder="10"
+            />
+          </div>
+        )}
+
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder={
+            mode === "filled" ? "Note (optional) — e.g. 'Powell pivot rally'" :
+            mode === "killed" ? "Reason — e.g. 'thesis decayed past stop'" :
+            "Reason — e.g. 'waiting for FOMC clarity'"
+          }
+          rows={2}
+          className="w-full px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-200 text-[length:var(--t-2xs)] placeholder:text-slate-600 focus:outline-none focus:border-emerald-400/40 resize-none"
+          onClick={(e) => e.stopPropagation()}
+        />
+
+        <div className="flex items-center gap-2 mt-2">
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-lg text-[length:var(--t-2xs)] font-semibold active:scale-95 transition"
+            style={{
+              background: `${ACTION_CONFIG[mode].color}20`,
+              border: `1px solid ${ACTION_CONFIG[mode].color}40`,
+              color: ACTION_CONFIG[mode].color,
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (mode === "filled") {
+                const fp = Number(fillPrice);
+                const q = Number(qty);
+                if (!fp || fp <= 0 || !q || q <= 0) return;
+                onPicked(buildFilled(decision, fp, q, notes.trim() || undefined));
+              } else if (mode === "killed") {
+                onPicked(buildKilled(decision, notes.trim() || undefined));
+              } else {
+                onPicked(buildDeferred(decision, notes.trim() || undefined));
+              }
+              setMode(null);
+              setNotes("");
+            }}
+          >
+            Confirm
+          </button>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-lg text-[length:var(--t-2xs)] text-slate-400 active:scale-95 transition"
+            onClick={(e) => { e.stopPropagation(); setMode(null); setNotes(""); }}
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     );
   }
@@ -112,13 +157,13 @@ function Picker({
         label="Killed"
         Icon={XCircle}
         accent="#fca5a5"
-        onClick={() => onPicked(buildKilled(decision))}
+        onClick={() => setMode("killed")}
       />
       <ActionButton
         label="Defer"
         Icon={Clock4}
         accent="#fcd34d"
-        onClick={() => onPicked(buildDeferred(decision))}
+        onClick={() => setMode("deferred")}
       />
     </div>
   );
@@ -245,6 +290,11 @@ function RecordedBadge({
         <Undo2 size={11} />
         <span>Undo</span>
       </button>
+      {action.notes && (
+        <div className="basis-full text-[length:var(--t-2xs)] text-slate-500 italic mt-1 leading-relaxed">
+          “{action.notes}”
+        </div>
+      )}
     </div>
   );
 }
@@ -260,7 +310,7 @@ const ACTION_CONFIG: Record<
 
 /* --------------------------- Action builders ----------------------- */
 
-function buildFilled(d: DecisionRow, fp: number, q: number): DecisionAction {
+function buildFilled(d: DecisionRow, fp: number, q: number, notes?: string): DecisionAction {
   return {
     decisionKey: keyForDecision(d),
     ticker: (d.ticker || "").toUpperCase(),
@@ -270,10 +320,11 @@ function buildFilled(d: DecisionRow, fp: number, q: number): DecisionAction {
     action: "filled",
     fillPrice: fp,
     qty: q,
+    notes,
     recordedAt: new Date().toISOString(),
   };
 }
-function buildKilled(d: DecisionRow): DecisionAction {
+function buildKilled(d: DecisionRow, notes?: string): DecisionAction {
   return {
     decisionKey: keyForDecision(d),
     ticker: (d.ticker || "").toUpperCase(),
@@ -281,10 +332,11 @@ function buildKilled(d: DecisionRow): DecisionAction {
     strategy: (d.strategy || "").toUpperCase(),
     decisionDate: (d.date || "").slice(0, 10),
     action: "killed",
+    notes,
     recordedAt: new Date().toISOString(),
   };
 }
-function buildDeferred(d: DecisionRow): DecisionAction {
+function buildDeferred(d: DecisionRow, notes?: string): DecisionAction {
   return {
     decisionKey: keyForDecision(d),
     ticker: (d.ticker || "").toUpperCase(),
@@ -292,6 +344,7 @@ function buildDeferred(d: DecisionRow): DecisionAction {
     strategy: (d.strategy || "").toUpperCase(),
     decisionDate: (d.date || "").slice(0, 10),
     action: "deferred",
+    notes,
     recordedAt: new Date().toISOString(),
   };
 }
