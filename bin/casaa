@@ -97,6 +97,14 @@ case "${1:-help}" in
     gh workflow run finnhub-calendars.yml --repo "$GH_REPO"
     ;;
 
+  news|insider|finnhub-news)
+    # Finnhub 4×/day pull — company news (with heuristic sentiment) +
+    # insider transactions per portfolio + watchlist ticker. Brain reads
+    # these for "per-position news alerts" + "unusual insider activity".
+    echo "→ finnhub-news-insider (cloud cron 4×/day, manual trigger)"
+    gh workflow run finnhub-news-insider.yml --repo "$GH_REPO"
+    ;;
+
   watchlist|wl)
     # Show or edit the curated universe (`prompts/watchlist.yaml`).
     # The brain reads this to know which categories to sweep when

@@ -1,0 +1,59 @@
+name: Finnhub News + Insider — 4×/day
+
+on:
+  schedule:
+    # 4× daily covering pre-mkt, mid-day, close, post-close in US time
+    # so the brain has the freshest news at every workflow trigger:
+    #   13:30 UTC = 21:30 SGT  (pre-mkt = 09:30 ET)
+    #   17:00 UTC = 01:00 SGT  (mid-day)
+    #   21:00 UTC = 05:00 SGT  (close)
+    #   02:00 UTC = 10:00 SGT  (post-close, pre WSR Lite)
+    # 4 × ~5min runs = ~20 min/day. Well within 2000-min free tier.
+    - cron: "30 13 * * *"
+    - cron: "0 17 * * *"
+    - cron: "0 21 * * *"
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+      news_only:
+        type: boolean
+        default: false
+      insider_only:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: finnhub-news-insider
+  cancel-in-progress: true
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+      FINNHUB_API_KEY:  ${{ secrets.FINNHUB_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Pull Finnhub news + insider
+        run: |
+          set -euo pipefail
+          ARGS=""
+          [ "${{ github.event.inputs.dry }}" = "true" ] && ARGS="$ARGS --dry"
+          [ "${{ github.event.inputs.news_only }}" = "true" ] && ARGS="$ARGS --news-only"
+          [ "${{ github.event.inputs.insider_only }}" = "true" ] && ARGS="$ARGS --insider-only"
+          python scripts/finnhub_news_insider.py $ARGS

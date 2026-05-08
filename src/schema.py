@@ -1070,6 +1070,135 @@ class EconomicEventRow:
 
 
 @dataclass
+class NewsSentimentRow:
+    """
+    Per-ticker company news + heuristic sentiment. Refreshed 4×/day by
+    `scripts/finnhub_news_insider.py` from Finnhub `company-news`.
+
+    Free tier doesn't expose Finnhub's premium ML sentiment, so we run a
+    cheap keyword-based heuristic (-1.0 to +1.0) at write time. The
+    brain (Opus) does the actual semantic analysis when it reads the
+    rows — heuristic just prioritises what to surface.
+
+    Brain reads this in:
+      - Daily Brief: per-position sentiment alerts (sentiment < -0.5 in
+        last 24h → flag in the brief)
+      - WSR Lite: "news sentiment changes since Monday WSR"
+      - WSR Full: per-position news context for synthesis
+
+    PWA shows a sentiment dot on Decision cards (green/amber/red) when
+    fresh news exists for the ticker.
+
+    UPSERT key: (id) — Finnhub article ID is unique. Re-pulls dedupe.
+    """
+    TAB_NAME = "news_sentiment"
+    HEADERS = [
+        "id",                # Finnhub article id (UPSERT key)
+        "datetime",          # SGT iso "YYYY-MM-DDTHHMMSS" (article timestamp)
+        "ticker",
+        "headline",
+        "summary",
+        "source",            # publisher name e.g. "Yahoo" / "Reuters"
+        "url",
+        "sentiment_score",   # -1.0 (very neg) → +1.0 (very pos), heuristic
+        "sentiment_label",   # "negative" | "neutral" | "positive"
+        "category",          # "company" | "general" | "earnings" | etc.
+        "updated_at",
+    ]
+
+    id: str
+    datetime: str
+    ticker: str
+    headline: str
+    summary: str
+    source: str
+    url: str
+    sentiment_score: float
+    sentiment_label: str
+    category: str
+    updated_at: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        # Truncate summary to 1KB to stay below Sheets cell limit and
+        # keep the row scannable.
+        summary = self.summary or ""
+        if len(summary) > 1000:
+            summary = summary[:1000] + "...[truncated]"
+        return [
+            self.id, self.datetime, self.ticker, self.headline, summary,
+            self.source, self.url,
+            _num(self.sentiment_score, 3),
+            self.sentiment_label, self.category, self.updated_at,
+        ]
+
+
+@dataclass
+class InsiderTransactionRow:
+    """
+    Insider buy/sell filings from SEC Form 4 (via Finnhub). Refreshed
+    daily by `scripts/finnhub_news_insider.py`.
+
+    Brain reads this in:
+      - Daily Brief: "unusual insider activity" flag if any portfolio
+        ticker has a >$1M buy or >$5M sell in last 7 days
+      - WSR Full: "insider net flow last 7d" per portfolio + watchlist
+      - Aggressive watch: heavy insider buying on a watchlist ticker
+        bumps it into the BUY_DIP queue with elevated conviction
+
+    UPSERT key: (id) — Finnhub assigns SEC filing id, unique per row.
+
+    Transaction codes:
+      P = open market purchase (BUY signal)
+      S = open market sale     (SELL signal)
+      A = grant/award
+      M = exercise of options  (typically followed by S — see filings)
+      G = bona fide gift
+      D = sale to issuer
+    """
+    TAB_NAME = "insider_transactions"
+    HEADERS = [
+        "id",                  # SEC filing id (UPSERT key)
+        "transaction_date",
+        "filing_date",
+        "ticker",
+        "name",                # insider name
+        "shares",              # signed: positive=acquired, negative=disposed
+        "transaction_code",    # P / S / A / M / G / D
+        "side",                # "buy" | "sell" | "grant" | "exercise" | "other"
+        "transaction_price",   # per-share price (0 for grants)
+        "value_usd",           # |shares × price| approximate $ value
+        "is_derivative",       # TRUE/FALSE
+        "shares_after",        # holdings post-transaction
+        "updated_at",
+    ]
+
+    id: str
+    transaction_date: str
+    filing_date: str
+    ticker: str
+    name: str
+    shares: float
+    transaction_code: str
+    side: str
+    transaction_price: float
+    value_usd: float
+    is_derivative: bool
+    shares_after: float
+    updated_at: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [
+            self.id, self.transaction_date, self.filing_date, self.ticker,
+            self.name, _num(self.shares, 0),
+            self.transaction_code, self.side,
+            _num(self.transaction_price, 4), _num(self.value_usd, 0),
+            "TRUE" if self.is_derivative else "FALSE",
+            _num(self.shares_after, 0),
+            self.updated_at,
+        ]
+
+
+@dataclass
 class LivePriceRow:
     """
     Near-realtime price feed — one upserted row per portfolio ticker.
