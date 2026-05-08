@@ -16,6 +16,7 @@
  */
 import type {
   DecisionRow,
+  EconomicEventRow,
   ExposurePostureRow,
   LivePriceRow,
   OptionsDefenseRow,
@@ -25,12 +26,19 @@ import type {
 } from "../data";
 import { evaluateTrigger, numeric } from "../data";
 import { Card } from "./Card";
-import { Zap, ShieldAlert, Calendar, Hourglass, Clock } from "lucide-react";
+import { Zap, ShieldAlert, Calendar, Hourglass, Clock, Radio } from "lucide-react";
+
+// Macro-blackout window thresholds. Mirrors src/macro_blackouts.py
+// and ZeroDTE's macro_news.py — tune both together.
+const BLACKOUT_BEFORE_MIN = 15;
+const BLACKOUT_AFTER_MIN  = 5;
+const APPROACHING_MIN     = 30;  // surface as a "macro soon" tile beyond blackout
 
 export function TldrTodayCard({
   decisions,
   optionsDefense,
   earnings,
+  economicEvents,
   livePrices,
   exposurePosture,
   tvSignals,
@@ -42,6 +50,7 @@ export function TldrTodayCard({
   decisions: DecisionRow[];
   optionsDefense: OptionsDefenseRow[];
   earnings: EarningsRow[];
+  economicEvents: EconomicEventRow[];
   livePrices: Map<string, LivePriceRow>;
   exposurePosture: ExposurePostureRow | null;
   tvSignals: Map<string, TvConsensus> | undefined;
@@ -81,15 +90,67 @@ export function TldrTodayCard({
     (e) => e.date === todayStr && heldTickers.has((e.ticker || "").toUpperCase()),
   );
 
-  // ---- 4. Pending count ----
+  // ---- 4. Macro blackout / approaching ----
+  // Mirror of src/macro_blackouts.py + ZeroDTE's macro_news.py.
+  // Find the soonest high-impact US event within the next APPROACHING window.
+  // Within ±BLACKOUT minutes → "BLACKOUT" tile (red, top priority after ACT_NOW).
+  // Within APPROACHING minutes → "MACRO SOON" tile (amber, lower priority).
+  const macroSoon = (() => {
+    const nowMs = Date.now();
+    let best: { event: string; minutesUntil: number; severity: "blackout" | "approaching" } | null = null;
+    for (const e of economicEvents) {
+      const impact = (e.impact || "").toLowerCase();
+      if (impact !== "high") continue;
+      // economic_calendar `time` is "YYYY-MM-DD HH:MM:SS" UTC. The PWA's
+      // EconomicEventRow exposes `date` and `time` separately; combine.
+      const ts = `${e.date} ${e.time || "00:00:00"}`.replace(" ", "T") + "Z";
+      const t = Date.parse(ts);
+      if (isNaN(t)) continue;
+      const deltaMin = (t - nowMs) / 60000;
+      if (deltaMin < -BLACKOUT_AFTER_MIN) continue;
+      if (deltaMin > APPROACHING_MIN) continue;
+      const severity: "blackout" | "approaching" =
+        deltaMin <= BLACKOUT_BEFORE_MIN && deltaMin >= -BLACKOUT_AFTER_MIN ? "blackout" : "approaching";
+      if (!best || Math.abs(deltaMin) < Math.abs(best.minutesUntil)) {
+        best = { event: e.event, minutesUntil: Math.round(deltaMin), severity };
+      }
+    }
+    return best;
+  })();
+
+  // ---- 5. Pending count ----
   const pending = decisions.filter((d) => (d.status || "").toLowerCase() === "pending").length;
 
   // ---- Compose items in priority order, max 3 rows ----
-  type Row = { kind: "act" | "def" | "ern" | "close" | "pen"; node: React.ReactNode };
+  type Row = { kind: "act" | "macro" | "def" | "ern" | "close" | "pen"; node: React.ReactNode };
   const rows: Row[] = [];
+
+  // Macro BLACKOUT — sits ABOVE act_now because pages within blackout
+  // are deferred anyway by trigger_alerts.py. Surface the reason
+  // first so the user understands why nothing's firing.
+  if (macroSoon?.severity === "blackout") {
+    const t = macroSoon.minutesUntil;
+    const tStr = t >= 0 ? `${t} min` : `${Math.abs(t)}min ago`;
+    rows.push({
+      kind: "macro",
+      node: (
+        <Item
+          key="macro-bl"
+          Icon={Radio}
+          color="#fca5a5"
+          pulse
+          label="MACRO BLACKOUT"
+          body={macroSoon.event}
+          sub={`${tStr} — Telegram pushes deferred until window clears`}
+          onClick={onJumpDecisions}
+        />
+      ),
+    });
+  }
 
   // ACT NOW (one row per fire, up to 2)
   for (const a of actNow.slice(0, 2)) {
+    if (rows.length >= 3) break;
     rows.push({
       kind: "act",
       node: (
@@ -101,6 +162,24 @@ export function TldrTodayCard({
           label="ACT NOW"
           body={`${a.ticker.toUpperCase()} · ${a.account.toUpperCase()}`}
           sub={a.reason}
+          onClick={onJumpDecisions}
+        />
+      ),
+    });
+  }
+
+  // Macro APPROACHING (15-30 min away — heads up, not a hard gate)
+  if (macroSoon?.severity === "approaching" && rows.length < 3) {
+    rows.push({
+      kind: "macro",
+      node: (
+        <Item
+          key="macro-soon"
+          Icon={Radio}
+          color="#fb923c"
+          label="MACRO SOON"
+          body={macroSoon.event}
+          sub={`in ${macroSoon.minutesUntil} min — blackout starts at ${BLACKOUT_BEFORE_MIN}min mark`}
           onClick={onJumpDecisions}
         />
       ),

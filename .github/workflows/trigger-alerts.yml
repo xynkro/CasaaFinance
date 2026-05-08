@@ -55,6 +55,11 @@ jobs:
       DRIVE_FOLDER_ID:     ${{ secrets.DRIVE_FOLDER_ID }}
       TELEGRAM_BOT_TOKEN:  ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID:    ${{ secrets.TELEGRAM_CHAT_ID }}
+      # Macro blackout gate — within ±15min of high-impact US event,
+      # Telegram pushes are deferred. Reuses the FINNHUB_API_KEY already
+      # used by finnhub-calendars.yml. If unset, blackout is disabled
+      # (graceful degrade — pushes fire as before).
+      FINNHUB_API_KEY:     ${{ secrets.FINNHUB_API_KEY }}
       # Soft-alert opt-in. To enable cron-default close-state alerts, add
       # repo variable TRIGGER_ALERTS_INCLUDE_CLOSE=true (Settings → Variables).
       # workflow_dispatch input takes precedence for one-off manual runs.

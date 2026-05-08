@@ -84,6 +84,7 @@ export function HomePage({
             decisions={data?.decisions ?? []}
             optionsDefense={data?.optionsDefense ?? []}
             earnings={data?.earnings ?? []}
+            economicEvents={data?.economicEvents ?? []}
             livePrices={data?.livePrices ?? new Map()}
             exposurePosture={data?.exposurePosture ?? null}
             tvSignals={data?.tvSignals}

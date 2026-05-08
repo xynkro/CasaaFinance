@@ -37,10 +37,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.sync import load_env  # noqa: E402
-from src import sheets as sh   # noqa: E402
-from src import schema as S    # noqa: E402
-from src import telegram as tg # noqa: E402
+from src.sync import load_env       # noqa: E402
+from src import sheets as sh        # noqa: E402
+from src import schema as S         # noqa: E402
+from src import telegram as tg      # noqa: E402
+from src.macro_blackouts import MacroFeed  # noqa: E402
 
 # Match the PWA evaluator semantics — these strategies BUY when price
 # falls TO the entry level. SELL/TRIM strategies wait for price to RISE
@@ -466,10 +467,28 @@ def main() -> int:
     tv_daily, tv_weekly = load_tv_recs(client)
     prior_alerts = load_alert_state(client)
 
+    # Macro-blackout gate (ported from ZeroDTE/backend/app/macro_news.py).
+    # Within ±15 min of a high-impact US event, defer Telegram pushes
+    # so we don't page "ACT NOW" 5 minutes before FOMC/CPI/NFP. Same
+    # failure-mode protection ZeroDTE uses for 0DTE entries.
+    macro = MacroFeed.fetch()
+    in_blackout, blackout_event = macro.in_blackout_window()
+    next_hi = macro.next_high_impact(within_hours=24)
+
     logger.info(
         f"Context: live_prices={len(live_prices)}  exposure={exposure_rec or '?'}  "
-        f"tv_daily={len(tv_daily)}  tv_weekly={len(tv_weekly)}  prior_alerts={len(prior_alerts)}"
+        f"tv_daily={len(tv_daily)}  tv_weekly={len(tv_weekly)}  prior_alerts={len(prior_alerts)}  "
+        f"macro_events={len(macro.calendar)}"
     )
+    if in_blackout and blackout_event:
+        logger.warning(
+            f"⚠ MACRO BLACKOUT: {blackout_event['event']} "
+            f"in {blackout_event['_minutes_until']:+d}min — Telegram pushes will be deferred"
+        )
+    elif next_hi:
+        logger.info(
+            f"Next high-impact: {next_hi['event']} in {next_hi['_minutes_until']}min"
+        )
 
     # Soft-alert opt-in. When set to "true" (env var or workflow input),
     # CLOSE-state transitions (within 3% of trigger but not crossed) will
@@ -584,8 +603,19 @@ def main() -> int:
         upsert_alert_state(client, state_rows, logger)
 
     # Send Telegrams — hard fires (ACT NOW) first, then soft fires (CLOSE).
+    # Macro blackout gates ALL outbound pushes: in-window events still
+    # update the trigger_alerts sheet (so the next-run dedup still works)
+    # but Telegram is suppressed to avoid paging during FOMC/CPI/NFP.
     sent = 0
+    deferred = 0
     for d, ev, cur in fires:
+        if in_blackout and blackout_event:
+            deferred += 1
+            logger.warning(
+                f"  ⏸ ACT_NOW deferred (macro blackout — {blackout_event['event']} "
+                f"{blackout_event['_minutes_until']:+d}min): {d.ticker} {d.account}"
+            )
+            continue
         try:
             tg.ping_trigger_act_now(
                 ticker=d.ticker.upper(),
@@ -602,7 +632,14 @@ def main() -> int:
             logger.warning(f"  ✗ ACT_NOW failed: {d.ticker} {d.account}: {e}")
 
     soft_sent = 0
+    soft_deferred = 0
     for d, ev, cur in soft_fires:
+        if in_blackout and blackout_event:
+            soft_deferred += 1
+            logger.warning(
+                f"  ⏸ CLOSE deferred (macro blackout): {d.ticker} {d.account}"
+            )
+            continue
         try:
             tg.ping_trigger_close(
                 ticker=d.ticker.upper(),
@@ -619,9 +656,11 @@ def main() -> int:
         except Exception as e:
             logger.warning(f"  ✗ CLOSE failed: {d.ticker} {d.account}: {e}")
 
+    total_deferred = deferred + soft_deferred
     logger.info(
         f"trigger_alerts done — sent {sent}/{len(fires)} act_now"
         + (f", {soft_sent}/{len(soft_fires)} close" if include_close else "")
+        + (f"; {total_deferred} deferred by macro blackout" if total_deferred else "")
     )
     return 0
 
