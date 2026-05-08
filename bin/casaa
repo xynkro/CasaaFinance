@@ -113,6 +113,17 @@ case "${1:-help}" in
     gh workflow run finnhub-analyst.yml --repo "$GH_REPO"
     ;;
 
+  api-usage|cost|spend)
+    # Scrape Anthropic API costs from recent brain workflow runs by
+    # parsing claude-code-action's result JSON in the gh logs.
+    # Populates the api_usage sheet that the Settings tab reads for
+    # MTD spend + per-workflow breakdown.
+    echo "→ api_usage_scrape (local; queries gh + writes sheet)"
+    source .venv/bin/activate
+    LIMIT="${2:-50}"
+    python scripts/api_usage_scrape.py --limit "$LIMIT"
+    ;;
+
   watchlist|wl)
     # Show or edit the curated universe (`prompts/watchlist.yaml`).
     # The brain reads this to know which categories to sweep when

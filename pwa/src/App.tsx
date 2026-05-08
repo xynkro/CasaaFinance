@@ -144,7 +144,14 @@ function Dashboard() {
           />
         );
       case 5:
-        return <SettingsPage settings={settings} onUpdate={updateSettings} onLogout={handleLogout} />;
+        return (
+          <SettingsPage
+            settings={settings}
+            onUpdate={updateSettings}
+            onLogout={handleLogout}
+            apiUsage={data?.apiUsage ?? []}
+          />
+        );
       default:
         return null;
     }

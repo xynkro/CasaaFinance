@@ -60,6 +60,10 @@ const GIDS: Record<string, string> = {
   news_sentiment: "1115837697",
   insider_transactions: "511704782",
   analyst_consensus: "991986564",
+  // Anthropic API usage + cost log per brain run. Populated by
+  // scripts/api_usage_scrape.py parsing claude-code-action's result
+  // JSON. Settings tab renders MTD spend + per-workflow breakdown.
+  api_usage: "1292394805",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -486,6 +490,131 @@ export interface TvConsensus {
 }
 
 /**
+ * Derived trigger state for a watching decision row. Computed client-side
+ * (no backend changes) by `evaluateTrigger()`. Bridges the gap between
+ * "Watching — waiting for trigger" and "Filled — already executed":
+ *
+ *   dormant  → trigger > 5% away. Cards stay quiet.
+ *   close    → within 3% of trigger price. Amber chip surfaces.
+ *   ready    → trigger hit but a gate (regime / TV / etc.) blocks. Blue chip.
+ *   act_now  → trigger hit AND all gates clear. Red pulsing chip.
+ *
+ * Only watching-status rows get evaluated; other statuses return dormant.
+ */
+export type TriggerState = "dormant" | "close" | "ready" | "act_now";
+
+export interface TriggerEvaluation {
+  state: TriggerState;
+  reason: string;
+  triggerPrice?: number;
+  currentPrice?: number;
+  pctToTrigger?: number;        // signed: negative = need to move further
+  blockingGates: string[];
+}
+
+/**
+ * Derive a real-time trigger state from a decision row + live data.
+ *
+ * The brain writes a "watching" row with `entry` set to the price level
+ * it wants to act at, and an `accumulation_plan` that may reference
+ * regime gates (NEW_ENTRY_ALLOWED) or TV signal gates (TV daily=BUY).
+ * This function compares live data against those gates so the PWA can
+ * show "ACT NOW" the moment the conditions are met — instead of
+ * waiting for the next WSR re-emission to flip status to pending.
+ */
+export function evaluateTrigger(
+  decision: DecisionRow,
+  currentPrice: number | undefined,
+  exposurePosture: ExposurePostureRow | null,
+  tvConsensus: TvConsensus | undefined,
+): TriggerEvaluation {
+  const empty: TriggerEvaluation = {
+    state: "dormant",
+    reason: "",
+    blockingGates: [],
+  };
+
+  if ((decision.status || "").toLowerCase() !== "watching") return empty;
+
+  const entry = Number(decision.entry);
+  if (!entry || !currentPrice) return { ...empty, reason: "no price data" };
+
+  const strategy = (decision.strategy || "").toUpperCase();
+  // Direction: BUY_DIP / CSP / LONG_PUT-on-puts wait for the underlying
+  // to drop to the entry level. TRIM / CC wait for it to rise.
+  const isBuy = strategy === "BUY_DIP" || strategy === "CSP" || strategy === "PMCC";
+  const isSell = strategy === "TRIM" || strategy === "CC";
+  if (!isBuy && !isSell) return { ...empty, reason: "non-directional strategy" };
+
+  // Signed distance: positive = trigger already crossed; negative = still away.
+  const pctToTrigger = isBuy
+    ? (currentPrice - entry) / entry        // BUY: need price ≤ entry → 0 or negative when triggered
+    : (entry - currentPrice) / entry;       // SELL: need price ≥ entry → 0 or negative when triggered
+
+  // Detect blocking gates in the accumulation plan
+  const gates: string[] = [];
+  const planLower = (decision.accumulation_plan || "").toLowerCase();
+  if (
+    planLower.includes("new_entry_allowed") ||
+    planLower.includes("cash_priority blocks") ||
+    planLower.includes("ceiling ≥") ||
+    planLower.includes("exposure_ceiling")
+  ) {
+    const rec = exposurePosture?.recommendation;
+    if (rec && rec !== "NEW_ENTRY_ALLOWED") {
+      gates.push(`exposure ${rec}, need NEW_ENTRY_ALLOWED`);
+    }
+  }
+  if (
+    planLower.includes("tv daily=buy") ||
+    planLower.includes("tv daily flips") ||
+    planLower.includes("tv daily=str")
+  ) {
+    const tvRec = (tvConsensus?.daily?.recommendation || "").toUpperCase();
+    if (tvRec && !tvRec.includes("BUY")) {
+      gates.push(`TV daily=${tvRec}, need BUY`);
+    }
+  }
+
+  // State machine
+  // - triggered: pctToTrigger ≤ 0  (price has crossed the trigger threshold)
+  // - close:     pctToTrigger ≤ 0.03  (within 3% — getting interesting)
+  // - dormant:   pctToTrigger > 0.03
+  let state: TriggerState;
+  if (pctToTrigger <= 0) {
+    state = gates.length === 0 ? "act_now" : "ready";
+  } else if (pctToTrigger <= 0.03) {
+    state = "close";
+  } else {
+    state = "dormant";
+  }
+
+  const reason = (() => {
+    const tag = isBuy ? "drop to" : "rise to";
+    const pricePct = (Math.abs(pctToTrigger) * 100).toFixed(1);
+    if (state === "act_now") {
+      return `Trigger hit — ${isBuy ? "buy" : "trim"} at $${currentPrice.toFixed(2)} (entry $${entry.toFixed(2)})`;
+    }
+    if (state === "ready") {
+      return `Trigger hit but gated: ${gates.join(" · ")}`;
+    }
+    if (state === "close") {
+      return `${pricePct}% to ${tag} $${entry.toFixed(2)}`;
+    }
+    return `${pricePct}% from trigger $${entry.toFixed(2)}`;
+  })();
+
+  return {
+    state,
+    reason,
+    triggerPrice: entry,
+    currentPrice,
+    pctToTrigger,
+    blockingGates: gates,
+  };
+}
+
+/**
  * Risk Parity LITE audit row — written daily at 22:45 UTC by
  * `risk-parity-audit.yml`. 16 rows per run = 8 asset classes
  * (equity_us, equity_us_dividend, equity_intl, bond_long,
@@ -506,6 +635,24 @@ export interface LivePriceRow {
   volume: string;
   updated_at: string;     // SGT-anchored "YYYY-MM-DDTHHMMSS"
   source: string;         // "tv" | "yahoo"
+}
+
+/**
+ * API usage / cost row — one per completed brain run. Populated by
+ * `scripts/api_usage_scrape.py` (gh run view → parse claude-code-action
+ * result JSON). Settings panel reads this for MTD spend + per-workflow
+ * breakdown + recent runs table.
+ */
+export interface ApiUsageRow {
+  date: string;            // SGT iso run completion
+  run_id: string;
+  workflow: string;        // "daily-brief" | "wsr-full" | "wsr-lite" | "market-scan"
+  model: string;
+  status: string;          // "success" | "failure" | "cancelled"
+  num_turns: string;
+  duration_ms: string;
+  total_cost_usd: string;
+  updated_at: string;
 }
 
 /**
@@ -854,6 +1001,7 @@ export interface DashboardData {
   newsByTicker: Map<string, NewsSummary>;
   insiderByTicker: Map<string, InsiderSummary>;
   analystByTicker: Map<string, AnalystConsensusRow>;
+  apiUsage: ApiUsageRow[];               // raw rows; Settings panel aggregates
   error: string | null;
 }
 
@@ -923,6 +1071,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       newsRows,
       insiderRows,
       analystRows,
+      apiUsageRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -930,6 +1079,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTab<NewsSentimentRow>("news_sentiment").catch(() => [] as NewsSentimentRow[]),
       fetchTab<InsiderTransactionRow>("insider_transactions").catch(() => [] as InsiderTransactionRow[]),
       fetchTab<AnalystConsensusRow>("analyst_consensus").catch(() => [] as AnalystConsensusRow[]),
+      fetchTab<ApiUsageRow>("api_usage").catch(() => [] as ApiUsageRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -1004,6 +1154,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       newsByTicker,
       insiderByTicker,
       analystByTicker,
+      apiUsage: apiUsageRows,
       error: null,
     };
   } catch (e) {
@@ -1027,6 +1178,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       newsByTicker: new Map(),
       insiderByTicker: new Map(),
       analystByTicker: new Map(),
+      apiUsage: [],
       error: String(e),
     };
   }

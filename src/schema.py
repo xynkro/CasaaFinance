@@ -965,6 +965,56 @@ class RiskParityAuditRow:
 
 
 @dataclass
+class ApiUsageRow:
+    """
+    Per-workflow Anthropic API usage + cost log. Populated by
+    `scripts/api_usage_scrape.py` parsing the result JSON that
+    claude-code-action writes at the end of each brain run:
+
+        {"type":"result","subtype":"success","is_error":false,
+         "duration_ms":1271673,"num_turns":62,
+         "total_cost_usd":5.671771,"permission_denials_count":0}
+
+    UPSERT key: `run_id` (one row per GH Actions run). Re-scrapes are
+    idempotent. The Settings panel reads this for MTD spend +
+    per-workflow + recent-runs tables.
+
+    NOTE: only Anthropic costs are tracked here. Finnhub/TV/Yahoo are
+    free tier. FMP is the user's separate paid subscription (not
+    metered per-call by us).
+    """
+    TAB_NAME = "api_usage"
+    HEADERS = [
+        "date",            # SGT iso "YYYY-MM-DDTHHMMSS" (run completion time)
+        "run_id",          # GH Actions run id (UPSERT key)
+        "workflow",        # "daily-brief" | "wsr-full" | "wsr-lite" | "market-scan" | etc.
+        "model",           # "claude-opus-4-7" | "claude-sonnet-4-5"
+        "status",          # "success" | "failure" | "cancelled"
+        "num_turns",
+        "duration_ms",
+        "total_cost_usd",
+        "updated_at",      # SGT iso when this row was scraped
+    ]
+
+    date: str
+    run_id: str
+    workflow: str
+    model: str
+    status: str
+    num_turns: int
+    duration_ms: int
+    total_cost_usd: float
+    updated_at: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [
+            self.date, self.run_id, self.workflow, self.model, self.status,
+            str(self.num_turns), str(self.duration_ms),
+            _num(self.total_cost_usd, 4), self.updated_at,
+        ]
+
+
+@dataclass
 class EarningsRow:
     """
     Earnings calendar entry — one row per (ticker, quarter). Refreshed

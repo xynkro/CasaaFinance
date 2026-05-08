@@ -1,6 +1,8 @@
 import { useState } from "react";
 import type { Settings } from "../settings";
-import { LogOut, DollarSign, LayoutGrid, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check, Clock, Eye, CheckCircle, XCircle, AlertTriangle, Info } from "lucide-react";
+import type { ApiUsageRow } from "../data";
+import { ApiUsageCard } from "../cards/ApiUsageCard";
+import { LogOut, DollarSign, LayoutGrid, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check, Clock, Eye, CheckCircle, XCircle, AlertTriangle, Info, Zap, Hourglass } from "lucide-react";
 
 const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Review", "Settings"];
 
@@ -173,7 +175,9 @@ function DecisionStatusGlossary() {
         "regime gate (\"on NEW_ENTRY_ALLOWED\"), an event (\"after AMD " +
         "Q1 earnings 5/13\"), or a confirmation (\"on TV daily=BUY\"). " +
         "Read the accumulation plan for the exact trigger. No capital " +
-        "is allocated until something flips it to Pending.",
+        "is allocated until something flips it to Pending. " +
+        "While Watching, the card may show one of three derived pills " +
+        "(Close / Ready / ACT NOW) — see below.",
     },
     {
       icon: CheckCircle,
@@ -264,6 +268,83 @@ function DecisionStatusGlossary() {
           );
         })}
       </div>
+
+      {/* Derived "bridge" states — what fills the gap between Watching
+          and Filled. The brain's status field is sticky for 2-3 days
+          between WSR runs; these are computed CLIENT-SIDE every time
+          the PWA refreshes from live price + regime + TV signals so
+          you see "ACT NOW" in real time. Renders as a small pill in
+          the Decisions card header next to the status pill. */}
+      <div className="mt-5 pt-5 border-t border-white/5">
+        <div className="flex items-center gap-2 mb-3">
+          <Zap size={12} className="text-red-400" />
+          <h4 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider">
+            Watching — derived states
+          </h4>
+        </div>
+        <p className="text-[length:var(--t-xs)] text-slate-500 mb-3 leading-relaxed">
+          A Watching row's trigger is checked LIVE every PWA refresh.
+          Three small pills surface based on how close the trigger is to
+          firing — without waiting for the next WSR re-emission:
+        </p>
+        <div className="flex flex-col gap-2.5">
+          {[
+            {
+              icon: Hourglass,
+              color: "#fcd34d",
+              bg: "rgba(251,191,36,0.10)",
+              label: "Close",
+              body:
+                "Live price within 3% of the brain's trigger level. " +
+                "Heads-up — start watching this one closely.",
+            },
+            {
+              icon: Hourglass,
+              color: "#93c5fd",
+              bg: "rgba(96,165,250,0.12)",
+              label: "Ready (gated)",
+              body:
+                "Price trigger is HIT, but a gate (regime " +
+                "= NEW_ENTRY_ALLOWED, TV daily = BUY, etc.) is still " +
+                "blocking. The card tooltip shows which gate.",
+            },
+            {
+              icon: Zap,
+              color: "#fca5a5",
+              bg: "rgba(239,68,68,0.15)",
+              label: "ACT NOW",
+              body:
+                "Price trigger HIT and all gates clear. Pulsing red — " +
+                "the conditions the brain set are met right now. Open " +
+                "IBKR and execute per the accumulation plan.",
+            },
+          ].map((it) => {
+            const Icon = it.icon;
+            return (
+              <div
+                key={it.label}
+                className="flex items-start gap-2 rounded-lg p-2.5"
+                style={{ background: it.bg, border: `1px solid ${it.color}22` }}
+              >
+                <span
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-bold uppercase tracking-wide shrink-0"
+                  style={{
+                    background: `${it.color}18`,
+                    border: `1px solid ${it.color}33`,
+                    color: it.color,
+                  }}
+                >
+                  <Icon size={10} />
+                  {it.label}
+                </span>
+                <span className="text-[length:var(--t-xs)] text-slate-400 leading-relaxed">
+                  {it.body}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
@@ -272,10 +353,12 @@ export function SettingsPage({
   settings,
   onUpdate,
   onLogout,
+  apiUsage,
 }: {
   settings: Settings;
   onUpdate: (patch: Partial<Settings>) => void;
   onLogout: () => void;
+  apiUsage?: ApiUsageRow[];
 }) {
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
@@ -400,6 +483,10 @@ export function SettingsPage({
 
       {/* Reference glossary — what the 5 decision_queue status values mean */}
       <DecisionStatusGlossary />
+
+      {/* Anthropic API spend across brain workflows. Empty-state when
+          api_usage sheet hasn't been populated yet. */}
+      <ApiUsageCard rows={apiUsage ?? []} />
 
       {/* Account */}
       <div className="glass rounded-2xl p-5">

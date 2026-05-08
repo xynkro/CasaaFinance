@@ -3,8 +3,9 @@ import type {
   AnalystConsensusRow,
   NewsSummary,
   InsiderSummary,
+  TriggerEvaluation,
 } from "../data";
-import { Calendar, ArrowDownRight, ArrowUpRight, Megaphone, Users } from "lucide-react";
+import { Calendar, ArrowDownRight, ArrowUpRight, Megaphone, Users, Zap, Hourglass } from "lucide-react";
 
 /**
  * Phase 6 — small chips that surface Finnhub-derived context on
@@ -110,6 +111,71 @@ export function NewsSentimentDot({ news }: { news?: NewsSummary }) {
     >
       <Megaphone size={10} />
       {label.replace(" news", "")}
+    </span>
+  );
+}
+
+// --- Trigger state badge ----------------------------------------------------
+
+/**
+ * Trigger state badge — bridges the gap between Watching and Filled.
+ *
+ * The brain writes a `watching` row and may not re-emit for 2-3 days.
+ * This badge evaluates the trigger CLIENT-SIDE (`evaluateTrigger()` in
+ * data.ts) using live prices + regime + TV signals, so the user sees
+ * "ACT NOW" the moment the conditions clear — without waiting for the
+ * next WSR run.
+ *
+ *   close   → amber Hourglass — within 3% of trigger
+ *   ready   → blue Hourglass — trigger hit, gate (regime / TV) blocks
+ *   act_now → red pulsing Zap — trigger hit, all gates clear
+ *   dormant → null (no chip when nothing is happening)
+ */
+export function TriggerBadge({ evaluation }: { evaluation: TriggerEvaluation }) {
+  if (evaluation.state === "dormant") return null;
+
+  const cfg = {
+    act_now: {
+      bg: "rgba(239,68,68,0.15)",
+      border: "rgba(239,68,68,0.45)",
+      color: "#fca5a5",
+      label: "ACT NOW",
+      Icon: Zap,
+      pulse: true,
+    },
+    ready: {
+      bg: "rgba(96,165,250,0.12)",
+      border: "rgba(96,165,250,0.30)",
+      color: "#93c5fd",
+      label: "Ready (gated)",
+      Icon: Hourglass,
+      pulse: false,
+    },
+    close: {
+      bg: "rgba(251,191,36,0.10)",
+      border: "rgba(251,191,36,0.25)",
+      color: "#fcd34d",
+      label: "Close",
+      Icon: Hourglass,
+      pulse: false,
+    },
+  }[evaluation.state];
+
+  const Icon = cfg.Icon;
+  return (
+    <span
+      title={evaluation.reason}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold uppercase tracking-wide${
+        cfg.pulse ? " animate-pulse" : ""
+      }`}
+      style={{
+        background: cfg.bg,
+        border: `1px solid ${cfg.border}`,
+        color: cfg.color,
+      }}
+    >
+      <Icon size={11} />
+      {cfg.label}
     </span>
   );
 }

@@ -23,7 +23,9 @@ import {
   AnalystChip,
   NewsSentimentDot,
   InsiderFlowIcon,
+  TriggerBadge,
 } from "../cards/InfoChips";
+import { evaluateTrigger } from "../data";
 import { StockDetail } from "../components/StockDetail";
 import { daysAgo } from "../lib/dates";
 import {
@@ -595,6 +597,7 @@ function DecisionCard({
   analyst,
   news,
   insider,
+  exposurePosture,
 }: {
   decision: DecisionRow;
   onTap: () => void;
@@ -604,11 +607,16 @@ function DecisionCard({
   analyst?: AnalystConsensusRow;
   news?: NewsSummary;
   insider?: InsiderSummary;
+  exposurePosture?: ExposurePostureRow | null;
 }) {
   const status = STATUS_CONFIG[decision.status?.toLowerCase()] ?? DEFAULT_STATUS;
   const Icon = status.icon;
   const conv = Math.round(Number(decision.conv) || 0);
   const showOptionsSpec = !!decision.strategy && OPTIONS_STRATEGIES.includes(decision.strategy);
+  // Real-time trigger evaluation (only meaningful for status="watching").
+  // Returns dormant when not watching or no data; the badge renders null
+  // for dormant so cards stay clean.
+  const triggerEval = evaluateTrigger(decision, currentPrice, exposurePosture ?? null, tvConsensus);
   // Show the chip strip only when at least one chip has data, so cards
   // with no Finnhub context (e.g. SGX tickers TV doesn't cover) stay clean.
   const hasInfoChips = !!(earnings || analyst || news || insider);
@@ -642,6 +650,10 @@ function DecisionCard({
           </div>
         </div>
         <div className="flex items-center gap-1.5">
+          {/* Real-time trigger pill — surfaces ACT NOW the moment the
+              brain's watching-row trigger fires, without waiting for
+              the next WSR re-emission. Renders null when dormant. */}
+          <TriggerBadge evaluation={triggerEval} />
           <AgeChip date={decision.date} />
           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${status.bg}`}>
             <Icon size={12} className={status.text} />
@@ -923,6 +935,7 @@ export function DecisionsPage({
                       analyst={analystByTicker?.get((d.ticker || "").toUpperCase())}
                       news={newsByTicker?.get((d.ticker || "").toUpperCase())}
                       insider={insiderByTicker?.get((d.ticker || "").toUpperCase())}
+                      exposurePosture={exposurePosture}
                     />
                   </div>
                 ))}
@@ -944,6 +957,7 @@ export function DecisionsPage({
                       analyst={analystByTicker?.get((d.ticker || "").toUpperCase())}
                       news={newsByTicker?.get((d.ticker || "").toUpperCase())}
                       insider={insiderByTicker?.get((d.ticker || "").toUpperCase())}
+                      exposurePosture={exposurePosture}
                     />
                   </div>
                 ))}
