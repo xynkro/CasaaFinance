@@ -1070,6 +1070,65 @@ class EconomicEventRow:
 
 
 @dataclass
+class AnalystConsensusRow:
+    """
+    Wall Street consensus per ticker — count of analysts in each rating
+    bucket. Refreshed weekly by `scripts/finnhub_analyst.py` from
+    Finnhub `stock/recommendation`.
+
+    Free tier covers recommendation distribution but NOT price targets
+    (premium only). The brain still gets the most useful signal: how
+    many sell-side analysts are positive vs neutral vs negative.
+
+    Brain reads this in:
+      - WSR Full: "analyst consensus shifts since last WSR" — flag
+        upgrades (more buys) or downgrades (more sells)
+      - Decision card thesis: "Wall St: 42 buy / 4 hold / 1 sell" anchor
+        for share recs (gives the user a quick "vs consensus" reference)
+
+    PWA shows an analyst chip on Decision cards.
+
+    UPSERT key: ticker — one row per ticker (latest period only).
+    """
+    TAB_NAME = "analyst_consensus"
+    HEADERS = [
+        "ticker",
+        "period",            # YYYY-MM-DD (Finnhub publishes monthly)
+        "strong_buy_count",
+        "buy_count",
+        "hold_count",
+        "sell_count",
+        "strong_sell_count",
+        "total_count",
+        "consensus_score",   # weighted avg in [-2..+2]
+        "consensus_label",   # "STRONG_BUY" | "BUY" | "HOLD" | "SELL" | "STRONG_SELL"
+        "updated_at",
+    ]
+
+    ticker: str
+    period: str
+    strong_buy_count: int
+    buy_count: int
+    hold_count: int
+    sell_count: int
+    strong_sell_count: int
+    total_count: int
+    consensus_score: float
+    consensus_label: str
+    updated_at: str
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        return [
+            self.ticker, self.period,
+            str(self.strong_buy_count), str(self.buy_count),
+            str(self.hold_count), str(self.sell_count),
+            str(self.strong_sell_count), str(self.total_count),
+            _num(self.consensus_score, 2),
+            self.consensus_label, self.updated_at,
+        ]
+
+
+@dataclass
 class NewsSentimentRow:
     """
     Per-ticker company news + heuristic sentiment. Refreshed 4×/day by

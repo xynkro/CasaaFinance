@@ -105,6 +105,14 @@ case "${1:-help}" in
     gh workflow run finnhub-news-insider.yml --repo "$GH_REPO"
     ;;
 
+  analyst|consensus)
+    # Finnhub weekly pull — Wall St analyst recommendation distribution
+    # per ticker. Brain reads for "consensus shifts" + Decision card
+    # thesis anchor.
+    echo "→ finnhub-analyst (cloud cron Sunday, manual trigger)"
+    gh workflow run finnhub-analyst.yml --repo "$GH_REPO"
+    ;;
+
   watchlist|wl)
     # Show or edit the curated universe (`prompts/watchlist.yaml`).
     # The brain reads this to know which categories to sweep when
