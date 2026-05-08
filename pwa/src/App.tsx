@@ -125,6 +125,10 @@ function Dashboard() {
             casparSnapshot={data?.caspar ?? null}
             sarahSnapshot={data?.sarah ?? null}
             tvSignals={data?.tvSignals}
+            earnings={data?.earnings ?? []}
+            analystByTicker={data?.analystByTicker}
+            newsByTicker={data?.newsByTicker}
+            insiderByTicker={data?.insiderByTicker}
           />
         );
       case 4:

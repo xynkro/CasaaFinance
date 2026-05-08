@@ -9,11 +9,21 @@ import type {
   WheelNextLegRow,
   ExitPlanRow,
   TvConsensus,
+  EarningsRow,
+  AnalystConsensusRow,
+  NewsSummary,
+  InsiderSummary,
 } from "../data";
 import { Card } from "../cards/Card";
 import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
 import { ActionQueueCard } from "../cards/ActionQueueCard";
 import { ExposureBudgetCard } from "../cards/ExposureBudgetCard";
+import {
+  EarningsBadge,
+  AnalystChip,
+  NewsSentimentDot,
+  InsiderFlowIcon,
+} from "../cards/InfoChips";
 import { StockDetail } from "../components/StockDetail";
 import { daysAgo } from "../lib/dates";
 import {
@@ -581,16 +591,27 @@ function DecisionCard({
   onTap,
   currentPrice,
   tvConsensus,
+  earnings,
+  analyst,
+  news,
+  insider,
 }: {
   decision: DecisionRow;
   onTap: () => void;
   currentPrice: number | undefined;
   tvConsensus: TvConsensus | undefined;
+  earnings?: EarningsRow;
+  analyst?: AnalystConsensusRow;
+  news?: NewsSummary;
+  insider?: InsiderSummary;
 }) {
   const status = STATUS_CONFIG[decision.status?.toLowerCase()] ?? DEFAULT_STATUS;
   const Icon = status.icon;
   const conv = Math.round(Number(decision.conv) || 0);
   const showOptionsSpec = !!decision.strategy && OPTIONS_STRATEGIES.includes(decision.strategy);
+  // Show the chip strip only when at least one chip has data, so cards
+  // with no Finnhub context (e.g. SGX tickers TV doesn't cover) stay clean.
+  const hasInfoChips = !!(earnings || analyst || news || insider);
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -639,6 +660,18 @@ function DecisionCard({
       {/* TradingView 26-indicator consensus (1d + 1W) — external sanity-check
           on the brain's thesis. Amber warning if timeframes disagree. */}
       <TvConsensusChip consensus={tvConsensus} />
+
+      {/* Finnhub-derived context chips (Phase 6) — earnings inside DTE,
+          Wall St consensus, news sentiment, insider flow. Each chip is
+          null-safe so the strip is hidden when the brain has no signal. */}
+      {hasInfoChips && (
+        <div className="flex items-center flex-wrap gap-1.5 mb-3">
+          <EarningsBadge earnings={earnings} />
+          <AnalystChip analyst={analyst} />
+          <NewsSentimentDot news={news} />
+          <InsiderFlowIcon insider={insider} />
+        </div>
+      )}
 
       {/* Accumulation/tranche plan (share recs only — option recs leave it empty) */}
       <AccumulationPlanRow decision={decision} />
@@ -737,6 +770,10 @@ export function DecisionsPage({
   casparSnapshot,
   sarahSnapshot,
   tvSignals,
+  earnings,
+  analystByTicker,
+  newsByTicker,
+  insiderByTicker,
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
@@ -750,10 +787,28 @@ export function DecisionsPage({
   casparSnapshot?: SnapshotRow | null;
   sarahSnapshot?: SnapshotRow | null;
   tvSignals?: Map<string, TvConsensus>;
+  earnings?: EarningsRow[];
+  analystByTicker?: Map<string, AnalystConsensusRow>;
+  newsByTicker?: Map<string, NewsSummary>;
+  insiderByTicker?: Map<string, InsiderSummary>;
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const techByTicker = new Map<string, TechnicalScoreRow>();
   for (const t of technicalScores ?? []) techByTicker.set(t.ticker, t);
+
+  // Build per-ticker upcoming-earnings lookup (next 30 days only). Uses
+  // the closest-future earnings row per ticker so multi-quarter rows
+  // don't fight each other.
+  const earningsByTicker = new Map<string, EarningsRow>();
+  if (earnings && earnings.length) {
+    const today = new Date().toISOString().slice(0, 10);
+    for (const e of earnings) {
+      if (!e.ticker || !e.date || e.date < today) continue;
+      const t = e.ticker.toUpperCase();
+      const prev = earningsByTicker.get(t);
+      if (!prev || e.date < prev.date) earningsByTicker.set(t, e);
+    }
+  }
 
   // Resolve live price once per row (positions first, scores fallback).
   const priceFor = (ticker: string) =>
@@ -864,6 +919,10 @@ export function DecisionsPage({
                       onTap={() => setSelected(d)}
                       currentPrice={priceFor(d.ticker)}
                       tvConsensus={tvFor(d.ticker)}
+                      earnings={earningsByTicker.get((d.ticker || "").toUpperCase())}
+                      analyst={analystByTicker?.get((d.ticker || "").toUpperCase())}
+                      news={newsByTicker?.get((d.ticker || "").toUpperCase())}
+                      insider={insiderByTicker?.get((d.ticker || "").toUpperCase())}
                     />
                   </div>
                 ))}
@@ -881,6 +940,10 @@ export function DecisionsPage({
                       onTap={() => setSelected(d)}
                       currentPrice={priceFor(d.ticker)}
                       tvConsensus={tvFor(d.ticker)}
+                      earnings={earningsByTicker.get((d.ticker || "").toUpperCase())}
+                      analyst={analystByTicker?.get((d.ticker || "").toUpperCase())}
+                      news={newsByTicker?.get((d.ticker || "").toUpperCase())}
+                      insider={insiderByTicker?.get((d.ticker || "").toUpperCase())}
                     />
                   </div>
                 ))}

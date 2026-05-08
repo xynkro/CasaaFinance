@@ -43,6 +43,23 @@ const GIDS: Record<string, string> = {
   // per portfolio ticker. PWA Portfolio overlays this on positions for
   // near-realtime mkt_val/UPL display.
   live_prices: "666282627",
+  // Finnhub-powered tabs (Phase 1-3 of Strategy reliability rollout).
+  // earnings_calendar: per (ticker, year, quarter) UPSERT, 30-day
+  //   lookahead, filtered to portfolio + watchlist (~84 tickers). Drives
+  //   the Earnings badge on Decision cards + "This week" Home widget.
+  // economic_calendar: medium+high impact macro events for next 14
+  //   days, US/EU/CN/JP/SG only. Drives "Macro this week" Home widget.
+  // news_sentiment: company-news rows last 14 days per ticker with
+  //   heuristic sentiment score. Drives the news dot on Decision cards.
+  // insider_transactions: SEC Form 4 filings last 90 days per ticker.
+  //   Drives the insider flow icon when last 7d net is meaningful.
+  // analyst_consensus: latest Wall Street recommendation distribution
+  //   per ticker. Drives the analyst chip on Decision cards.
+  earnings_calendar: "1062081514",
+  economic_calendar: "1783608533",
+  news_sentiment: "1115837697",
+  insider_transactions: "511704782",
+  analyst_consensus: "991986564",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -492,6 +509,204 @@ export interface LivePriceRow {
 }
 
 /**
+ * Earnings calendar row — one upserted per (ticker, year, quarter).
+ * Refreshed daily by `finnhub-calendars.yml`. PWA Decision cards show
+ * an earnings badge when ticker has earnings inside option DTE.
+ */
+export interface EarningsRow {
+  date: string;            // YYYY-MM-DD earnings date
+  ticker: string;
+  hour: string;            // "bmo" | "amc" | "dmh"
+  year: string;
+  quarter: string;
+  eps_estimate: string;
+  eps_actual: string;
+  revenue_estimate: string;
+  revenue_actual: string;
+  surprise_pct: string;
+  updated_at: string;
+}
+
+/**
+ * Economic calendar row — medium+high impact macro events for next 14
+ * days. Refreshed daily. Drives "Macro this week" widget on Home.
+ */
+export interface EconomicEventRow {
+  date: string;
+  time: string;
+  country: string;        // ISO-2
+  event: string;
+  impact: string;         // "low" | "medium" | "high"
+  forecast: string;
+  actual: string;
+  previous: string;
+  unit: string;
+  updated_at: string;
+}
+
+/**
+ * News sentiment row — company news with heuristic sentiment score.
+ * Refreshed 4×/day. PWA Decision cards show a sentiment dot.
+ */
+export interface NewsSentimentRow {
+  id: string;
+  datetime: string;
+  ticker: string;
+  headline: string;
+  summary: string;
+  source: string;
+  url: string;
+  sentiment_score: string; // -1..+1
+  sentiment_label: string; // "negative" | "neutral" | "positive"
+  category: string;
+  updated_at: string;
+}
+
+/**
+ * Insider transaction row — SEC Form 4 filing. Refreshed 4×/day.
+ * PWA Decision cards show insider flow icon when last 7d net signal.
+ */
+export interface InsiderTransactionRow {
+  id: string;
+  transaction_date: string;
+  filing_date: string;
+  ticker: string;
+  name: string;
+  shares: string;          // signed
+  transaction_code: string;
+  side: string;            // "buy" | "sell" | "grant" | ...
+  transaction_price: string;
+  value_usd: string;
+  is_derivative: string;   // "TRUE" | "FALSE"
+  shares_after: string;
+  updated_at: string;
+}
+
+/**
+ * Analyst consensus row — Wall St rating distribution. Refreshed
+ * weekly. Drives analyst chip on Decision cards.
+ */
+export interface AnalystConsensusRow {
+  ticker: string;
+  period: string;
+  strong_buy_count: string;
+  buy_count: string;
+  hold_count: string;
+  sell_count: string;
+  strong_sell_count: string;
+  total_count: string;
+  consensus_score: string; // -2..+2
+  consensus_label: string; // "STRONG_BUY" | "BUY" | ...
+  updated_at: string;
+}
+
+/**
+ * Per-ticker insider summary over a window. Brain prompts use these
+ * aggregates ("net side=buy >$1M last 7d → bullish confirm"); PWA
+ * renders them as a single icon + tooltip.
+ */
+export interface InsiderSummary {
+  ticker: string;
+  net_buy_value: number;   // signed; positive = net buying
+  buy_count: number;       // # of buy filings
+  sell_count: number;      // # of sell filings
+  largest_value: number;
+  largest_name: string;
+  latest_date: string;
+}
+
+export function summarizeInsider(
+  rows: InsiderTransactionRow[],
+  windowDays = 7,
+): Map<string, InsiderSummary> {
+  const out = new Map<string, InsiderSummary>();
+  if (!rows.length) return out;
+  const cutoff = new Date();
+  cutoff.setUTCDate(cutoff.getUTCDate() - windowDays);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  for (const r of rows) {
+    if (!r.ticker || (r.transaction_date || "") < cutoffStr) continue;
+    const t = r.ticker.toUpperCase();
+    const value = Number(r.value_usd) || 0;
+    const side = (r.side || "").toLowerCase();
+    let entry = out.get(t);
+    if (!entry) {
+      entry = {
+        ticker: t, net_buy_value: 0, buy_count: 0, sell_count: 0,
+        largest_value: 0, largest_name: "", latest_date: r.transaction_date,
+      };
+      out.set(t, entry);
+    }
+    if (side === "buy") {
+      entry.net_buy_value += value;
+      entry.buy_count += 1;
+    } else if (side === "sell" || side === "issuer_sale") {
+      entry.net_buy_value -= value;
+      entry.sell_count += 1;
+    }
+    if (value > entry.largest_value) {
+      entry.largest_value = value;
+      entry.largest_name = r.name;
+    }
+    if ((r.transaction_date || "") > entry.latest_date) {
+      entry.latest_date = r.transaction_date;
+    }
+  }
+  return out;
+}
+
+/** Per-ticker latest news summary — most recent headline + max-magnitude sentiment. */
+export interface NewsSummary {
+  ticker: string;
+  latest_datetime: string;
+  latest_headline: string;
+  latest_score: number;
+  worst_score: number;     // most-negative score in window
+  best_score: number;      // most-positive in window
+  count_24h: number;
+  count_72h: number;
+}
+
+export function summarizeNews(rows: NewsSentimentRow[]): Map<string, NewsSummary> {
+  const out = new Map<string, NewsSummary>();
+  if (!rows.length) return out;
+  const now = new Date();
+  const t24 = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 13);
+  const t72 = new Date(now.getTime() - 72 * 60 * 60 * 1000).toISOString().slice(0, 13);
+  for (const r of rows) {
+    const t = (r.ticker || "").toUpperCase();
+    if (!t) continue;
+    const score = Number(r.sentiment_score) || 0;
+    let entry = out.get(t);
+    if (!entry) {
+      entry = {
+        ticker: t,
+        latest_datetime: r.datetime,
+        latest_headline: r.headline,
+        latest_score: score,
+        worst_score: score,
+        best_score: score,
+        count_24h: 0,
+        count_72h: 0,
+      };
+      out.set(t, entry);
+    }
+    if ((r.datetime || "") > entry.latest_datetime) {
+      entry.latest_datetime = r.datetime;
+      entry.latest_headline = r.headline;
+      entry.latest_score = score;
+    }
+    if (score < entry.worst_score) entry.worst_score = score;
+    if (score > entry.best_score) entry.best_score = score;
+    // crude time bucketing using ISO-prefix string compare
+    const dtIso = r.datetime?.replace(/(\d{4}-\d{2}-\d{2})T(\d{2}).*/, "$1T$2");
+    if (dtIso && dtIso >= t24) entry.count_24h += 1;
+    if (dtIso && dtIso >= t72) entry.count_72h += 1;
+  }
+  return out;
+}
+
+/**
  * Build a ticker→LivePriceRow map for fast lookup. Empty/missing ticker
  * rows skipped. The map's `latest_updated_at` returns the most recent
  * timestamp across all rows (for the freshness chip).
@@ -632,6 +847,13 @@ export interface DashboardData {
   // these onto positions for near-realtime mkt_val/UPL.
   livePrices: Map<string, LivePriceRow>;
   livePricesUpdatedAt: string;
+  // Finnhub-powered structured tabs (Phase 1-3). Brain consumes these as
+  // input and emits summary fields; PWA also renders chips on cards.
+  earnings: EarningsRow[];               // next 30 days, filtered universe
+  economicEvents: EconomicEventRow[];    // next 14 days
+  newsByTicker: Map<string, NewsSummary>;
+  insiderByTicker: Map<string, InsiderSummary>;
+  analystByTicker: Map<string, AnalystConsensusRow>;
   error: string | null;
 }
 
@@ -692,12 +914,30 @@ export async function fetchDashboard(): Promise<DashboardData> {
         // until first cron run lands; catch keeps PWA alive meanwhile.
         fetchTab<RiskParityAuditRow>("risk_parity_audit").catch(() => [] as RiskParityAuditRow[]),
       ]);
-    // Live prices fetched separately so a temporary failure doesn't blow up
-    // the whole dashboard load (the rest of the data is still useful).
-    const livePriceRows = await fetchTab<LivePriceRow>("live_prices").catch(
-      () => [] as LivePriceRow[],
-    );
+    // Live prices + Finnhub tabs fetched in a second batch — failures here
+    // shouldn't blow up the rest of the dashboard load.
+    const [
+      livePriceRows,
+      earningsRows,
+      economicRows,
+      newsRows,
+      insiderRows,
+      analystRows,
+    ] = await Promise.all([
+      fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
+      fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
+      fetchTab<EconomicEventRow>("economic_calendar").catch(() => [] as EconomicEventRow[]),
+      fetchTab<NewsSentimentRow>("news_sentiment").catch(() => [] as NewsSentimentRow[]),
+      fetchTab<InsiderTransactionRow>("insider_transactions").catch(() => [] as InsiderTransactionRow[]),
+      fetchTab<AnalystConsensusRow>("analyst_consensus").catch(() => [] as AnalystConsensusRow[]),
+    ]);
     const liveIdx = indexLivePrices(livePriceRows);
+    const newsByTicker = summarizeNews(newsRows);
+    const insiderByTicker = summarizeInsider(insiderRows, 7);
+    const analystByTicker = new Map<string, AnalystConsensusRow>();
+    for (const a of analystRows) {
+      if (a.ticker) analystByTicker.set(a.ticker.toUpperCase(), a);
+    }
     const casparRows = normalizeSnapshot(casparRaw);
     const sarahRows = normalizeSnapshot(sarahRaw);
 
@@ -759,6 +999,11 @@ export async function fetchDashboard(): Promise<DashboardData> {
       riskParityAudit: latestGroup(riskParityRows),
       livePrices: liveIdx.byTicker,
       livePricesUpdatedAt: liveIdx.latestUpdatedAt,
+      earnings: earningsRows,
+      economicEvents: economicRows,
+      newsByTicker,
+      insiderByTicker,
+      analystByTicker,
       error: null,
     };
   } catch (e) {
@@ -777,6 +1022,11 @@ export async function fetchDashboard(): Promise<DashboardData> {
       riskParityAudit: [],
       livePrices: new Map(),
       livePricesUpdatedAt: "",
+      earnings: [],
+      economicEvents: [],
+      newsByTicker: new Map(),
+      insiderByTicker: new Map(),
+      analystByTicker: new Map(),
       error: String(e),
     };
   }

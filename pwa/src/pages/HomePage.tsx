@@ -6,6 +6,7 @@ import { MoversCard } from "../cards/MoversCard";
 import { SectorMixCard } from "../cards/SectorMixCard";
 import { WsrSummaryCard } from "../cards/WsrSummaryCard";
 import { WsrLiteCard } from "../cards/WsrLiteCard";
+import { UpcomingCalendarsCard } from "../cards/UpcomingCalendarsCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
 import { Activity } from "lucide-react";
@@ -105,6 +106,16 @@ export function HomePage({ data, loading }: { data: DashboardData | null; loadin
 
         <div className="fade-up fade-up-2 mt-4">
           <RiskPulseCard macro={data?.macro ?? null} />
+        </div>
+
+        {/* Week-ahead earnings + macro events (Phase 6 — Finnhub-driven).
+            Renders null when both lists are empty so first-deploy doesn't
+            show a stub card. */}
+        <div className="fade-up fade-up-3 mt-4">
+          <UpcomingCalendarsCard
+            earnings={data?.earnings ?? []}
+            events={data?.economicEvents ?? []}
+          />
         </div>
 
         <div className="fade-up fade-up-3 mt-4">
