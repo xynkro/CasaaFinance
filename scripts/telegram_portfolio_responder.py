@@ -1,6 +1,27 @@
 """
 telegram_portfolio_responder.py — every-N-min Telegram bot poller.
 
+⚠️ INACTIVE — single-bot conflict.
+
+The @Tron_Shaft_Bot is also polled by ZeroDTE's FastAPI service. Telegram's
+getUpdates model only supports ONE polling client per bot — two clients
+race and ack each other's messages. So the GH Actions cron for this
+responder is intentionally absent. To re-enable, you need either:
+
+(a) extend ZeroDTE's command handler to read FinancePWA's snapshot
+    sheets and reply with the portfolio summary (recommended — single
+    bot, single command surface), OR
+(b) create a separate bot via @BotFather (e.g. @Casaa_Finance_Bot),
+    set its token as TELEGRAM_BOT_TOKEN, and re-add the workflow.
+
+The summary helper at src/portfolio_summary.py is project-agnostic and
+can be imported by either path. The functions below remain useful for
+ad-hoc local polls (`casaa portfolio-respond`) when ZeroDTE's responder
+isn't running, e.g. between dev sessions.
+
+Original docstring follows.
+─────────────────────────────────────────────────────────────────────
+
 Watches the "Portfolio Ping" topic in the Finance & Trading supergroup
 for messages matching `~/portfolio` (or `/portfolio`, `~/positions`,
 `/positions`). When a known user posts one, the bot replies in-thread
