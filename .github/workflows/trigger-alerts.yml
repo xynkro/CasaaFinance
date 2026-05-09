@@ -60,6 +60,11 @@ jobs:
       # used by finnhub-calendars.yml. If unset, blackout is disabled
       # (graceful degrade — pushes fire as before).
       FINNHUB_API_KEY:     ${{ secrets.FINNHUB_API_KEY }}
+      # Sonnet-driven "so what" interpretation for macro news pings.
+      # Optional — falls back to keyword heuristic if unset. Cost: ~$1/mo
+      # at HOT_NEWS_PING_CAP=3 with edge-triggered dedup. Add as repo
+      # secret ANTHROPIC_API_KEY (Settings → Secrets and variables).
+      ANTHROPIC_API_KEY:   ${{ secrets.ANTHROPIC_API_KEY }}
       # Soft-alert opt-in. To enable cron-default close-state alerts, add
       # repo variable TRIGGER_ALERTS_INCLUDE_CLOSE=true (Settings → Variables).
       # workflow_dispatch input takes precedence for one-off manual runs.

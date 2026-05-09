@@ -310,6 +310,39 @@ def load_decisions(client, logger: logging.Logger) -> list[Decision]:
     return out
 
 
+def load_portfolio_tickers(client) -> set[str]:
+    """Return uppercase ticker set held across both accounts (latest grab).
+
+    Used by the macro-news mirror logic — when a hot headline mentions any
+    of these tickers, the ping is also routed to Multi Day Swing so the
+    user sees portfolio-relevant news alongside their decisions topic.
+    """
+    out: set[str] = set()
+    ss = sh._open_sheet(client)
+    for tab in ("positions_caspar", "positions_sarah"):
+        try:
+            ws = ss.worksheet(tab)
+        except Exception:
+            continue
+        rows = ws.get_all_values()
+        if len(rows) < 2:
+            continue
+        hdr = rows[0]
+        try:
+            c_d = hdr.index("date")
+            c_t = hdr.index("ticker")
+        except ValueError:
+            continue
+        # Latest date — same convention as the PWA's `latestGroup()`.
+        latest = max((r[c_d] for r in rows[1:] if len(r) > c_d and r[c_d]), default="")
+        if not latest:
+            continue
+        for r in rows[1:]:
+            if len(r) > max(c_d, c_t) and r[c_d] == latest and r[c_t]:
+                out.add(r[c_t].strip().upper())
+    return out
+
+
 def load_live_prices(client) -> dict[str, float]:
     """ticker (uppercase) → last_price."""
     ss = sh._open_sheet(client)
@@ -707,6 +740,44 @@ def main() -> int:
         f"({n_fresh} fresh, {len(prior_macro_alerts)} already alerted)"
     )
 
+    # ── LLM "so what" enrichment (Sonnet) ──────────────────────────────
+    # Replaces the keyword-heuristic `so_what` with a 1-sentence WSJ-style
+    # interpretation. Only enriches the items we're about to ping (cap = 3
+    # per run × dedup), so cost stays under ~$1/mo. Falls back silently to
+    # the heuristic line if ANTHROPIC_API_KEY is unset or any call fails.
+    if macro_news_plan:
+        try:
+            from src.news_interpret import enrich_news_items
+            enrich_news_items(macro_news_plan)
+            logger.info(
+                f"  · enriched {sum(1 for n in macro_news_plan if n.get('so_what'))}"
+                f"/{len(macro_news_plan)} headlines with LLM so-what"
+            )
+        except Exception as e:
+            logger.warning(f"  · LLM enrichment failed (using heuristic): {e}")
+
+    # ── Portfolio-ticker mirror plan (B) ───────────────────────────────
+    # When a hot headline mentions any held ticker, also send a copy to
+    # the Multi Day Swing topic so portfolio-relevant news lands in the
+    # decisions lane. The mirror is a SEPARATE Telegram message (different
+    # leading line) — the original ping still goes to Macro News too.
+    portfolio_tickers = load_portfolio_tickers(client)
+    logger.info(f"Portfolio tickers (for mirror): {sorted(portfolio_tickers) or '(none)'}")
+
+    def _matched_tickers(text: str) -> list[str]:
+        """Return portfolio tickers mentioned in `text` (case-insensitive,
+        word-boundary match so 'OPEN' doesn't match 'opens')."""
+        import re as _re
+        if not text or not portfolio_tickers:
+            return []
+        hits: list[str] = []
+        upper = text.upper()
+        for tk in portfolio_tickers:
+            # Cheap pre-filter then word-boundary check
+            if tk in upper and _re.search(rf"\b{_re.escape(tk)}\b", upper):
+                hits.append(tk)
+        return hits
+
     if args.dry:
         for d, ev, cur in fires:
             logger.info(f"  [DRY] would fire ACT_NOW: {d.ticker} {d.account} entry=${d.entry:.2f} → cur=${cur:.2f}  ({ev.direction})")
@@ -813,6 +884,7 @@ def main() -> int:
     elif in_blackout and blackout_event:
         logger.info(f"  · BLACKOUT already alerted: {blackout_event.get('event')}")
 
+    swing_mirrored = 0
     for n in macro_news_plan:
         news_key = f"news:{n['id']}"
         try:
@@ -829,6 +901,25 @@ def main() -> int:
             logger.info(f"  ✓ sent NEWS{cat_tag}{so_what_tag}: {n.get('headline', '')[:60]}")
         except Exception as e:
             logger.warning(f"  ✗ NEWS failed: {e}")
+
+        # Mirror to Multi Day Swing if the headline mentions any held ticker.
+        # Done inside the same loop so dedup state covers both routes.
+        text_for_match = f"{n.get('headline', '')} {n.get('summary', '')}"
+        matched = _matched_tickers(text_for_match)
+        if matched:
+            try:
+                tg.ping_macro_news_to_swing(
+                    headline=n.get("headline", ""),
+                    matched_tickers=matched,
+                    so_what=n.get("so_what", ""),
+                    source=n.get("source", ""),
+                    url=n.get("url", ""),
+                )
+                swing_mirrored += 1
+                logger.info(f"    ↳ mirrored to swing topic (tickers: {matched})")
+            except Exception as e:
+                logger.warning(f"    ↳ swing mirror failed: {e}")
+
         macro_state_rows.append(S.MacroAlertStateRow(
             event_key=news_key,
             event_type="hot_news",
@@ -838,6 +929,78 @@ def main() -> int:
             updated_at=now_iso,
         ))
 
+    # ── Daily swing-book summary (A) ───────────────────────────────────
+    # One ping per SGT day, fired by whichever cron run lands first after
+    # 09:00 SGT. Gives Multi Day Swing a standing daily heartbeat showing
+    # watching count / blocked count / top 3 closest-to-trigger, even on
+    # quiet days when no ACT_NOW transitions fire.
+    swing_summary_sent = False
+    try:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        SGT = _ZI("Asia/Singapore")
+        now_sgt = _dt.now(SGT)
+        sgt_date = now_sgt.strftime("%Y-%m-%d")
+        sum_key = f"swing_summary:{sgt_date}"
+        # Fire window: 09:00-23:59 SGT, weekdays only. Skip weekends so
+        # the topic doesn't get an empty "watching 0" ping each Saturday.
+        in_window = (now_sgt.hour >= 9 and now_sgt.weekday() < 5)
+        if in_window and sum_key not in prior_macro_alerts:
+            # Compute counts from state_rows we just evaluated.
+            watching_n = sum(1 for r in state_rows if r.last_state in ("dormant", "ready", "close"))
+            act_now_n = sum(1 for r in state_rows if r.last_state == "act_now")
+            blocked_n = sum(1 for r in state_rows if r.blocking_gates)
+
+            # Top-3 closest-to-trigger by absolute pct distance.
+            close_rows: list[dict] = []
+            for r in state_rows:
+                if r.last_state == "act_now" or not r.entry_price:
+                    continue
+                pct = abs(r.current_price - r.entry_price) / r.entry_price
+                close_rows.append({
+                    "ticker": r.ticker,
+                    "account": r.account,
+                    "pct_to_trigger": pct,
+                })
+            close_rows.sort(key=lambda c: c["pct_to_trigger"])
+            top_close = close_rows[:3]
+
+            # Cash status — best-effort from exposure_rec (full string if set).
+            cash_status = ""
+            if exposure_rec:
+                cash_status = f"Posture: {exposure_rec[:60]}"
+
+            try:
+                tg.ping_swing_summary(
+                    date=sgt_date,
+                    watching=watching_n,
+                    act_now=act_now_n,
+                    blocked=blocked_n,
+                    top_close=top_close,
+                    cash_status=cash_status,
+                    pwa_url=PWA_URL,
+                )
+                swing_summary_sent = True
+                logger.info(
+                    f"  ✓ sent SWING SUMMARY: watching={watching_n} act_now={act_now_n} "
+                    f"blocked={blocked_n} top_close={len(top_close)}"
+                )
+                macro_state_rows.append(S.MacroAlertStateRow(
+                    event_key=sum_key,
+                    event_type="swing_summary",
+                    event_summary=f"watching={watching_n} act_now={act_now_n} blocked={blocked_n}",
+                    event_time=now_sgt.isoformat(),
+                    alerted_at=now_iso,
+                    updated_at=now_iso,
+                ))
+            except Exception as e:
+                logger.warning(f"  ✗ SWING SUMMARY failed: {e}")
+        else:
+            why = "outside window" if not in_window else "already sent today"
+            logger.info(f"  · swing summary skipped ({why})")
+    except Exception as e:
+        logger.warning(f"  · swing summary block error: {e}")
+
     if macro_state_rows:
         upsert_macro_alert_state(client, macro_state_rows, logger)
 
@@ -846,6 +1009,8 @@ def main() -> int:
         f"trigger_alerts done — sent {sent}/{len(fires)} act_now"
         + (f", {soft_sent}/{len(soft_fires)} close" if include_close else "")
         + (f", {macro_pinged} macro" if macro_pinged else "")
+        + (f", {swing_mirrored} swing-mirror" if swing_mirrored else "")
+        + (", swing summary ✓" if swing_summary_sent else "")
         + (f"; {total_deferred} deferred by macro blackout" if total_deferred else "")
     )
     return 0

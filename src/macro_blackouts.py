@@ -171,10 +171,9 @@ class MacroFeed:
         return feed
 
     # Finnhub general-news is Reuters-heavy. Pulling forex/crypto/merger
-    # broadens the source mix (Bloomberg, MarketWatch, CNBC, Yahoo, etc.)
-    # without exploding API quota — each call is one credit and we run
-    # this every 10 min. Order matters: `general` first so its items dominate
-    # the head of the list when timestamps tie.
+    # broadens the source mix without exploding API quota — each call is
+    # one credit and we run this every 10 min. Order matters: `general`
+    # first so its items dominate the head of the list when timestamps tie.
     NEWS_CATEGORIES = ("general", "forex", "crypto", "merger")
 
     def _refresh_news(self, api_key: str, timeout: float) -> None:
@@ -183,6 +182,7 @@ class MacroFeed:
         seen_ids: set[int] = set()
         out: list[dict] = []
 
+        # ── Finnhub feeds (4 categories) ────────────────────────────────
         for cat in self.NEWS_CATEGORIES:
             try:
                 r = requests.get(
@@ -200,8 +200,6 @@ class MacroFeed:
                 ts = datetime.fromtimestamp(n.get("datetime", 0), tz=timezone.utc)
                 if ts < cutoff:
                     continue
-                # Dedup across categories — Finnhub repeats the same item
-                # under multiple buckets fairly often.
                 nid = n.get("id")
                 url = n.get("url", "")
                 if nid and nid in seen_ids:
@@ -226,13 +224,54 @@ class MacroFeed:
                     "so_what": interpret_headline(headline, summary),
                 })
 
+        # ── RSS aggregator (WSJ, Bloomberg, MarketWatch, CNBC) ──────────
+        # Imported lazily so a missing module doesn't break Finnhub-only
+        # operation. Failures inside aggregate_rss are logged and dropped.
+        try:
+            from .news_aggregator import aggregate_rss
+        except ImportError:
+            try:
+                from src.news_aggregator import aggregate_rss
+            except ImportError:
+                aggregate_rss = None  # type: ignore[assignment]
+        if aggregate_rss is not None:
+            try:
+                rss_items = aggregate_rss(timeout=timeout)
+            except Exception as e:
+                log.warning("MacroFeed RSS aggregate failed: %s", e)
+                rss_items = []
+            for item in rss_items:
+                try:
+                    ts = datetime.fromisoformat(item["datetime"])
+                except (KeyError, ValueError):
+                    continue
+                if ts < cutoff:
+                    continue
+                url = item.get("url", "")
+                rid = item.get("id")
+                # Dedup — RSS items often duplicate Finnhub by URL.
+                if url and url in seen_urls:
+                    continue
+                if rid and rid in seen_ids:
+                    continue
+                if url:
+                    seen_urls.add(url)
+                if rid:
+                    seen_ids.add(rid)
+                headline = item.get("headline", "")
+                summary = item.get("summary", "")
+                out.append({
+                    **item,
+                    "hot": is_hot_news(headline, summary),
+                    "so_what": interpret_headline(headline, summary),
+                })
+
         out.sort(key=lambda x: x["datetime"], reverse=True)
-        self.news = out[:60]  # was 30 — wider net since we pull 4 categories
+        self.news = out[:80]  # widened — 4 Finnhub buckets + 4 RSS feeds
         sources = {x["source"] for x in self.news if x.get("source")}
         log.info(
-            "MacroFeed news: %d items (%d hot) across %d sources from %s",
-            len(out), sum(1 for x in out if x["hot"]),
-            len(sources), ",".join(self.NEWS_CATEGORIES),
+            "MacroFeed news: %d items (%d hot) across %d sources",
+            len(out), sum(1 for x in out if x["hot"]), len(sources),
         )
 
     def _refresh_calendar(self, api_key: str, timeout: float) -> None:

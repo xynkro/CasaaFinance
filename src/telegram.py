@@ -142,6 +142,103 @@ def ping_grab_ready(
     )
 
 
+def ping_swing_summary(
+    date: str,
+    watching: int,
+    act_now: int,
+    blocked: int,
+    top_close: list[dict] | None = None,
+    cash_status: str = "",
+    pwa_url: str | None = None,
+) -> dict:
+    """
+    Once-a-day snapshot of the swing book. Fires on the first trigger_alerts
+    cron run after 09:00 SGT each weekday so the Multi Day Swing topic
+    has standing content even on quiet days when no ACT_NOW pings fire.
+
+    Args:
+        date: SGT date "YYYY-MM-DD"
+        watching: count of decisions in WATCHING state
+        act_now: count currently at ACT_NOW
+        blocked: count blocked by gates (CASH_PRIORITY, etc.)
+        top_close: up to 3 closest-to-trigger decisions, each with
+            {ticker, account, pct_to_trigger}
+        cash_status: short string like "Cash 5.0% — at floor"
+    """
+    lines = [f"📊 Swing Book · {date}"]
+
+    # Counts row — keep it dense.
+    bits = []
+    if watching:
+        bits.append(f"watching {watching}")
+    if act_now:
+        bits.append(f"⚡ ACT NOW {act_now}")
+    if blocked:
+        bits.append(f"blocked {blocked}")
+    if not bits:
+        bits.append("no live decisions")
+    lines.append(" · ".join(bits))
+
+    if cash_status:
+        lines.append(cash_status)
+
+    if top_close:
+        lines.append("")
+        lines.append("Closest to trigger:")
+        for c in top_close[:3]:
+            tk = c.get("ticker", "?")
+            acct = (c.get("account") or "").upper()
+            pct = c.get("pct_to_trigger", 0)
+            try:
+                pct_str = f"{abs(float(pct)) * 100:.1f}%"
+            except (TypeError, ValueError):
+                pct_str = "?"
+            lines.append(f"  · {tk} {acct} — {pct_str} to trigger")
+
+    if pwa_url:
+        lines.append(f"📱 {pwa_url}")
+
+    return send(
+        "\n".join(lines),
+        parse_mode="none",
+        message_thread_id=MULTI_DAY_SWING_TOPIC,
+    )
+
+
+def ping_macro_news_to_swing(
+    headline: str,
+    matched_tickers: list[str],
+    so_what: str = "",
+    source: str = "",
+    url: str = "",
+) -> dict:
+    """
+    Mirror copy of a macro-news ping to the Multi Day Swing topic when
+    the headline mentions one or more portfolio tickers. Lets the swing
+    topic surface news that's directly relevant to held positions
+    without forcing the user to flip to the Macro News topic.
+
+    Distinct from `ping_macro_news` (Macro News topic) by the route AND
+    by the leading line which calls out the matched tickers.
+    """
+    body = headline.strip()
+    if len(body) > 200:
+        body = body[:197] + "..."
+    tickers_str = " ".join(f"${t}" for t in matched_tickers[:5])
+    lines = [f"📍 NEWS · {tickers_str} · {body}"]
+    if so_what:
+        lines.append(f"💡 {so_what}")
+    if source:
+        lines.append(f"source: {source}")
+    if url:
+        lines.append(url)
+    return send(
+        "\n".join(lines),
+        parse_mode="none",
+        message_thread_id=MULTI_DAY_SWING_TOPIC,
+    )
+
+
 def ping_trigger_act_now(
     ticker: str,
     account: str,
