@@ -1,6 +1,7 @@
 import type { SnapshotRow, PositionRow, LivePriceRow } from "../data";
 import { Card } from "./Card";
 import { TrendingUp, TrendingDown, Wallet } from "lucide-react";
+import { toAcctCcy } from "../lib/sgxFx";
 
 function fmt(v: string | number | undefined, prefix = "$"): string {
   const n = Number(v);
@@ -96,6 +97,8 @@ function StatTile({ label, value, accent }: { label: string; value: string; acce
 export function PnlCard({
   label,
   currency,
+  account,
+  usdSgd,
   snapshot,
   positions,
   livePrices,
@@ -104,6 +107,10 @@ export function PnlCard({
 }: {
   label: string;
   currency: "USD" | "SGD";
+  /** "caspar" (USD base) or "sarah" (SGD base). Drives SGX-FX adjustment. */
+  account: "caspar" | "sarah";
+  /** Spot USD/SGD for FX-converting cross-currency holdings. */
+  usdSgd: number;
   snapshot: SnapshotRow | null;
   positions?: PositionRow[];
   livePrices?: Map<string, LivePriceRow>;
@@ -135,14 +142,22 @@ export function PnlCard({
   // value. This avoids double-counting options or losing FX precision for
   // Sarah's mixed-currency book.
   const posCount = positions?.length ?? 0;
-  const grabStockMktVal = positions?.reduce((sum, p) => sum + Number(p.mkt_val || 0), 0) ?? 0;
+  // Both grab-time and live mkt_val are FX-normalised to the account's base
+  // currency. SGX positions in Caspar's USD account convert SGD→USD; US
+  // positions in Sarah's SGD account convert USD→SGD. Without this, the
+  // delta between grab-time and live drifts by the FX-mismatch and the
+  // displayed NLV diverges from IBKR's authoritative number.
+  const grabStockMktVal = positions?.reduce((sum, p) => {
+    const t = (p.ticker || "").toUpperCase();
+    return sum + toAcctCcy(Number(p.mkt_val || 0), t, account, usdSgd);
+  }, 0) ?? 0;
   const liveStockMktVal = positions?.reduce((sum, p) => {
     const t = (p.ticker || "").toUpperCase();
     const lp = livePrices?.get(t);
-    if (lp && Number(lp.last) > 0) {
-      return sum + Number(p.qty || 0) * Number(lp.last);
-    }
-    return sum + Number(p.mkt_val || 0);
+    const rawMv = lp && Number(lp.last) > 0
+      ? Number(p.qty || 0) * Number(lp.last)
+      : Number(p.mkt_val || 0);
+    return sum + toAcctCcy(rawMv, t, account, usdSgd);
   }, 0) ?? 0;
   const stockDelta = liveStockMktVal - grabStockMktVal;
 
@@ -154,16 +169,15 @@ export function PnlCard({
   // this top-line is "snapshot ± live drift".
   const snapshotNlv = Number(snapshot.net_liq || 0);
   const liveNlv = snapshotNlv + stockDelta;
-  // Prefer live UPL when we have it; otherwise the snapshot's UPL.
+  // Prefer live UPL when we have it; otherwise the snapshot's UPL. Both
+  // legs are FX-normalised so SGX UPL doesn't double-count for Caspar.
   const liveUpl = positions?.reduce((sum, p) => {
     const t = (p.ticker || "").toUpperCase();
     const lp = livePrices?.get(t);
-    if (lp && Number(lp.last) > 0) {
-      const qty = Number(p.qty || 0);
-      const cost = Number(p.avg_cost || 0);
-      return sum + qty * (Number(lp.last) - cost);
-    }
-    return sum + Number(p.upl || 0);
+    const rawUpl = lp && Number(lp.last) > 0
+      ? Number(p.qty || 0) * (Number(lp.last) - Number(p.avg_cost || 0))
+      : Number(p.upl || 0);
+    return sum + toAcctCcy(rawUpl, t, account, usdSgd);
   }, 0) ?? 0;
   const uplPctVal = liveNlv > 0 ? liveUpl / liveNlv : Number(snapshot.upl_pct || 0);
   const uplPct = {
@@ -199,6 +213,19 @@ export function PnlCard({
             style={{ background: pnlColor, boxShadow: `0 0 6px ${pnlColor}60` }}
           />
           <span className="text-[length:var(--t-sm)] font-semibold text-slate-300">{label}</span>
+          {/* Currency chip — keeps Caspar (USD) symmetric with Sarah (SGD)
+              so neither account looks unlabelled at a glance. */}
+          <span
+            className="text-[10px] font-semibold tracking-wider px-1.5 py-0.5 rounded font-tabular"
+            style={{
+              background: "rgba(148,163,184,0.10)",
+              color: "rgb(148 163 184)",
+              border: "1px solid rgba(148,163,184,0.18)",
+            }}
+            title={currency === "SGD" ? "Singapore Dollars" : "US Dollars"}
+          >
+            {currency}
+          </span>
         </div>
         {/* Freshness chip — replaces the static "YYYY-MM-DD" tag with a
             relative "X min ago" so the user can see at a glance how live

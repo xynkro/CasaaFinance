@@ -683,19 +683,28 @@ def main() -> int:
     from datetime import datetime, timedelta, timezone as _tz
     fresh_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=HOT_NEWS_FRESH_MIN)).isoformat()
 
+    # Gate widened: a headline qualifies if it's HOT (keyword match) OR has
+    # a "so what" interpretation. The interpret_headline rule set covers
+    # OPEC / earnings / guidance which aren't in HOT_KEYWORDS but still
+    # warrant a ping — the so-what line tells the user what direction the
+    # tape may move.
+    def _ping_worthy(n: dict) -> bool:
+        return bool(n.get("hot") or n.get("so_what"))
+
     macro_news_plan: list[dict] = [
         n for n in macro.news
-        if n.get("hot")
+        if _ping_worthy(n)
         and n.get("id")
         and (n.get("datetime") or "") >= fresh_cutoff
         and f"news:{n['id']}" not in prior_macro_alerts
     ][:HOT_NEWS_PING_CAP]
 
+    n_worthy = sum(1 for n in macro.news if _ping_worthy(n))
+    n_fresh = sum(1 for n in macro.news if _ping_worthy(n) and (n.get("datetime") or "") >= fresh_cutoff)
     logger.info(
         f"Macro plan: blackout={'YES' if macro_blackout_plan else 'no'} | "
-        f"news={len(macro_news_plan)} of {sum(1 for n in macro.news if n.get('hot'))} hot "
-        f"({sum(1 for n in macro.news if n.get('hot') and (n.get('datetime') or '') >= fresh_cutoff)} fresh, "
-        f"{len(prior_macro_alerts)} already alerted)"
+        f"news={len(macro_news_plan)} of {n_worthy} ping-worthy "
+        f"({n_fresh} fresh, {len(prior_macro_alerts)} already alerted)"
     )
 
     if args.dry:
@@ -811,9 +820,13 @@ def main() -> int:
                 headline=n.get("headline", ""),
                 source=n.get("source", ""),
                 url=n.get("url", ""),
+                so_what=n.get("so_what", ""),
+                category=n.get("category", ""),
             )
             macro_pinged += 1
-            logger.info(f"  ✓ sent NEWS: {n.get('headline', '')[:60]}")
+            so_what_tag = " 💡" if n.get("so_what") else ""
+            cat_tag = f" [{n.get('category', '?')}]"
+            logger.info(f"  ✓ sent NEWS{cat_tag}{so_what_tag}: {n.get('headline', '')[:60]}")
         except Exception as e:
             logger.warning(f"  ✗ NEWS failed: {e}")
         macro_state_rows.append(S.MacroAlertStateRow(

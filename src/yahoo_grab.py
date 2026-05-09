@@ -159,8 +159,10 @@ def refresh_account(
     from src.schema import now_sgt_iso
     now_ts = now_sgt_iso()  # SGT-anchored so cloud + Mac writes sort consistently
     updated_rows: list[list[str]] = []
-    total_mkt_val = 0.0
-    total_upl = 0.0
+    total_mkt_val = 0.0          # raw sum (position-native currency)
+    total_upl = 0.0              # raw sum (position-native currency)
+    total_mkt_val_acct = 0.0     # FX-normalised to account base currency
+    total_upl_acct = 0.0         # FX-normalised to account base currency
 
     for pos in latest_positions:
         ticker = pos.get("ticker", "").strip()
@@ -181,6 +183,24 @@ def refresh_account(
         upl = (price - avg_cost) * qty
         total_mkt_val += mkt_val
         total_upl += upl
+
+        # ── FX-normalise to account base currency for the snapshot total ────
+        # SGX positions are quoted in SGD, US positions in USD. Caspar's
+        # account is USD-based, Sarah's is SGD-based. Without conversion, raw
+        # SGD gets double-counted as USD (or vice versa) and the snapshot NLV
+        # drifts away from IBKR's authoritative number.
+        is_sgx = ticker in SGX_TICKERS
+        if cfg["currency"] == "USD" and is_sgx:
+            mkt_val_acct = mkt_val / usdsgd  # SGD → USD
+            upl_acct = upl / usdsgd
+        elif cfg["currency"] == "SGD" and not is_sgx:
+            mkt_val_acct = mkt_val * usdsgd  # USD → SGD (Sarah's USD stocks)
+            upl_acct = upl * usdsgd
+        else:
+            mkt_val_acct = mkt_val
+            upl_acct = upl
+        total_mkt_val_acct += mkt_val_acct
+        total_upl_acct += upl_acct
 
         logger.info(f"  {ticker:8} qty={qty:6.0f}  last={price:10.4f}  mkt_val={mkt_val:10.2f}  upl={upl:+9.2f}")
 
@@ -228,19 +248,12 @@ def refresh_account(
     except (ValueError, TypeError):
         cash = 0.0
 
-    if cfg["currency"] == "SGD":
-        # Sarah's positions are USD, snapshot is SGD
-        net_liq = total_mkt_val * usdsgd + cash
-        upl_currency = total_upl * usdsgd
-        net_liq_prev = net_liq - upl_currency
-        upl_pct = upl_currency / net_liq_prev if net_liq_prev else 0
-        snap_row = [now_ts, f"{net_liq:.2f}", f"{cash:.2f}", f"{upl_currency:.2f}", f"{upl_pct:.4f}"]
-    else:
-        # Caspar: USD for US stocks, SGD for SGX stocks — approximate USD value
-        net_liq = total_mkt_val + cash
-        net_liq_prev = net_liq - total_upl
-        upl_pct = total_upl / net_liq_prev if net_liq_prev else 0
-        snap_row = [now_ts, f"{net_liq:.2f}", f"{cash:.2f}", f"{total_upl:.2f}", f"{upl_pct:.4f}"]
+    # FX-normalised totals already in account base currency (computed above
+    # per-position so SGX SGD doesn't get treated as USD or vice versa).
+    net_liq = total_mkt_val_acct + cash
+    net_liq_prev = net_liq - total_upl_acct
+    upl_pct = total_upl_acct / net_liq_prev if net_liq_prev else 0
+    snap_row = [now_ts, f"{net_liq:.2f}", f"{cash:.2f}", f"{total_upl_acct:.2f}", f"{upl_pct:.4f}"]
 
     logger.info(f"  Snapshot: net_liq={snap_row[1]} cash={cash:.2f} upl={snap_row[3]} upl_pct={snap_row[4]}")
 

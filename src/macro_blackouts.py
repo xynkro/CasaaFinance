@@ -72,6 +72,78 @@ def is_hot_news(headline: str, summary: str = "") -> bool:
     return any(kw in text for kw in HOT_KEYWORDS)
 
 
+# ── "So what" interpretation layer ─────────────────────────────────────────
+# Map keyword patterns to short trader-actionable interpretations. Built as
+# a list of (predicate, interpretation) so the first match wins — order
+# from most-specific to most-generic.
+#
+# Predicate is a tuple of required substrings (all must appear in the
+# lowercased headline+summary). Empty tuple matches any text.
+#
+# This is a heuristic shortcut — no LLM call. Cheap, deterministic, and
+# good enough for "I see this headline at 9pm, what direction does it
+# nudge tomorrow's open?" Replace with an LLM call if/when you want
+# nuance per-headline (cost: ~$0.002/Sonnet per item × 27 hot/day = ~$1/mo).
+SO_WHAT_RULES: list[tuple[tuple[str, ...], str]] = [
+    # Geopolitics / energy
+    (("iran", "tanker"),     "Crude supply risk → energy/defense bid, broad equities risk-off"),
+    (("iran", "strait"),     "Crude supply risk → energy/defense bid, broad equities risk-off"),
+    (("iran", "strike"),     "Geopolitical shock → defensives + crude bid, equities lower"),
+    (("iran", "missile"),    "Geopolitical shock → defensives + crude bid, equities lower"),
+    (("opec", "cut"),        "Crude supply tightens → energy bid, transports/airlines pressure"),
+    (("opec", "production"), "Crude price impulse → energy sector reprices"),
+    (("oil", "tanker"),      "Crude supply risk → energy/defense bid"),
+    (("russia", "sanction"), "Energy + commodities bid, defense bid, EM risk-off"),
+    (("ukraine", "strike"),  "Risk-off; defense + energy bid"),
+    (("china", "tariff"),    "Risk-off; semis & exporters pressure, USD strength"),
+    (("china", "stimulus"),  "Materials + EM bid; commodities firm"),
+    # Fed / rates
+    (("rate cut",),          "Risk-on; growth/tech + small caps bid, USD weak, gold firm"),
+    (("powell", "dovish"),   "Risk-on; long-duration bid, USD weak"),
+    (("powell", "hawkish"),  "Risk-off; defensives bid, USD strong, gold pressured"),
+    (("rate hike",),         "Risk-off; growth pressured, USD strong, banks may bid"),
+    (("fomc",),              "Position carefully into FOMC — vol-skewed; intraday whipsaw common"),
+    (("fed", "minutes"),     "Vol pickup; check tone for hawkish/dovish skew"),
+    # Inflation prints
+    (("cpi", "hot"),         "Hawkish read → equities lower, USD up, gold pressured"),
+    (("cpi", "cool"),        "Dovish read → equities up, USD down, gold firm"),
+    (("ppi", "hot"),         "Margin-squeeze fear → growth + small caps pressured"),
+    # Jobs / growth
+    (("payroll", "miss"),    "Growth concern → cyclicals pressured, rate-cut bid for tech"),
+    (("payroll", "beat"),    "Growth ok → risk-on, banks bid, USD up"),
+    (("unemployment", "rise"), "Growth concern → defensives + rate-cut bets bid"),
+    (("recession",),         "Defensive rotation; long-duration + gold bid"),
+    # Politics / fiscal
+    (("tariff",),            "Risk-off; semis + multinationals pressured, USD strength"),
+    (("trade war",),         "Risk-off; broad equity pressure, defensives bid"),
+    (("shutdown",),          "Vol up; defensive rotation, T-bills wobble near deadline"),
+    (("election", "result"), "Sector rotation likely — read the winner's policy mix"),
+    # Single-name / micro
+    (("earnings", "miss"),   "Single-name event — limited macro spillover unless large-cap"),
+    (("earnings", "beat"),   "Single-name event — read the guide for the swing read"),
+    (("guidance", "cut"),    "Sector read-across; check peers for sympathy moves"),
+    # Generic "hot" fallback — anything that hit HOT_KEYWORDS but no specific rule
+    (("circuit breaker",),   "Severe vol event → expect broad gap on next session"),
+    (("crash",),             "Severe vol event → defensives + cash bid"),
+    (("rally",),             "Risk-on momentum — fade only with a clear setup"),
+]
+
+
+def interpret_headline(headline: str, summary: str = "") -> str:
+    """Return a short trader-actionable "so what" line, or "" if no rule matches.
+
+    The interpretation is one short sentence describing the directional
+    nudge — what to expect at the next open, which sectors to watch.
+    Pure keyword heuristic, no LLM. Good enough for 80% of macro pings;
+    swap in an LLM call later for the long tail.
+    """
+    text = (headline + " " + summary).lower()
+    for terms, interp in SO_WHAT_RULES:
+        if all(t in text for t in terms):
+            return interp
+    return ""
+
+
 @dataclass
 class MacroFeed:
     """One-shot snapshot of Finnhub news + US economic calendar.
@@ -98,37 +170,70 @@ class MacroFeed:
         feed._refresh_calendar(key, timeout)
         return feed
 
-    def _refresh_news(self, api_key: str, timeout: float) -> None:
-        try:
-            r = requests.get(
-                f"{FINNHUB_BASE}/news",
-                params={"category": "general", "token": api_key},
-                timeout=timeout,
-            )
-            r.raise_for_status()
-            raw = r.json()
-        except Exception as e:
-            log.warning("MacroFeed news fetch failed: %s", e)
-            return
+    # Finnhub general-news is Reuters-heavy. Pulling forex/crypto/merger
+    # broadens the source mix (Bloomberg, MarketWatch, CNBC, Yahoo, etc.)
+    # without exploding API quota — each call is one credit and we run
+    # this every 10 min. Order matters: `general` first so its items dominate
+    # the head of the list when timestamps tie.
+    NEWS_CATEGORIES = ("general", "forex", "crypto", "merger")
 
+    def _refresh_news(self, api_key: str, timeout: float) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        seen_urls: set[str] = set()
+        seen_ids: set[int] = set()
         out: list[dict] = []
-        for n in raw:
-            ts = datetime.fromtimestamp(n.get("datetime", 0), tz=timezone.utc)
-            if ts < cutoff:
+
+        for cat in self.NEWS_CATEGORIES:
+            try:
+                r = requests.get(
+                    f"{FINNHUB_BASE}/news",
+                    params={"category": cat, "token": api_key},
+                    timeout=timeout,
+                )
+                r.raise_for_status()
+                raw = r.json() or []
+            except Exception as e:
+                log.warning("MacroFeed news[%s] fetch failed: %s", cat, e)
                 continue
-            out.append({
-                "id": n.get("id"),
-                "datetime": ts.isoformat(),
-                "headline": n.get("headline", ""),
-                "summary": (n.get("summary") or "")[:200],
-                "source": n.get("source", ""),
-                "url": n.get("url", ""),
-                "hot": is_hot_news(n.get("headline", ""), n.get("summary", "")),
-            })
+
+            for n in raw:
+                ts = datetime.fromtimestamp(n.get("datetime", 0), tz=timezone.utc)
+                if ts < cutoff:
+                    continue
+                # Dedup across categories — Finnhub repeats the same item
+                # under multiple buckets fairly often.
+                nid = n.get("id")
+                url = n.get("url", "")
+                if nid and nid in seen_ids:
+                    continue
+                if url and url in seen_urls:
+                    continue
+                if nid:
+                    seen_ids.add(nid)
+                if url:
+                    seen_urls.add(url)
+                headline = n.get("headline", "")
+                summary = (n.get("summary") or "")[:200]
+                out.append({
+                    "id": nid,
+                    "datetime": ts.isoformat(),
+                    "headline": headline,
+                    "summary": summary,
+                    "source": n.get("source", ""),
+                    "url": url,
+                    "category": cat,
+                    "hot": is_hot_news(headline, summary),
+                    "so_what": interpret_headline(headline, summary),
+                })
+
         out.sort(key=lambda x: x["datetime"], reverse=True)
-        self.news = out[:30]
-        log.info("MacroFeed news: %d items (%d hot)", len(out), sum(1 for x in out if x["hot"]))
+        self.news = out[:60]  # was 30 — wider net since we pull 4 categories
+        sources = {x["source"] for x in self.news if x.get("source")}
+        log.info(
+            "MacroFeed news: %d items (%d hot) across %d sources from %s",
+            len(out), sum(1 for x in out if x["hot"]),
+            len(sources), ",".join(self.NEWS_CATEGORIES),
+        )
 
     def _refresh_calendar(self, api_key: str, timeout: float) -> None:
         try:

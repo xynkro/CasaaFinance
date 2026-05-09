@@ -92,6 +92,7 @@ function Dashboard() {
             exitPlans={data?.exitPlans ?? []}
             livePrices={data?.livePrices ?? new Map()}
             livePricesUpdatedAt={data?.livePricesUpdatedAt ?? ""}
+            usdSgd={Number(data?.macro?.usd_sgd) || 1.30}
             loading={loading && !data}
           />
         );

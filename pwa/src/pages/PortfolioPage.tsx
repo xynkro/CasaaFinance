@@ -40,6 +40,7 @@ export function PortfolioPage({
   exitPlans,
   livePrices,
   livePricesUpdatedAt,
+  usdSgd,
   loading,
 }: {
   casparSnapshot: SnapshotRow | null;
@@ -51,6 +52,9 @@ export function PortfolioPage({
   exitPlans: ExitPlanRow[];
   livePrices: Map<string, LivePriceRow>;
   livePricesUpdatedAt: string;
+  /** USD/SGD spot from the latest macro row. Drives SGX-FX adjustment so
+      Caspar's mixed-currency book displays a USD-equivalent NLV. */
+  usdSgd: number;
   loading: boolean;
 }) {
   const CasparPanel = (
@@ -59,6 +63,8 @@ export function PortfolioPage({
         <PnlCard
           label="Caspar"
           currency="USD"
+          account="caspar"
+          usdSgd={usdSgd}
           snapshot={casparSnapshot}
           positions={casparPositions}
           livePrices={livePrices}
@@ -86,6 +92,8 @@ export function PortfolioPage({
         <PnlCard
           label="Sarah"
           currency="SGD"
+          account="sarah"
+          usdSgd={usdSgd}
           snapshot={sarahSnapshot}
           positions={sarahPositions}
           livePrices={livePrices}

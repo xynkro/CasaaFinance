@@ -248,19 +248,32 @@ def ping_macro_news(
     headline: str,
     source: str = "",
     url: str = "",
+    so_what: str = "",
+    category: str = "",
 ) -> dict:
     """
     Edge-triggered hot-news headline ping. Fired when the macro_blackouts
-    poller catches a Finnhub general-news headline matching HOT_KEYWORDS
-    (fed/cpi/iran/tariff/etc.).
+    poller catches a Finnhub headline matching HOT_KEYWORDS (fed/cpi/iran/
+    tariff/etc.) across multiple categories (general, forex, crypto, merger).
 
     Sent EXACTLY ONCE per news_id (dedup tracked in macro_alerts_state).
     Capped at 3 per cron run so a Finnhub backlog catch-up doesn't flood.
+
+    Args:
+        headline: news headline (truncated at 200 chars)
+        source: publisher name (e.g. "Reuters", "Bloomberg")
+        url: link to the article
+        so_what: short trader-actionable interpretation
+                 (e.g. "Crude bid → energy/defense risk-on")
+        category: Finnhub category (general/forex/crypto/merger) for label
     """
     body = headline.strip()
     if len(body) > 200:
         body = body[:197] + "..."
-    lines = [f"📰 MACRO · {body}"]
+    cat_tag = f" · {category}" if category and category != "general" else ""
+    lines = [f"📰 MACRO{cat_tag} · {body}"]
+    if so_what:
+        lines.append(f"💡 {so_what}")
     if source:
         lines.append(f"source: {source}")
     if url:
