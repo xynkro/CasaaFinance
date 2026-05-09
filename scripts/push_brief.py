@@ -109,11 +109,18 @@ def _validate_payload(payload: dict, logger: logging.Logger) -> tuple[bool, str]
 
 
 def _push_daily(payload: dict, logger: logging.Logger, no_drive: bool = False) -> dict:
-    """Write a daily brief to daily_brief_latest sheet + Drive/Daily Briefs/."""
+    """Write a daily brief to daily_brief_latest sheet + Drive/Daily Briefs/.
+
+    Also fires a Multi Day Swing Telegram ping with headline + verdict +
+    top bullets so the topic carries daily content. Was previously only
+    in src/sync.py's daily-brief path — but the cron uses this script
+    directly, so the ping was never firing.
+    """
     from src.sync import load_env
     from src import sheets as sh
     from src import schema as S
     from src import drive as dr
+    from src import telegram as tg
 
     load_env()
     client = sh.authenticate()
@@ -154,15 +161,43 @@ def _push_daily(payload: dict, logger: logging.Logger, no_drive: bool = False) -
         except Exception as e:
             logger.warning(f"⚠ Drive write failed (non-fatal): {e}")
 
+    # ── Telegram → Multi Day Swing topic ────────────────────────────────
+    # Fires here (not in sync.py) because the cron driving the daily brief
+    # calls this script directly via stdin — sync.py's ping path is only
+    # used by the local `casaa sync` workflow. Without this call, Multi
+    # Day Swing has no daily content beyond ACT_NOW transitions.
+    try:
+        pwa_url = os.environ.get("PWA_URL") or "https://xynkro.github.io/CasaaFinance/"
+        tg.ping_daily_ready(
+            date=payload["date"],
+            pwa_url=pwa_url,
+            headline=payload.get("headline", ""),
+            verdict=payload.get("verdict", ""),
+            bullets=payload.get("bullets", []),
+            posture=payload.get("posture", ""),
+            drive_url=drive_url,
+        )
+        logger.info("✓ Telegram: Daily Brief → Multi Day Swing")
+    except Exception as e:
+        # Non-fatal — sheet/drive writes already succeeded, ping is bonus.
+        logger.warning(f"⚠ Telegram ping failed (non-fatal): {e}")
+
     return {"sheet_tab": "daily_brief_latest", "drive_file_id": drive_file_id, "drive_url": drive_url}
 
 
 def _push_wsr(payload: dict, logger: logging.Logger, no_drive: bool = False) -> dict:
-    """Write a WSR Lite or WSR Full to wsr_summary sheet + Drive folder."""
+    """Write a WSR Lite or WSR Full to wsr_summary sheet + Drive folder.
+
+    Also fires a Multi Day Swing Telegram ping so the swing topic gets
+    weekly content alongside the daily brief. Same wiring fix as
+    `_push_daily` — the cron uses this script directly so sync.py's
+    `ping_wsr_ready` was never running.
+    """
     from src.sync import load_env
     from src import sheets as sh
     from src import schema as S
     from src import drive as dr
+    from src import telegram as tg
 
     load_env()
     client = sh.authenticate()
@@ -235,6 +270,27 @@ def _push_wsr(payload: dict, logger: logging.Logger, no_drive: bool = False) -> 
                 logger.info(f"✓ Sheet write: wsr_archive (new file)")
         except Exception as e:
             logger.warning(f"⚠ Drive/archive write failed (non-fatal): {e}")
+
+    # ── Telegram → Multi Day Swing topic ────────────────────────────────
+    # Fires here (not in sync.py) for the same reason as _push_daily:
+    # the WSR cron pipes JSON into this script directly, never going
+    # through sync.py's ping path.
+    try:
+        pwa_url = os.environ.get("PWA_URL") or "https://xynkro.github.io/CasaaFinance/"
+        # ping_wsr_ready already exists; extend its body to carry the
+        # verdict + macro_read + action summary so the topic is readable.
+        tg.ping_wsr_ready(
+            date=payload["date"],
+            pwa_url=pwa_url,
+            kind=("WSR Lite" if btype == "wsr_lite" else "WSR Full"),
+            verdict=payload.get("verdict", ""),
+            macro_read=payload.get("macro_read", ""),
+            action_summary=payload.get("action_summary", ""),
+            drive_url=drive_url,
+        )
+        logger.info("✓ Telegram: WSR → Multi Day Swing")
+    except Exception as e:
+        logger.warning(f"⚠ Telegram ping failed (non-fatal): {e}")
 
     return {"sheet_tab": "wsr_summary", "drive_file_id": drive_file_id, "drive_url": drive_url}
 

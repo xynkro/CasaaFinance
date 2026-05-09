@@ -86,11 +86,58 @@ def send(
 # Multi Day Swing topic — FinancePWA's lane
 # ────────────────────────────────────────────────────────────────────
 
-def ping_daily_ready(date: str, pwa_url: str | None = None) -> dict:
-    """Short 'Daily Brief ready' ping with optional PWA URL line."""
-    lines = [f"📰 Daily Brief {date} ready"]
+def ping_daily_ready(
+    date: str,
+    pwa_url: str | None = None,
+    headline: str = "",
+    verdict: str = "",
+    bullets: list[str] | None = None,
+    posture: str = "",
+    drive_url: str | None = None,
+) -> dict:
+    """
+    Daily-brief Telegram digest. Routed to Multi Day Swing topic so the
+    swing book has standing daily content beyond ACT_NOW transitions.
+
+    Includes the brief's headline + verdict + top bullets + posture inline
+    so the user can read the topic and skip opening the PWA. The full
+    brief is still in the Drive doc + the daily_brief_latest sheet tab.
+
+    Args:
+        date: brief date "YYYY-MM-DD"
+        pwa_url: PWA link (added as footer)
+        headline: 1-line summary (e.g. "SPX +0.4%, semis lead")
+        verdict: brain-derived verdict ("constructive" / "cautious" / etc.)
+        bullets: up to 3 takeaway bullets
+        posture: cash/exposure recommendation 1-liner
+        drive_url: link to full brief markdown in Drive
+    """
+    lines = [f"📰 Daily Brief · {date}"]
+    if headline:
+        lines.append(headline.strip())
+    if verdict:
+        lines.append(f"verdict: {verdict.strip()}")
+    if bullets:
+        lines.append("")
+        for b in bullets[:3]:
+            b = (b or "").strip()
+            if not b:
+                continue
+            # Truncate per-bullet to keep the Telegram preview readable.
+            if len(b) > 140:
+                b = b[:137] + "..."
+            lines.append(f"• {b}")
+    if posture:
+        lines.append("")
+        lines.append(f"posture: {posture.strip()[:120]}")
+    footer_bits = []
+    if drive_url:
+        footer_bits.append(f"📄 {drive_url}")
     if pwa_url:
-        lines.append(f"📱 PWA: {pwa_url}")
+        footer_bits.append(f"📱 {pwa_url}")
+    if footer_bits:
+        lines.append("")
+        lines.extend(footer_bits)
     return send(
         "\n".join(lines),
         parse_mode="none",
@@ -98,11 +145,52 @@ def ping_daily_ready(date: str, pwa_url: str | None = None) -> dict:
     )
 
 
-def ping_wsr_ready(date: str, pwa_url: str | None = None) -> dict:
-    """Short 'Weekly Strategy ready' ping with optional PWA URL line."""
-    lines = [f"📊 Weekly Strategy {date} ready"]
+def ping_wsr_ready(
+    date: str,
+    pwa_url: str | None = None,
+    kind: str = "WSR",
+    verdict: str = "",
+    macro_read: str = "",
+    action_summary: str = "",
+    drive_url: str | None = None,
+) -> dict:
+    """
+    Weekly Strategy Review digest. Routes to Multi Day Swing topic with
+    verdict + macro read + action summary inline so the topic carries
+    the headline content (full doc still in Drive).
+
+    Args:
+        date: review date "YYYY-MM-DD"
+        pwa_url: PWA link (footer)
+        kind: "WSR Lite" | "WSR Full" — appears in the title line
+        verdict: brain-derived verdict
+        macro_read: 1-paragraph macro-environment read
+        action_summary: this-week action items
+        drive_url: link to full markdown
+    """
+    lines = [f"📊 {kind} · {date}"]
+    if verdict:
+        lines.append(f"verdict: {verdict.strip()}")
+    if macro_read:
+        body = macro_read.strip()
+        if len(body) > 220:
+            body = body[:217] + "..."
+        lines.append("")
+        lines.append(body)
+    if action_summary:
+        body = action_summary.strip()
+        if len(body) > 220:
+            body = body[:217] + "..."
+        lines.append("")
+        lines.append(f"Action: {body}")
+    footer_bits = []
+    if drive_url:
+        footer_bits.append(f"📄 {drive_url}")
     if pwa_url:
-        lines.append(f"📱 PWA: {pwa_url}")
+        footer_bits.append(f"📱 {pwa_url}")
+    if footer_bits:
+        lines.append("")
+        lines.extend(footer_bits)
     return send(
         "\n".join(lines),
         parse_mode="none",
@@ -135,69 +223,6 @@ def ping_grab_ready(
     ]
     if pwa_url:
         lines.append(f"📱 PWA: {pwa_url}")
-    return send(
-        "\n".join(lines),
-        parse_mode="none",
-        message_thread_id=MULTI_DAY_SWING_TOPIC,
-    )
-
-
-def ping_swing_summary(
-    date: str,
-    watching: int,
-    act_now: int,
-    blocked: int,
-    top_close: list[dict] | None = None,
-    cash_status: str = "",
-    pwa_url: str | None = None,
-) -> dict:
-    """
-    Once-a-day snapshot of the swing book. Fires on the first trigger_alerts
-    cron run after 09:00 SGT each weekday so the Multi Day Swing topic
-    has standing content even on quiet days when no ACT_NOW pings fire.
-
-    Args:
-        date: SGT date "YYYY-MM-DD"
-        watching: count of decisions in WATCHING state
-        act_now: count currently at ACT_NOW
-        blocked: count blocked by gates (CASH_PRIORITY, etc.)
-        top_close: up to 3 closest-to-trigger decisions, each with
-            {ticker, account, pct_to_trigger}
-        cash_status: short string like "Cash 5.0% — at floor"
-    """
-    lines = [f"📊 Swing Book · {date}"]
-
-    # Counts row — keep it dense.
-    bits = []
-    if watching:
-        bits.append(f"watching {watching}")
-    if act_now:
-        bits.append(f"⚡ ACT NOW {act_now}")
-    if blocked:
-        bits.append(f"blocked {blocked}")
-    if not bits:
-        bits.append("no live decisions")
-    lines.append(" · ".join(bits))
-
-    if cash_status:
-        lines.append(cash_status)
-
-    if top_close:
-        lines.append("")
-        lines.append("Closest to trigger:")
-        for c in top_close[:3]:
-            tk = c.get("ticker", "?")
-            acct = (c.get("account") or "").upper()
-            pct = c.get("pct_to_trigger", 0)
-            try:
-                pct_str = f"{abs(float(pct)) * 100:.1f}%"
-            except (TypeError, ValueError):
-                pct_str = "?"
-            lines.append(f"  · {tk} {acct} — {pct_str} to trigger")
-
-    if pwa_url:
-        lines.append(f"📱 {pwa_url}")
-
     return send(
         "\n".join(lines),
         parse_mode="none",

@@ -740,22 +740,6 @@ def main() -> int:
         f"({n_fresh} fresh, {len(prior_macro_alerts)} already alerted)"
     )
 
-    # ── LLM "so what" enrichment (Sonnet) ──────────────────────────────
-    # Replaces the keyword-heuristic `so_what` with a 1-sentence WSJ-style
-    # interpretation. Only enriches the items we're about to ping (cap = 3
-    # per run × dedup), so cost stays under ~$1/mo. Falls back silently to
-    # the heuristic line if ANTHROPIC_API_KEY is unset or any call fails.
-    if macro_news_plan:
-        try:
-            from src.news_interpret import enrich_news_items
-            enrich_news_items(macro_news_plan)
-            logger.info(
-                f"  · enriched {sum(1 for n in macro_news_plan if n.get('so_what'))}"
-                f"/{len(macro_news_plan)} headlines with LLM so-what"
-            )
-        except Exception as e:
-            logger.warning(f"  · LLM enrichment failed (using heuristic): {e}")
-
     # ── Portfolio-ticker mirror plan (B) ───────────────────────────────
     # When a hot headline mentions any held ticker, also send a copy to
     # the Multi Day Swing topic so portfolio-relevant news lands in the
@@ -929,78 +913,6 @@ def main() -> int:
             updated_at=now_iso,
         ))
 
-    # ── Daily swing-book summary (A) ───────────────────────────────────
-    # One ping per SGT day, fired by whichever cron run lands first after
-    # 09:00 SGT. Gives Multi Day Swing a standing daily heartbeat showing
-    # watching count / blocked count / top 3 closest-to-trigger, even on
-    # quiet days when no ACT_NOW transitions fire.
-    swing_summary_sent = False
-    try:
-        from datetime import datetime as _dt
-        from zoneinfo import ZoneInfo as _ZI
-        SGT = _ZI("Asia/Singapore")
-        now_sgt = _dt.now(SGT)
-        sgt_date = now_sgt.strftime("%Y-%m-%d")
-        sum_key = f"swing_summary:{sgt_date}"
-        # Fire window: 09:00-23:59 SGT, weekdays only. Skip weekends so
-        # the topic doesn't get an empty "watching 0" ping each Saturday.
-        in_window = (now_sgt.hour >= 9 and now_sgt.weekday() < 5)
-        if in_window and sum_key not in prior_macro_alerts:
-            # Compute counts from state_rows we just evaluated.
-            watching_n = sum(1 for r in state_rows if r.last_state in ("dormant", "ready", "close"))
-            act_now_n = sum(1 for r in state_rows if r.last_state == "act_now")
-            blocked_n = sum(1 for r in state_rows if r.blocking_gates)
-
-            # Top-3 closest-to-trigger by absolute pct distance.
-            close_rows: list[dict] = []
-            for r in state_rows:
-                if r.last_state == "act_now" or not r.entry_price:
-                    continue
-                pct = abs(r.current_price - r.entry_price) / r.entry_price
-                close_rows.append({
-                    "ticker": r.ticker,
-                    "account": r.account,
-                    "pct_to_trigger": pct,
-                })
-            close_rows.sort(key=lambda c: c["pct_to_trigger"])
-            top_close = close_rows[:3]
-
-            # Cash status — best-effort from exposure_rec (full string if set).
-            cash_status = ""
-            if exposure_rec:
-                cash_status = f"Posture: {exposure_rec[:60]}"
-
-            try:
-                tg.ping_swing_summary(
-                    date=sgt_date,
-                    watching=watching_n,
-                    act_now=act_now_n,
-                    blocked=blocked_n,
-                    top_close=top_close,
-                    cash_status=cash_status,
-                    pwa_url=PWA_URL,
-                )
-                swing_summary_sent = True
-                logger.info(
-                    f"  ✓ sent SWING SUMMARY: watching={watching_n} act_now={act_now_n} "
-                    f"blocked={blocked_n} top_close={len(top_close)}"
-                )
-                macro_state_rows.append(S.MacroAlertStateRow(
-                    event_key=sum_key,
-                    event_type="swing_summary",
-                    event_summary=f"watching={watching_n} act_now={act_now_n} blocked={blocked_n}",
-                    event_time=now_sgt.isoformat(),
-                    alerted_at=now_iso,
-                    updated_at=now_iso,
-                ))
-            except Exception as e:
-                logger.warning(f"  ✗ SWING SUMMARY failed: {e}")
-        else:
-            why = "outside window" if not in_window else "already sent today"
-            logger.info(f"  · swing summary skipped ({why})")
-    except Exception as e:
-        logger.warning(f"  · swing summary block error: {e}")
-
     if macro_state_rows:
         upsert_macro_alert_state(client, macro_state_rows, logger)
 
@@ -1010,7 +922,6 @@ def main() -> int:
         + (f", {soft_sent}/{len(soft_fires)} close" if include_close else "")
         + (f", {macro_pinged} macro" if macro_pinged else "")
         + (f", {swing_mirrored} swing-mirror" if swing_mirrored else "")
-        + (", swing summary ✓" if swing_summary_sent else "")
         + (f"; {total_deferred} deferred by macro blackout" if total_deferred else "")
     )
     return 0
