@@ -12,3 +12,4 @@ requests==2.33.1
 requests-oauthlib==2.0.0
 tradingview-ta==3.3.0
 yfinance==1.2.2
+beautifulsoup4==4.14.3

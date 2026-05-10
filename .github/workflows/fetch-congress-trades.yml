@@ -1,0 +1,60 @@
+name: Fetch Congress Trades — Daily CapitolTrades Scrape
+
+# Scrapes Congressional trade filings from CapitolTrades.com and appends
+# new rows (deduped by filing_id) to the congress_trades sheet.
+#
+# STOCK Act mandates filings within 45 days of trade execution, observed
+# lag is 7-30 days. Daily polling is more than enough — there's no
+# benefit to going faster.
+#
+# Schedule: 22:30 UTC = 06:30 SGT next day, Mon-Fri.
+
+on:
+  schedule:
+    - cron: "30 22 * * 0-4"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+      days:
+        description: "Lookback window in days (default 14)"
+        type: string
+        default: "14"
+      max_pages:
+        description: "Max pages to scrape (default 30, ~12 rows each)"
+        type: string
+        default: "30"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetch-congress-trades
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OAUTH_TOKEN_JSON:    ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:            ${{ secrets.SHEET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Scrape CapitolTrades
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          if [ -n "${{ inputs.days }}" ]; then ARGS="$ARGS --days ${{ inputs.days }}"; fi
+          if [ -n "${{ inputs.max_pages }}" ]; then ARGS="$ARGS --max-pages ${{ inputs.max_pages }}"; fi
+          python scripts/fetch_congress_trades.py $ARGS
