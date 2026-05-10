@@ -1,0 +1,55 @@
+name: Insider Pulse Digest — Daily Telegram
+
+# Sends one consolidated digest message to the "Insider Trading" topic
+# in the Finance & Trading Telegram supergroup. Reads today's confluence
+# signals + recent CapitolTrades filings + flagged unmapped recipients.
+#
+# Schedule: 23:15 UTC = 07:15 SGT next day, Mon-Fri
+# (after fetch+screener, before daily-brief at 07:43).
+#
+# REQUIRED SECRET (one-time setup): TELEGRAM_INSIDER_TRADING_TOPIC
+# Caspar creates the topic manually in the supergroup, finds its
+# message_thread_id via getUpdates, and adds it as a repo secret.
+# Until configured, this workflow runs but the send is a no-op.
+
+on:
+  schedule:
+    - cron: "15 23 * * 0-4"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: insider-pulse-digest
+  cancel-in-progress: true
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OAUTH_TOKEN_JSON:                 ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:                         ${{ secrets.SHEET_ID }}
+      TELEGRAM_BOT_TOKEN:               ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_INSIDER_TRADING_TOPIC:   ${{ secrets.TELEGRAM_INSIDER_TRADING_TOPIC }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Send Insider Pulse digest
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          python scripts/insider_pulse_digest.py $ARGS

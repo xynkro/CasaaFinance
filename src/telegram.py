@@ -35,6 +35,16 @@ FINANCE_CHAT_ID = os.environ.get("TELEGRAM_FINANCE_CHAT_ID", "-1003942004211")
 MULTI_DAY_SWING_TOPIC = int(os.environ.get("TELEGRAM_MULTI_DAY_SWING_TOPIC", "3"))
 MACRO_NEWS_TOPIC = int(os.environ.get("TELEGRAM_MACRO_NEWS_TOPIC", "6"))
 
+# Insider Trading topic — created by Caspar manually in the Finance &
+# Trading supergroup. Topic ID discovered via getUpdates after first
+# message lands in the topic, then set as repo secret. Until configured,
+# `ping_insider_pulse` is a no-op (graceful skip — strategy still works,
+# digest just doesn't send).
+_insider_topic_raw = os.environ.get("TELEGRAM_INSIDER_TRADING_TOPIC", "").strip()
+INSIDER_TRADING_TOPIC: int | None = (
+    int(_insider_topic_raw) if _insider_topic_raw.isdigit() else None
+)
+
 # Personal-chat fallback — not used by the production helpers below
 # but kept as a backstop for ad-hoc scripts that pre-date routing.
 PERSONAL_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "922547929")
@@ -453,5 +463,112 @@ def ping_macro_news(
         "\n".join(lines),
         parse_mode="HTML",
         message_thread_id=MACRO_NEWS_TOPIC,
+        disable_web_page_preview=True,
+    )
+
+
+# ────────────────────────────────────────────────────────────────────
+# Insider Trading topic — gov spending confluence pulse
+# ────────────────────────────────────────────────────────────────────
+
+def ping_insider_pulse(
+    date: str,
+    confluence_picks: list[dict] | None = None,
+    capitol_filings: list[dict] | None = None,
+    unmapped: list[dict] | None = None,
+    pwa_url: str | None = None,
+) -> dict:
+    """
+    Daily Insider Trading topic digest. Single message containing:
+      - 🎯 CONFLUENCE PICKS (top 3 from gov_confluence_signals)
+      - 🏛 CAPITOL TRADES (top 3 from congress_trades by amount)
+      - ⚠ UNMAPPED RECIPIENTS (review for ticker mapping addition)
+
+    Args:
+        date: ISO YYYY-MM-DD
+        confluence_picks: list of dicts with keys {ticker, score, tier,
+            strategy, action, thesis, contracts_dollars, congress_dollars,
+            insider_dollars, contract_count, congress_count, insider_count}
+        capitol_filings: list of dicts with keys {politician_name, party,
+            chamber, ticker, transaction_type, amount_min, amount_max,
+            filing_date}
+        unmapped: list of dicts with keys {recipient_name, total_amount,
+            agency} for the unmapped-recipients review queue
+        pwa_url: optional PWA link for footer
+
+    Returns:
+        Telegram API response dict, or {"skipped": ...} if topic not configured.
+
+    HTML parse mode + disable_web_page_preview to keep formatting tight
+    and avoid auto-link cards under the message.
+    """
+    if INSIDER_TRADING_TOPIC is None:
+        return {"skipped": "TELEGRAM_INSIDER_TRADING_TOPIC not configured"}
+
+    import html
+    lines = [f"📊 <b>INSIDER PULSE</b> · {html.escape(date)}"]
+
+    # ── Confluence picks ──────────────────────────────────────────────
+    picks = list(confluence_picks or [])
+    if picks:
+        lines.append("")
+        lines.append("🎯 <b>CONFLUENCE PICKS</b>")
+        for i, p in enumerate(picks[:3], start=1):
+            tk = html.escape(str(p.get("ticker", "?")))
+            score = float(p.get("score", 0))
+            tier = str(p.get("tier", "")) or "-"
+            strat = html.escape(str(p.get("strategy", "WATCH") or "WATCH"))
+            thesis = html.escape(str(p.get("thesis", ""))[:140])
+            action = html.escape(str(p.get("action", ""))[:160])
+            lines.append(f"{i}. <b>${tk}</b> — score {score:.0f} · Tier {tier}")
+            if action:
+                lines.append(f"   {action}")
+            elif thesis:
+                lines.append(f"   {thesis}")
+            arrow = "🟢" if strat in ("BUY_DIP", "LONG_CALL", "PMCC") else "👀"
+            lines.append(f"   → {arrow} {strat}")
+    else:
+        lines.append("")
+        lines.append("🎯 <b>CONFLUENCE PICKS</b>")
+        lines.append("   <i>no signals scored ≥70 today</i>")
+
+    # ── Capitol Trades ────────────────────────────────────────────────
+    filings = list(capitol_filings or [])
+    if filings:
+        lines.append("")
+        lines.append("🏛 <b>CAPITOL TRADES</b> (top by amount)")
+        for f in filings[:5]:
+            pol = html.escape(str(f.get("politician_name", "?"))[:25])
+            party = str(f.get("party", ""))[:1]
+            chamber = str(f.get("chamber", ""))[:5]
+            tk = html.escape(str(f.get("ticker", "?")))
+            ttype = html.escape(str(f.get("transaction_type", "?")).upper())
+            amax = float(f.get("amount_max", 0))
+            amin = float(f.get("amount_min", 0))
+            arrow = "🟢" if ttype.lower() == "buy" else "🔴"
+            lines.append(
+                f"  {arrow} {pol} ({party}-{chamber}) → ${tk} {ttype} "
+                f"<code>${amin/1e3:.0f}K-${amax/1e3:.0f}K</code>"
+            )
+
+    # ── Unmapped flagged ──────────────────────────────────────────────
+    flagged = list(unmapped or [])
+    if flagged:
+        lines.append("")
+        lines.append("⚠ <b>UNMAPPED RECIPIENTS</b> (review)")
+        for u in flagged[:3]:
+            name = html.escape(str(u.get("recipient_name", "?"))[:50])
+            amount = float(u.get("total_amount", 0))
+            lines.append(f"  · <code>${amount/1e6:.1f}M</code> — {name}")
+
+    # Footer
+    if pwa_url:
+        lines.append("")
+        lines.append(f"📱 {html.escape(pwa_url)}")
+
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=INSIDER_TRADING_TOPIC,
         disable_web_page_preview=True,
     )
