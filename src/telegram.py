@@ -246,20 +246,26 @@ def ping_macro_news_to_swing(
     Distinct from `ping_macro_news` (Macro News topic) by the route AND
     by the leading line which calls out the matched tickers.
     """
+    # HTML parse mode + inline-linked source — same treatment as
+    # ping_macro_news so the swing-mirror copy isn't visually noisier
+    # than the Macro News original.
+    import html
     body = headline.strip()
     if len(body) > 200:
         body = body[:197] + "..."
     tickers_str = " ".join(f"${t}" for t in matched_tickers[:5])
-    lines = [f"📍 NEWS · {tickers_str} · {body}"]
+    lines = [f"📍 NEWS · {html.escape(tickers_str)} · {html.escape(body)}"]
     if so_what:
-        lines.append(f"💡 {so_what}")
-    if source:
-        lines.append(f"source: {source}")
-    if url:
-        lines.append(url)
+        lines.append(f"💡 {html.escape(so_what)}")
+    if source and url:
+        lines.append(f'🔗 <a href="{html.escape(url, quote=True)}">{html.escape(source)}</a>')
+    elif source:
+        lines.append(f"source: {html.escape(source)}")
+    elif url:
+        lines.append(html.escape(url))
     return send(
         "\n".join(lines),
-        parse_mode="none",
+        parse_mode="HTML",
         message_thread_id=MULTI_DAY_SWING_TOPIC,
     )
 
@@ -389,19 +395,29 @@ def ping_macro_news(
                  (e.g. "Crude bid → energy/defense risk-on")
         category: Finnhub category (general/forex/crypto/merger) for label
     """
+    # HTML parse mode lets us collapse "source: Bloomberg" + raw URL line
+    # into one inline link — `[source](url)`-style — which kills the
+    # "headline appears twice" visual when the URL slug echoed the
+    # headline (e.g. bloomberg.com/news/articles/.../iran-tanker-strait).
+    import html
     body = headline.strip()
     if len(body) > 200:
         body = body[:197] + "..."
     cat_tag = f" · {category}" if category and category != "general" else ""
-    lines = [f"📰 MACRO{cat_tag} · {body}"]
+    lines = [f"📰 MACRO{cat_tag} · {html.escape(body)}"]
     if so_what:
-        lines.append(f"💡 {so_what}")
-    if source:
-        lines.append(f"source: {source}")
-    if url:
-        lines.append(url)
+        lines.append(f"💡 {html.escape(so_what)}")
+    # Inline-link the source name; falls back to plain source text if no URL,
+    # or the bare URL if no source name (rare — Finnhub/RSS items always
+    # carry a source).
+    if source and url:
+        lines.append(f'🔗 <a href="{html.escape(url, quote=True)}">{html.escape(source)}</a>')
+    elif source:
+        lines.append(f"source: {html.escape(source)}")
+    elif url:
+        lines.append(html.escape(url))
     return send(
         "\n".join(lines),
-        parse_mode="none",
+        parse_mode="HTML",
         message_thread_id=MACRO_NEWS_TOPIC,
     )
