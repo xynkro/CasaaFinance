@@ -51,13 +51,26 @@ FINNHUB_BASE = "https://finnhub.io/api/v1"
 BLACKOUT_BEFORE_MIN = 15
 BLACKOUT_AFTER_MIN  = 5
 
-# Keywords for hot-topic news that could move markets sharply. Preserved
-# verbatim from ZeroDTE so cross-project hot-news classification agrees.
+# Keywords for hot-topic news that could move markets sharply. Drives the
+# only filter the macro-news cron applies — a headline pings if any of
+# these substrings appear in the headline or summary. Originally aligned
+# with ZeroDTE's list; extended here with a few macro-relevant terms
+# (opec, recession, sanction, dovish, hawkish, oil tanker) that previously
+# slipped through the gate but were caught by the now-deleted
+# interpret_headline heuristic.
 HOT_KEYWORDS = [
+    # Fed / rates
     "fed", "fomc", "powell", "rate cut", "rate hike", "inflation",
-    "cpi", "ppi", "jobs", "payroll", "unemployment", "gdp",
-    "war", "strike", "missile", "attack", "iran", "russia", "ukraine", "china",
-    "tariff", "trump", "biden", "election", "shutdown",
+    "cpi", "ppi", "dovish", "hawkish",
+    # Jobs / growth
+    "jobs", "payroll", "unemployment", "gdp", "recession",
+    # Geopolitics / energy
+    "war", "strike", "missile", "attack", "sanction",
+    "iran", "russia", "ukraine", "china",
+    "opec", "oil tanker", "crude supply",
+    # Politics / fiscal
+    "tariff", "trade war", "trump", "biden", "election", "shutdown",
+    # Market structure
     "spx", "spy", "circuit breaker", "crash", "rally",
 ]
 
@@ -70,78 +83,6 @@ def is_hot_news(headline: str, summary: str = "") -> bool:
     """
     text = (headline + " " + summary).lower()
     return any(kw in text for kw in HOT_KEYWORDS)
-
-
-# ── "So what" interpretation layer ─────────────────────────────────────────
-# Map keyword patterns to short trader-actionable interpretations. Built as
-# a list of (predicate, interpretation) so the first match wins — order
-# from most-specific to most-generic.
-#
-# Predicate is a tuple of required substrings (all must appear in the
-# lowercased headline+summary). Empty tuple matches any text.
-#
-# This is a heuristic shortcut — no LLM call. Cheap, deterministic, and
-# good enough for "I see this headline at 9pm, what direction does it
-# nudge tomorrow's open?" Replace with an LLM call if/when you want
-# nuance per-headline (cost: ~$0.002/Sonnet per item × 27 hot/day = ~$1/mo).
-SO_WHAT_RULES: list[tuple[tuple[str, ...], str]] = [
-    # Geopolitics / energy
-    (("iran", "tanker"),     "Crude supply risk → energy/defense bid, broad equities risk-off"),
-    (("iran", "strait"),     "Crude supply risk → energy/defense bid, broad equities risk-off"),
-    (("iran", "strike"),     "Geopolitical shock → defensives + crude bid, equities lower"),
-    (("iran", "missile"),    "Geopolitical shock → defensives + crude bid, equities lower"),
-    (("opec", "cut"),        "Crude supply tightens → energy bid, transports/airlines pressure"),
-    (("opec", "production"), "Crude price impulse → energy sector reprices"),
-    (("oil", "tanker"),      "Crude supply risk → energy/defense bid"),
-    (("russia", "sanction"), "Energy + commodities bid, defense bid, EM risk-off"),
-    (("ukraine", "strike"),  "Risk-off; defense + energy bid"),
-    (("china", "tariff"),    "Risk-off; semis & exporters pressure, USD strength"),
-    (("china", "stimulus"),  "Materials + EM bid; commodities firm"),
-    # Fed / rates
-    (("rate cut",),          "Risk-on; growth/tech + small caps bid, USD weak, gold firm"),
-    (("powell", "dovish"),   "Risk-on; long-duration bid, USD weak"),
-    (("powell", "hawkish"),  "Risk-off; defensives bid, USD strong, gold pressured"),
-    (("rate hike",),         "Risk-off; growth pressured, USD strong, banks may bid"),
-    (("fomc",),              "Position carefully into FOMC — vol-skewed; intraday whipsaw common"),
-    (("fed", "minutes"),     "Vol pickup; check tone for hawkish/dovish skew"),
-    # Inflation prints
-    (("cpi", "hot"),         "Hawkish read → equities lower, USD up, gold pressured"),
-    (("cpi", "cool"),        "Dovish read → equities up, USD down, gold firm"),
-    (("ppi", "hot"),         "Margin-squeeze fear → growth + small caps pressured"),
-    # Jobs / growth
-    (("payroll", "miss"),    "Growth concern → cyclicals pressured, rate-cut bid for tech"),
-    (("payroll", "beat"),    "Growth ok → risk-on, banks bid, USD up"),
-    (("unemployment", "rise"), "Growth concern → defensives + rate-cut bets bid"),
-    (("recession",),         "Defensive rotation; long-duration + gold bid"),
-    # Politics / fiscal
-    (("tariff",),            "Risk-off; semis + multinationals pressured, USD strength"),
-    (("trade war",),         "Risk-off; broad equity pressure, defensives bid"),
-    (("shutdown",),          "Vol up; defensive rotation, T-bills wobble near deadline"),
-    (("election", "result"), "Sector rotation likely — read the winner's policy mix"),
-    # Single-name / micro
-    (("earnings", "miss"),   "Single-name event — limited macro spillover unless large-cap"),
-    (("earnings", "beat"),   "Single-name event — read the guide for the swing read"),
-    (("guidance", "cut"),    "Sector read-across; check peers for sympathy moves"),
-    # Generic "hot" fallback — anything that hit HOT_KEYWORDS but no specific rule
-    (("circuit breaker",),   "Severe vol event → expect broad gap on next session"),
-    (("crash",),             "Severe vol event → defensives + cash bid"),
-    (("rally",),             "Risk-on momentum — fade only with a clear setup"),
-]
-
-
-def interpret_headline(headline: str, summary: str = "") -> str:
-    """Return a short trader-actionable "so what" line, or "" if no rule matches.
-
-    The interpretation is one short sentence describing the directional
-    nudge — what to expect at the next open, which sectors to watch.
-    Pure keyword heuristic, no LLM. Good enough for 80% of macro pings;
-    swap in an LLM call later for the long tail.
-    """
-    text = (headline + " " + summary).lower()
-    for terms, interp in SO_WHAT_RULES:
-        if all(t in text for t in terms):
-            return interp
-    return ""
 
 
 @dataclass
@@ -221,7 +162,6 @@ class MacroFeed:
                     "url": url,
                     "category": cat,
                     "hot": is_hot_news(headline, summary),
-                    "so_what": interpret_headline(headline, summary),
                 })
 
         # ── RSS aggregator (WSJ, Bloomberg, MarketWatch, CNBC) ──────────
@@ -263,7 +203,6 @@ class MacroFeed:
                 out.append({
                     **item,
                     "hot": is_hot_news(headline, summary),
-                    "so_what": interpret_headline(headline, summary),
                 })
 
         out.sort(key=lambda x: x["datetime"], reverse=True)

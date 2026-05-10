@@ -60,15 +60,6 @@ jobs:
       # used by finnhub-calendars.yml. If unset, blackout is disabled
       # (graceful degrade — pushes fire as before).
       FINNHUB_API_KEY:     ${{ secrets.FINNHUB_API_KEY }}
-      # LLM-driven "so what" interpretation for macro news pings (replaces
-      # the keyword heuristic which was producing canned-feeling output).
-      # Optional — if unset, the 💡 line is just omitted from the ping.
-      # Cost: ~$0.50/mo at current ping volume. Add the secret at
-      # Settings → Secrets and variables → Actions.
-      ANTHROPIC_API_KEY:   ${{ secrets.ANTHROPIC_API_KEY }}
-      # Override if you want a cheaper model for the so-what line
-      # (e.g. claude-sonnet-4-6 → ~$0.30/mo). Defaults to claude-opus-4-7.
-      NEWS_INTERPRET_MODEL: ${{ vars.NEWS_INTERPRET_MODEL }}
       # Soft-alert opt-in. To enable cron-default close-state alerts, add
       # repo variable TRIGGER_ALERTS_INCLUDE_CLOSE=true (Settings → Variables).
       # workflow_dispatch input takes precedence for one-off manual runs.

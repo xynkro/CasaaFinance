@@ -233,7 +233,6 @@ def ping_grab_ready(
 def ping_macro_news_to_swing(
     headline: str,
     matched_tickers: list[str],
-    so_what: str = "",
     source: str = "",
     url: str = "",
 ) -> dict:
@@ -246,17 +245,15 @@ def ping_macro_news_to_swing(
     Distinct from `ping_macro_news` (Macro News topic) by the route AND
     by the leading line which calls out the matched tickers.
     """
-    # HTML parse mode + inline-linked source — same treatment as
-    # ping_macro_news so the swing-mirror copy isn't visually noisier
-    # than the Macro News original.
+    # Same HTML + inline-link treatment as ping_macro_news so the
+    # swing-mirror copy isn't visually noisier than the Macro News
+    # original. No "so what" line — same reasoning (see ping_macro_news).
     import html
     body = headline.strip()
     if len(body) > 200:
         body = body[:197] + "..."
     tickers_str = " ".join(f"${t}" for t in matched_tickers[:5])
     lines = [f"📍 NEWS · {html.escape(tickers_str)} · {html.escape(body)}"]
-    if so_what:
-        lines.append(f"💡 {html.escape(so_what)}")
     if source and url:
         lines.append(f'🔗 <a href="{html.escape(url, quote=True)}">{html.escape(source)}</a>')
     elif source:
@@ -376,39 +373,39 @@ def ping_macro_news(
     headline: str,
     source: str = "",
     url: str = "",
-    so_what: str = "",
     category: str = "",
 ) -> dict:
     """
     Edge-triggered hot-news headline ping. Fired when the macro_blackouts
-    poller catches a Finnhub headline matching HOT_KEYWORDS (fed/cpi/iran/
-    tariff/etc.) across multiple categories (general, forex, crypto, merger).
+    poller catches a headline matching HOT_KEYWORDS (fed/cpi/iran/tariff/
+    opec/etc.) across Finnhub (general/forex/crypto/merger) + RSS feeds
+    (WSJ/Bloomberg/MarketWatch/CNBC).
 
     Sent EXACTLY ONCE per news_id (dedup tracked in macro_alerts_state).
     Capped at 3 per cron run so a Finnhub backlog catch-up doesn't flood.
+
+    No "so what" interpretation line — the keyword heuristic produced
+    canned output that read as fake reasoning, and an LLM-driven version
+    would re-introduce API cost. Reasoning lives in the daily brief now
+    (Multi Day Swing topic, once a day, Opus-quality).
 
     Args:
         headline: news headline (truncated at 200 chars)
         source: publisher name (e.g. "Reuters", "Bloomberg")
         url: link to the article
-        so_what: short trader-actionable interpretation
-                 (e.g. "Crude bid → energy/defense risk-on")
-        category: Finnhub category (general/forex/crypto/merger) for label
+        category: Finnhub/RSS category for the inline tag
     """
-    # HTML parse mode lets us collapse "source: Bloomberg" + raw URL line
-    # into one inline link — `[source](url)`-style — which kills the
-    # "headline appears twice" visual when the URL slug echoed the
-    # headline (e.g. bloomberg.com/news/articles/.../iran-tanker-strait).
+    # HTML parse mode + inline-linked source — the URL slug used to echo
+    # the headline ("bloomberg.com/.../iran-tanker-strait" right under
+    # an Iran tanker headline), making the message look duplicated.
     import html
     body = headline.strip()
     if len(body) > 200:
         body = body[:197] + "..."
     cat_tag = f" · {category}" if category and category != "general" else ""
     lines = [f"📰 MACRO{cat_tag} · {html.escape(body)}"]
-    if so_what:
-        lines.append(f"💡 {html.escape(so_what)}")
-    # Inline-link the source name; falls back to plain source text if no URL,
-    # or the bare URL if no source name (rare — Finnhub/RSS items always
+    # Inline-link the source name; falls back to plain source text if no
+    # URL, or the bare URL if no source (rare — Finnhub/RSS items always
     # carry a source).
     if source and url:
         lines.append(f'🔗 <a href="{html.escape(url, quote=True)}">{html.escape(source)}</a>')
