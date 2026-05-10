@@ -45,6 +45,7 @@ def send(
     parse_mode: ParseMode = "none",
     chat_id: str | None = None,
     message_thread_id: int | None = None,
+    disable_web_page_preview: bool = False,
 ) -> dict:
     """
     Send a message. Returns Telegram API response dict.
@@ -59,6 +60,11 @@ def send(
         message_thread_id: topic thread within a forum-mode supergroup.
                  Required when chat_id is the Finance & Trading group.
                  Omit (or pass None) for non-forum chats.
+        disable_web_page_preview: when True, suppresses Telegram's
+                 auto-generated link-preview card. Set on the macro
+                 pings — the preview card was rendering the article
+                 title underneath our message, which visually echoed
+                 the headline.
     """
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
@@ -73,6 +79,10 @@ def send(
         payload["parse_mode"] = parse_mode
     if message_thread_id is not None:
         payload["message_thread_id"] = message_thread_id
+    if disable_web_page_preview:
+        # Legacy field name still supported by Bot API and simpler than
+        # the newer link_preview_options object. Either works.
+        payload["disable_web_page_preview"] = True
 
     r = requests.post(url, json=payload, timeout=15)
     r.raise_for_status()
@@ -245,11 +255,11 @@ def ping_macro_news_to_swing(
     Distinct from `ping_macro_news` (Macro News topic) by the route AND
     by the leading line which calls out the matched tickers.
     """
-    # Same HTML + inline-link treatment as ping_macro_news so the
-    # swing-mirror copy isn't visually noisier than the Macro News
-    # original. No "so what" line — same reasoning (see ping_macro_news).
+    # Same HTML + inline-link + preview-disable + source-suffix-strip
+    # treatment as ping_macro_news so the swing-mirror copy isn't
+    # visually noisier than the Macro News original.
     import html
-    body = headline.strip()
+    body = _strip_source_suffix(headline.strip(), source)
     if len(body) > 200:
         body = body[:197] + "..."
     tickers_str = " ".join(f"${t}" for t in matched_tickers[:5])
@@ -264,6 +274,7 @@ def ping_macro_news_to_swing(
         "\n".join(lines),
         parse_mode="HTML",
         message_thread_id=MULTI_DAY_SWING_TOPIC,
+        disable_web_page_preview=True,
     )
 
 
@@ -369,6 +380,27 @@ def ping_macro_blackout(
     )
 
 
+def _strip_source_suffix(headline: str, source: str) -> str:
+    """Strip a trailing " - Source" / " — Source" / " | Source" attribution.
+
+    Many news APIs (Reuters via Finnhub, Bloomberg via RSS) include the
+    publisher name at the tail of the headline string — fine for a feed
+    reader, but in our pings we already show the source on its own line,
+    so the suffix is just visual repetition. Match is case-insensitive
+    against the explicit source value, so "...says - Reuters" with
+    source="Reuters" or source="reuters" both strip cleanly.
+    """
+    if not source:
+        return headline
+    h = headline.rstrip()
+    s_lower = source.strip().lower()
+    for sep in (" - ", " — ", " – ", " | ", " · "):
+        suffix_lower = f"{sep}{s_lower}"
+        if h.lower().endswith(suffix_lower):
+            return h[:-(len(suffix_lower))].rstrip(" .,:;-—–|·")
+    return h
+
+
 def ping_macro_news(
     headline: str,
     source: str = "",
@@ -395,11 +427,15 @@ def ping_macro_news(
         url: link to the article
         category: Finnhub/RSS category for the inline tag
     """
-    # HTML parse mode + inline-linked source — the URL slug used to echo
-    # the headline ("bloomberg.com/.../iran-tanker-strait" right under
-    # an Iran tanker headline), making the message look duplicated.
+    # HTML parse mode + inline-linked source. Two fixes layered to kill
+    # the headline-twice visual:
+    #   1. Strip trailing "- Reuters" / "| Bloomberg" attribution from
+    #      the headline since we already show source on its own line.
+    #   2. Disable Telegram's auto link-preview card. Otherwise it
+    #      fetches the URL and renders the article title underneath,
+    #      which echoes the headline a second time.
     import html
-    body = headline.strip()
+    body = _strip_source_suffix(headline.strip(), source)
     if len(body) > 200:
         body = body[:197] + "..."
     cat_tag = f" · {category}" if category and category != "general" else ""
@@ -417,4 +453,5 @@ def ping_macro_news(
         "\n".join(lines),
         parse_mode="HTML",
         message_thread_id=MACRO_NEWS_TOPIC,
+        disable_web_page_preview=True,
     )
