@@ -95,6 +95,64 @@ for r in it[1:]:
                 print(f'  {r[1]} {r[3]:6} {r[7]:8} sh={r[5]:>10} @${r[8]} value=${value:>12,.0f} ({r[4]})')
         except ValueError:
             pass
+
+# Government Spending Confluence — today's screener output
+# (gov_contracts + congress_trades + insider, scored 0-100)
+print()
+print('GOV CONFLUENCE TODAY (top by score, tier-A/B picks have strategy):')
+try:
+    gc = ss.worksheet('gov_confluence_signals').get_all_values()
+    today_str = datetime.date.today().isoformat()
+    gc_hdr = gc[0] if gc else []
+    cols = {h: i for i, h in enumerate(gc_hdr)}
+    today_signals = []
+    for r in gc[1:]:
+        if r and len(r) > cols.get('date', 0) and r[cols['date']] == today_str:
+            today_signals.append(r)
+    today_signals.sort(key=lambda r: float(r[cols['confluence_score']] or 0), reverse=True)
+    for r in today_signals[:10]:
+        score = r[cols['confluence_score']]
+        tk = r[cols['ticker']]
+        tier = r[cols['tier']] or '-'
+        strat = r[cols['recommended_strategy']] or 'WATCH'
+        thesis = r[cols['thesis_oneliner']]
+        action = r[cols['recommended_action']]
+        print(f'  {tk:6} score={score:>5} tier={tier:1} strat={strat:10} | {thesis} | {action[:80]}')
+    if not today_signals:
+        print('  (no signals scored >= 60 today)')
+except Exception as e:
+    print(f'  (gov_confluence_signals not available: {e})')
+
+# Recent Capitol Trades (Congress filings) — last 3 days
+print()
+print('CAPITOL TRADES (filings last 3 days, top by amount):')
+try:
+    ct = ss.worksheet('congress_trades').get_all_values()
+    three_d = (datetime.date.today() - datetime.timedelta(days=3)).isoformat()
+    ct_hdr = ct[0] if ct else []
+    ct_cols = {h: i for i, h in enumerate(ct_hdr)}
+    recent = []
+    for r in ct[1:]:
+        if r and len(r) > ct_cols.get('filing_date', 0):
+            if r[ct_cols['filing_date']][:10] >= three_d:
+                try:
+                    amt_max = float(r[ct_cols['amount_max']] or 0)
+                except ValueError:
+                    amt_max = 0
+                recent.append((amt_max, r))
+    recent.sort(key=lambda x: -x[0])
+    for amt_max, r in recent[:8]:
+        pol = r[ct_cols['politician_name']][:22]
+        party = r[ct_cols['party']][:1]
+        chamber = r[ct_cols['chamber']][:5]
+        tk = r[ct_cols['ticker']]
+        ttype = r[ct_cols['transaction_type']]
+        amt_min = float(r[ct_cols['amount_min']] or 0)
+        print(f'  {pol:22} ({party}-{chamber:5}) {tk:6} {ttype:5} \${amt_min/1e3:>5.0f}K-\${amt_max/1e3:>6.0f}K')
+    if not recent:
+        print('  (no filings in last 3 days)')
+except Exception as e:
+    print(f'  (congress_trades not available: {e})')
 "
 ```
 
@@ -153,9 +211,38 @@ distinct chips.
   "earnings_next_7d":   ["MDT 6/3 AMC", "..."],
   "macro_today":        ["13:30 US CPI MoM est 0.3%", "Fed Cook 09:45 ET"],
   "negative_news":      ["BYND -0.7 'Restructuring talks fail'", "..."],
-  "insider_alert":      ["NVDA Huang sold 50k @ $213 = $10.6M", "..."]
+  "insider_alert":      ["NVDA Huang sold 50k @ $213 = $10.6M", "..."],
+  "gov_confluence":     ["AVAV score 87 Tier-A → BUY_DIP — $35M Army contract + Pelosi $250-500K + CFO $180K", "..."]
 }
 ```
+
+**`gov_confluence` field guidance** — read `gov_confluence_signals` for
+today (output of `screen_gov_confluence` cron at 07:00 SGT). Up to 3
+top-scoring picks (Tier A or B). For each, format as:
+  `<TICKER> score <N> <Tier> → <STRATEGY> — <one-line thesis>`
+
+You **MAY override** the rules-based `recommended_strategy` if you spot
+context the rules miss:
+  - Earnings within 7 days → downgrade to "WAIT/SKIP" (note in thesis)
+  - High IV rank (>60) on a LONG_CALL → switch to PMCC
+  - Clear technical breakdown despite the catalyst → skip with reason
+  - Macro blackout active for the day → defer (note "post-FOMC")
+
+If you change strategy or skip, also update the corresponding row in
+`decision_queue` (find by `source = "gov_confluence"`, today's date,
+matching ticker) — set `status` to `act_now` for high-conviction picks
+or `dormant` for skips. Use this Bash:
+```bash
+python -c "
+from src.sync import load_env; from src import sheets as sh
+load_env(); client = sh.authenticate(); ss = sh._open_sheet(client)
+ws = ss.worksheet('decision_queue')
+rows = ws.get_all_values()
+hdr = rows[0]
+# ... locate row by source+date+ticker, update strategy/status fields
+"
+```
+
 
 **Synthesis principles:**
 - Be concise. The PWA card shows headline + 3 bullets.

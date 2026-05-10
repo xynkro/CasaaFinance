@@ -19,7 +19,8 @@ A JSON object with this schema:
   "commodities_bullets":["..."],
   "posture_change":     "string or empty",
   "watch_bullets":      ["..."],
-  "key_takeaways":      ["bullet 1", "bullet 2", "bullet 3"]
+  "key_takeaways":      ["bullet 1", "bullet 2", "bullet 3"],
+  "gov_confluence":     ["TICKER score N Tier-X → STRATEGY — context", "..."]
 }
 ```
 
@@ -58,6 +59,9 @@ Produce ONLY valid markdown matching this template exactly. **No preamble, no co
 
 ## WATCH
 {format each watch bullet as "- {text}"}
+
+## GOV CONFLUENCE
+{format each gov_confluence bullet as "- {text}"; or "- _no signals scored ≥70 today_" if empty}
 ```
 
 ## Rules

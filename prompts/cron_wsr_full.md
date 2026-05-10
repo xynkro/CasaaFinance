@@ -117,6 +117,8 @@ Use `WebSearch` to fill ONLY the narrative gaps:
 - Insider buying/selling → `insider_transactions` has them
 - Analyst targets → `analyst_consensus` has them
 - TV indicator values → `tv_signals` has them across 1h + 1d + 1W
+- US federal contract awards → `gov_contracts` (last 30d) + `gov_confluence_signals`
+- Congress trade filings → `congress_trades` (last 60d)
 
 This is non-negotiable. Web-searching for data we already have in
 sheets makes the brain SLOW and INCONSISTENT (web pages may lag
@@ -409,6 +411,58 @@ with trigger, etc.).
 ```
 
 Pull each field from the latest `regime_signals`, `exposure_posture`, and `risk_parity_audit` rows. If a source hasn't reported (sheet empty or cron not yet run), emit `null` for that field — Sonnet renders "—" for nulls. The `risk_parity` sub-object is the diversification hygiene summary: per account, the `top_overweight` and `top_underweight` are formatted `"<asset_class> <signed_delta>pp"` strings pulled from the audit's max +delta_pct and min -delta_pct rows.
+
+**Government Spending & Insider Confluence Deep Dive (REQUIRED section):**
+
+Emit a `gov_confluence_deep_dive` array at top level of the synthesis JSON.
+Pick the top 1–3 highest-scoring picks from `gov_confluence_signals` (last
+7 days). For each, write a full thesis covering:
+
+```json
+"gov_confluence_deep_dive": [
+  {
+    "ticker": "AVAV",
+    "weekly_max_score": 87,
+    "tier": "A",
+    "thesis": "AeroVironment landed a $35M Army drone IDIQ with 5-yr period of performance — $7M/yr run-rate is ~5% of FY24 revenue ($142M). Pelosi disclosed a $250-500K buy filed 5 days post-trade, CFO open-market bought $180K in late April. Three-vector confluence (contract + Congress + insider).",
+    "comparables": "vs KTOS (Kratos drones, similar IDIQ history) + AVAV's own past 5-yr contracts (2019 SwitchBlade IDIQ → +35% over next 6mo)",
+    "strategy": "LONG_CALL Jun20 $230 0.50d ~$4.20 premium",
+    "position_sizing": "0.5% NLV in premium = ~$50 worth of contracts",
+    "entry_trigger": "Underlying within 2% of $215 OR signal generation = entry (LONG_CALL doesn't need price-cross)",
+    "exit_criteria": "1.5x premium = take 50% off; -50% premium = full exit; 7d to expiry = roll or close",
+    "risks": "Earnings 5/28 — exit before; small-cap (low float) so 5%+ gap risk",
+    "redteam": "Contract may be partially-funded — check FY26 budget appropriations"
+  }
+]
+```
+
+Pull picks via:
+```bash
+python -c "
+from src.sync import load_env; from src import sheets as sh
+import datetime
+load_env(); client = sh.authenticate(); ss = sh._open_sheet(client)
+gc = ss.worksheet('gov_confluence_signals').get_all_values()
+hdr = gc[0]; cols = {h:i for i,h in enumerate(hdr)}
+seven_d = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+seen = {}
+for r in gc[1:]:
+    if r and r[cols['date']] >= seven_d:
+        tk = r[cols['ticker']]
+        score = float(r[cols['confluence_score']] or 0)
+        if score > seen.get(tk, (0,))[0]:
+            seen[tk] = (score, r[cols['tier']], r[cols['recommended_strategy']],
+                        r[cols['recommended_action']], r[cols['thesis_oneliner']],
+                        r[cols['contributing_contracts']], r[cols['contributing_congress_trades']],
+                        r[cols['contributing_insider_buys']])
+for tk, data in sorted(seen.items(), key=lambda x: -x[1][0])[:3]:
+    print(tk, data)
+"
+```
+
+If no signals scored ≥70 in the last 7 days, emit an empty array. Don't
+fabricate picks. The deep-dive is supplemental; the main weekly verdict
+still drives action.
 
 ### 6. Format and push (TWO writes — markdown + unified decision queue)
 

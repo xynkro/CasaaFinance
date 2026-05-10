@@ -270,8 +270,42 @@ Output a JSON matching this schema (pass to Sonnet template at `prompts/sonnet_f
   "action_summary": "what to do today",
   "options_summary": "options book status one-liner",
   "redteam_summary": "any new red-team flag since Monday",
-  "week_events": ""
+  "week_events": "",
+  "gov_confluence_leaderboard": [
+    {"ticker": "AVAV", "score": 87, "tier": "A", "strategy": "BUY_DIP",
+     "summary": "$35M Army drone IDIQ + Pelosi $250-500K + CFO $180K"},
+    {"ticker": "PLTR", "score": 79, "tier": "A", "strategy": "BUY_DIP",
+     "summary": "USSOCOM $40M AI contract + 2 directors bought $400K"}
+  ]
 }
+```
+
+**`gov_confluence_leaderboard` field** — read `gov_confluence_signals`
+for the last 7 days, take the top 5 by max-score-this-week, and emit
+each as `{ticker, score, tier, strategy, summary}`. Skip if the table
+is empty (return empty list, don't omit the field — Sonnet handles
+empty arrays). One-line summary should mention the contract size +
+Congress/insider context.
+
+```bash
+# Quick read:
+python -c "
+from src.sync import load_env; from src import sheets as sh
+import datetime
+load_env(); client = sh.authenticate(); ss = sh._open_sheet(client)
+gc = ss.worksheet('gov_confluence_signals').get_all_values()
+hdr = gc[0]; cols = {h:i for i,h in enumerate(hdr)}
+seven_d = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+seen = {}
+for r in gc[1:]:
+    if r and r[cols['date']] >= seven_d:
+        tk = r[cols['ticker']]
+        score = float(r[cols['confluence_score']] or 0)
+        if score > seen.get(tk, (0,))[0]:
+            seen[tk] = (score, r[cols['tier']], r[cols['recommended_strategy']], r[cols['recommended_action']])
+for tk, (sc, tier, strat, act) in sorted(seen.items(), key=lambda x: -x[1][0])[:5]:
+    print(f'{tk:6} score={sc:>5.0f} tier={tier:1} strat={strat:10} | {act[:80]}')
+"
 ```
 
 **`regime_anchor` (REQUIRED top-level field):** Pull each value from the latest `regime_signals` and `exposure_posture` rows. If a source hasn't reported, emit `null` for that field — Sonnet renders "—" for nulls. This forces an explicit read of the quant regime signals during the format step, surfacing them in the rendered markdown.
