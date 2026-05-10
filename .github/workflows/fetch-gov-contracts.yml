@@ -1,0 +1,59 @@
+name: Fetch Gov Contracts — Daily USAspending Pull
+
+# Pulls yesterday's federal contract awards from USAspending.gov, resolves
+# recipient names to publicly-traded tickers via the manual seed map, and
+# appends to the gov_contracts sheet. Auto-flags unmapped recipients above
+# $5M to gov_unmapped_recipients for weekly review.
+#
+# Schedule: 22:00 UTC = 06:00 SGT next day, Mon-Fri (US contract awards
+# don't post on weekends).
+
+on:
+  schedule:
+    - cron: "0 22 * * 0-4"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+      days:
+        description: "Trailing days to fetch (1 = yesterday only)"
+        type: string
+        default: "1"
+      end:
+        description: "ISO end date (YYYY-MM-DD); defaults to yesterday SGT"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fetch-gov-contracts
+  cancel-in-progress: true
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OAUTH_TOKEN_JSON:    ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:            ${{ secrets.SHEET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Fetch USAspending awards
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          if [ -n "${{ inputs.days }}" ]; then ARGS="$ARGS --days ${{ inputs.days }}"; fi
+          if [ -n "${{ inputs.end }}" ]; then ARGS="$ARGS --end ${{ inputs.end }}"; fi
+          python scripts/fetch_gov_contracts.py $ARGS
