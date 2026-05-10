@@ -1,0 +1,49 @@
+name: Screen Gov Confluence — Daily Confluence Scorer
+
+# Joins gov_contracts (last 30d) + congress_trades (last 60d) +
+# insider_transactions (last 90d) into per-ticker confluence scores.
+# Writes gov_confluence_signals + appends Tier A/B picks to decision_queue
+# with strategy (BUY_DIP / LONG_CALL / PMCC) populated.
+#
+# Schedule: 23:00 UTC = 07:00 SGT next day, Mon-Fri (after fetch_gov_contracts
+# 06:00 + fetch_congress_trades 06:30; before daily-brief 07:43).
+
+on:
+  schedule:
+    - cron: "0 23 * * 0-4"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: screen-gov-confluence
+  cancel-in-progress: true
+
+jobs:
+  screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OAUTH_TOKEN_JSON:    ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:            ${{ secrets.SHEET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run confluence screener
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          python scripts/screen_gov_confluence.py $ARGS
