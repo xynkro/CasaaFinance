@@ -54,10 +54,15 @@ TIER_B_MIN_SCORE = 80
 TIER_A_MIN_IMPACT_PCT = 0.01  # 1% TTM rev
 TIER_B_MIN_IMPACT_PCT = 0.05  # 5% TTM rev
 
-# Weights
-W_CONTRACT = 0.40
-W_CONGRESS = 0.30
-W_INSIDER  = 0.30
+# Weights (sum to 1.00). Re-balanced from 40/30/30 to 35/25/25/15
+# to add analyst consensus as the 4th vector. Inspired by QuiverQuant's
+# Analyst Buys strategy (78% win rate, Sharpe 0.92 over 3y) showing
+# weighted analyst signal adds real alpha when combined with cluster/
+# insider data. Source: https://www.quiverquant.com/strategies/s/Analyst%20Buys/
+W_CONTRACT = 0.35
+W_CONGRESS = 0.25
+W_INSIDER  = 0.25
+W_ANALYST  = 0.15
 
 # NAICS codes that get a small sector bonus (+5) — top federal-spending sectors
 PRIORITY_NAICS = {
@@ -97,6 +102,10 @@ class TickerStats:
     insider_value_total: float = 0.0
     insider_unique_count: int = 0
     has_insider_cluster: bool = False  # 3+ insiders in same 30d window
+    # Analyst data (Tweak #4) — looked up per-ticker, no aggregation
+    analyst_consensus_score: float = 0.0  # [-2..+2] raw from analyst_consensus
+    analyst_total_count: int = 0
+    analyst_label: str = ""  # STRONG_BUY|BUY|HOLD|SELL|STRONG_SELL|""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -360,6 +369,47 @@ def _read_held_tickers(client) -> set[str]:
     return held
 
 
+def _read_analyst_consensus(client) -> dict[str, dict]:
+    """Per-ticker latest analyst consensus from the weekly Finnhub cron.
+
+    No date filter — `analyst_consensus` is upserted by ticker, so every
+    row is current. Maps ticker → {consensus_score, label, total_count}.
+    Missing sheet or schema mismatch: returns {} (analyst vector falls
+    back to 0 for all tickers; not an error).
+
+    Source data ref: scripts/finnhub_analyst.py (weekly cron),
+    `consensus_score` field is weighted avg in [-2..+2].
+    """
+    ss = sh._open_sheet(client)
+    try:
+        ws = ss.worksheet(S.AnalystConsensusRow.TAB_NAME)
+    except Exception:
+        log.warning("analyst_consensus worksheet missing — analyst vector will be 0 for all tickers")
+        return {}
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return {}
+    hdr = rows[0]
+    cols = {h: i for i, h in enumerate(hdr)}
+    needed = ["ticker", "consensus_score", "consensus_label", "total_count"]
+    if not all(c in cols for c in needed):
+        log.warning("analyst_consensus schema mismatch — skipping analyst vector")
+        return {}
+
+    out: dict[str, dict] = {}
+    for r in rows[1:]:
+        ticker = (r[cols["ticker"]] if len(r) > cols["ticker"] else "").upper()
+        if not ticker:
+            continue
+        out[ticker] = {
+            "consensus_score": _safe_float(r[cols["consensus_score"]] if len(r) > cols["consensus_score"] else "0"),
+            "label": r[cols["consensus_label"]] if len(r) > cols["consensus_label"] else "",
+            "total_count": int(_safe_float(r[cols["total_count"]] if len(r) > cols["total_count"] else "0")),
+        }
+    log.info(f"analyst_consensus: {len(out)} tickers loaded")
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Scoring
 # ─────────────────────────────────────────────────────────────────────────────
@@ -368,9 +418,17 @@ def _build_stats(
     contracts_by_ticker: dict[str, list[dict]],
     congress_by_ticker: dict[str, list[dict]],
     insider_by_ticker: dict[str, list[dict]],
+    analyst_by_ticker: dict[str, dict],
     today: date,
 ) -> dict[str, TickerStats]:
-    """Build per-ticker accumulators by walking each feed."""
+    """Build per-ticker accumulators by walking each feed.
+
+    Universe is union of contract/congress/insider tickers — analyst
+    consensus alone does NOT qualify a ticker for a signal (Wall St
+    "buys" without one of the other vectors carries no edge for our
+    catalyst-based thesis). Analyst data is purely a confluence
+    booster on tickers already flagged by the other three feeds.
+    """
     all_tickers = set(contracts_by_ticker) | set(congress_by_ticker) | set(insider_by_ticker)
     out: dict[str, TickerStats] = {}
 
@@ -423,6 +481,14 @@ def _build_stats(
             if _within_days(ib["transaction_date"], 30, today):
                 unique_30d.add(ib["name"].upper())
         ts.has_insider_cluster = len(unique_30d) >= 3
+
+        # Analyst consensus lookup (Tweak #4) — no aggregation, just a
+        # per-ticker snapshot. Missing tickers stay at default 0.
+        ac = analyst_by_ticker.get(ticker)
+        if ac:
+            ts.analyst_consensus_score = ac["consensus_score"]
+            ts.analyst_total_count = ac["total_count"]
+            ts.analyst_label = ac["label"]
 
         out[ticker] = ts
     return out
@@ -489,6 +555,31 @@ def _score_insider(ts: TickerStats) -> float:
     return max(0.0, min(100.0, base))
 
 
+def _score_analyst(ts: TickerStats) -> float:
+    """Map analyst_consensus_score [-2..+2] → [0..100] (Tweak #4).
+
+    Mechanic:
+      - Below +1.0 (i.e. weaker than "BUY" consensus): score 0
+        (consensus must reach BUY to count as a confluence vector;
+         neutral/sell consensus is NOT a negative weight in this v1)
+      - In [1.0, 2.0]: linear ramp 50 → 100
+        (1.0 BUY → 50, 1.5 mid-BUY/STRONG → 75, 2.0 STRONG_BUY → 100)
+      - <5 total analysts: half-weight to dampen small-sample bias
+
+    Source: QuiverQuant Analyst Buys recipe. They weight forecasts by
+    per-analyst historical track record (better-than-free-tier data);
+    we approximate with the aggregate consensus from Finnhub free tier.
+    """
+    s = ts.analyst_consensus_score
+    if s < 1.0:
+        return 0.0
+    base = 50.0 + 50.0 * (s - 1.0)  # 1.0 → 50, 2.0 → 100
+    base = max(0.0, min(100.0, base))
+    if ts.analyst_total_count < 5:
+        base *= 0.5
+    return base
+
+
 def _classify_tier(score: float, impact_pct: float, has_multi_year: bool) -> str:
     """A | B | "" per design doc §3."""
     if score >= TIER_B_MIN_SCORE and has_multi_year and impact_pct >= TIER_B_MIN_IMPACT_PCT:
@@ -531,7 +622,13 @@ def _build_action_text(ts: TickerStats, score: float, strategy: str) -> str:
     return f"{label} · score {score:.0f} · {body}" if body else f"{label} · score {score:.0f}"
 
 
-def _build_thesis(ts: TickerStats, contract_score: float, congress_score: float, insider_score: float) -> str:
+def _build_thesis(
+    ts: TickerStats,
+    contract_score: float,
+    congress_score: float,
+    insider_score: float,
+    analyst_score: float = 0.0,
+) -> str:
     """Multi-sentence prose thesis in WSJ/Bloomberg style.
 
     Mirrors QuiverQuant's ChatGPT-Enhanced strategy format: 1-2 concise
@@ -585,9 +682,18 @@ def _build_thesis(ts: TickerStats, contract_score: float, congress_score: float,
     if conf_bits:
         sentences.append("Aligned " + " and ".join(conf_bits) + ".")
 
-    # Score footer for transparency — terse breakdown.
+    # Analyst sentence (Tweak #4) — only when meaningful (BUY or STRONG_BUY
+    # with >=5 covering analysts so we're not boosting on small-sample noise).
+    if ts.analyst_label in ("STRONG_BUY", "BUY") and ts.analyst_total_count >= 5:
+        label_pretty = ts.analyst_label.replace("_", " ").lower()
+        sentences.append(
+            f"Sell-side: {label_pretty} consensus across {ts.analyst_total_count} analysts."
+        )
+
+    # Score footer for transparency — terse breakdown including analyst.
     sentences.append(
-        f"Score breakdown — contract {contract_score:.0f} / congress {congress_score:.0f} / insider {insider_score:.0f}."
+        f"Score breakdown — contract {contract_score:.0f} / congress {congress_score:.0f} / "
+        f"insider {insider_score:.0f} / analyst {analyst_score:.0f}."
     )
 
     return " ".join(sentences)
@@ -606,10 +712,12 @@ def _build_signal_rows(stats: dict[str, TickerStats], today_iso: str) -> list[S.
         contract_score, impact_pct = _score_contract(ts, ttm_revenue=None)
         congress_score = _score_congress(ts)
         insider_score = _score_insider(ts)
+        analyst_score = _score_analyst(ts)
         score = (
             W_CONTRACT * contract_score
             + W_CONGRESS * congress_score
             + W_INSIDER  * insider_score
+            + W_ANALYST  * analyst_score
         )
         if score < MIN_SCORE_TO_PERSIST:
             continue
@@ -622,10 +730,11 @@ def _build_signal_rows(stats: dict[str, TickerStats], today_iso: str) -> list[S.
             contract_score=contract_score,
             congress_score=congress_score,
             insider_score=insider_score,
+            analyst_score=analyst_score,
             tier=tier,
             recommended_strategy=strategy,
             recommended_action=_build_action_text(ts, score, strategy),
-            thesis_oneliner=_build_thesis(ts, contract_score, congress_score, insider_score),
+            thesis_oneliner=_build_thesis(ts, contract_score, congress_score, insider_score, analyst_score),
             contributing_contracts=json.dumps([c["award_id"] for c in ts.contracts[:20]]),
             contributing_congress_trades=json.dumps([c["filing_id"] for c in ts.congress_buys[:20]]),
             contributing_insider_buys=json.dumps([b["id"] for b in ts.insider_buys[:20]]),
@@ -869,12 +978,14 @@ def main() -> int:
     insider = _read_insider_buys(client, today)
     # Tweak #2 — also pull Congress sells for the TRIM emitter.
     sells = _read_congress_sells(client, today)
+    # Tweak #4 — analyst consensus as 4th confluence vector.
+    analyst = _read_analyst_consensus(client)
 
     if not (contracts or congress or insider or sells):
         logger.info("All feeds empty — nothing to score")
         return 0
 
-    stats = _build_stats(contracts, congress, insider, today)
+    stats = _build_stats(contracts, congress, insider, analyst, today)
     logger.info(f"Computed stats for {len(stats)} unique tickers")
 
     signals = _build_signal_rows(stats, today_iso)

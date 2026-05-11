@@ -1983,7 +1983,7 @@ class GovConfluenceSignalRow:
     HEADERS = [
         "date", "ticker",
         "confluence_score",
-        "contract_score", "congress_score", "insider_score",
+        "contract_score", "congress_score", "insider_score", "analyst_score",
         "tier",
         "recommended_strategy",
         "recommended_action",
@@ -2000,14 +2000,15 @@ class GovConfluenceSignalRow:
     contract_score: float
     congress_score: float
     insider_score: float
-    tier: str  # "A" | "B" | ""
-    recommended_strategy: str  # "BUY_DIP" | "LONG_CALL" | "PMCC" | ""
-    recommended_action: str
-    thesis_oneliner: str
-    contributing_contracts: str  # JSON array of award_ids
-    contributing_congress_trades: str  # JSON array of filing_ids
-    contributing_insider_buys: str  # JSON array of insider tx ids
-    updated_at: str
+    analyst_score: float = 0.0  # Added Tweak #4 — backward-compat default
+    tier: str = ""  # "A" | "B" | ""
+    recommended_strategy: str = ""  # "BUY_DIP" | "LONG_CALL" | "PMCC" | ""
+    recommended_action: str = ""
+    thesis_oneliner: str = ""
+    contributing_contracts: str = ""  # JSON array of award_ids
+    contributing_congress_trades: str = ""  # JSON array of filing_ids
+    contributing_insider_buys: str = ""  # JSON array of insider tx ids
+    updated_at: str = ""
 
     def to_row(self) -> List[str]:
         return [
@@ -2016,6 +2017,7 @@ class GovConfluenceSignalRow:
             _num(self.contract_score, 1),
             _num(self.congress_score, 1),
             _num(self.insider_score, 1),
+            _num(self.analyst_score, 1),
             self.tier,
             self.recommended_strategy,
             self.recommended_action,
