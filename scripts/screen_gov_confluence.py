@@ -91,6 +91,7 @@ class TickerStats:
     congress_buys: list[dict] = field(default_factory=list)
     congress_amount_total: float = 0.0
     has_recent_congress: bool = False  # within 14d
+    has_congress_cluster: bool = False  # 3+ unique politicians in trailing 30d
     # Insider data
     insider_buys: list[dict] = field(default_factory=list)
     insider_value_total: float = 0.0
@@ -314,6 +315,17 @@ def _build_stats(
             ts.congress_amount_total += cg["midpoint"]
             if _within_days(cg["filing_date"], 14, today):
                 ts.has_recent_congress = True
+        # Congress cluster bonus: 3+ unique politicians in trailing 30d.
+        # Mirrors the existing insider cluster pattern — buyer diversity
+        # is information beyond cumulative dollar amount (multiple
+        # politicians independently choosing the same name).
+        unique_politicians_30d: set[str] = set()
+        for cg in congress_by_ticker.get(ticker, []):
+            if _within_days(cg["filing_date"], 30, today):
+                name = (cg.get("politician_name") or "").upper()
+                if name:
+                    unique_politicians_30d.add(name)
+        ts.has_congress_cluster = len(unique_politicians_30d) >= 3
 
         # Insider
         unique_names = set()
@@ -366,15 +378,19 @@ def _score_contract(ts: TickerStats, ttm_revenue: float | None) -> tuple[float, 
 
 
 def _score_congress(ts: TickerStats) -> float:
-    """Pure amount-driven for v1 (committees not populated yet).
+    """Amount + recency + cluster (committees not populated yet).
 
     $1M total weighted = score 100 (clipped).
     Recency bonus +20 if any filing in last 14 days.
+    Cluster bonus +20 if 3+ unique politicians bought in trailing 30d.
+    Final value clipped to [0, 100].
     """
     if not ts.congress_buys:
         return 0.0
     base = min(100.0, ts.congress_amount_total / 10_000.0)  # $1M = 100
     if ts.has_recent_congress:
+        base += 20.0
+    if ts.has_congress_cluster:
         base += 20.0
     return max(0.0, min(100.0, base))
 
