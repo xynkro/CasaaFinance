@@ -1,0 +1,57 @@
+name: Execute Decisions — Alpaca Paper Trading
+
+# Reads ACT_NOW decisions from decision_queue and submits orders to
+# Alpaca paper trading. Runs after the daily brief (07:43 SGT) has
+# had time to update the decision queue.
+#
+# Schedule: 00:00 UTC = 08:00 SGT (after 07:43 brief + buffer)
+# Only fires Mon-Fri (market days).
+#
+# REQUIRED SECRETS:
+#   ALPACA_API_KEY_ID     — paper-api key
+#   ALPACA_API_SECRET_KEY — paper-api secret
+
+on:
+  schedule:
+    - cron: "0 0 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: true
+        description: "Dry run (print plan, no orders)"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: execute-decisions
+  cancel-in-progress: true
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OAUTH_TOKEN_JSON:         ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:                 ${{ secrets.SHEET_ID }}
+      TELEGRAM_BOT_TOKEN:       ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      ALPACA_API_KEY_ID:        ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY:    ${{ secrets.ALPACA_API_SECRET_KEY }}
+      ALPACA_BASE_URL:          "https://paper-api.alpaca.markets"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Execute decisions
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          python scripts/execute_decisions.py $ARGS
