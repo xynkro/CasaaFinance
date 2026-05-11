@@ -185,6 +185,43 @@ def setup_logger() -> logging.Logger:
 
 # ──────────────────── Universe loading ────────────────────────────────────
 
+
+def _blend_gov_confluence_tickers(base: list[str], logger: logging.Logger) -> list[str]:
+    """Add gov_confluence_signals tickers (last 7d) to the scan universe.
+
+    Defense primes and gov-contractor names with fresh contract activity
+    should be scanned for options opportunities even if they're not in the
+    user's portfolio or watchlist YAML.
+    """
+    try:
+        import datetime as _dt
+        client = sh.authenticate()
+        ss = sh._open_sheet(client)
+        ws = ss.worksheet(S.GovConfluenceSignalRow.TAB_NAME)
+        rows = ws.get_all_values()
+        if len(rows) < 2:
+            return base
+        hdr = rows[0]
+        cols = {h: i for i, h in enumerate(hdr)}
+        seven_d = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+        existing = {t.upper() for t in base}
+        added = 0
+        for r in rows[1:]:
+            if len(r) <= cols.get("date", 0) or r[cols["date"]] < seven_d:
+                continue
+            tk = r[cols["ticker"]].strip().upper()
+            # Only add US-listed, alphabetic tickers (skip SGX, etc.)
+            if tk and tk not in existing and len(tk) <= 5 and tk.isalpha():
+                base.append(tk)
+                existing.add(tk)
+                added += 1
+        if added:
+            logger.info(f"  +{added} tickers from gov_confluence_signals → universe")
+    except Exception as e:
+        logger.debug(f"gov confluence universe blend skipped: {e}")
+    return base
+
+
 def load_universe(logger: logging.Logger) -> list[str]:
     """
     Try `src.watchlist.get_universe()`; fall back to hardcoded list if
@@ -221,6 +258,8 @@ def load_universe(logger: logging.Logger) -> list[str]:
         flat = flatten(universe) if universe else []
         if flat:
             logger.info(f"loaded {len(flat)} tickers from watchlist module")
+            # Blend gov confluence tickers into the universe
+            flat = _blend_gov_confluence_tickers(flat, logger)
             return flat
     except ImportError:
         logger.info("src.watchlist not importable — using hardcoded fallback")
@@ -236,6 +275,9 @@ def load_universe(logger: logging.Logger) -> list[str]:
             seen.add(u)
             out.append(u)
     logger.info(f"using hardcoded fallback universe: {len(out)} tickers")
+    # Blend in gov confluence tickers so defense/gov-contractor names
+    # with fresh contract activity get scanned for options opportunities
+    out = _blend_gov_confluence_tickers(out, logger)
     return out
 
 

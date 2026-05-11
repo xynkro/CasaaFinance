@@ -96,6 +96,30 @@ def gather_watchlist(logger: logging.Logger) -> list[str]:
     except Exception as e:
         logger.warning(f"decision_queue: {e}")
 
+    # Gov confluence — pull in tickers with recent gov contract / congress
+    # activity so the scan covers them even if not in portfolio/queue
+    try:
+        import datetime as _dt
+        from src import schema as S
+        ws_gc = ss.worksheet(S.GovConfluenceSignalRow.TAB_NAME)
+        gc_rows = ws_gc.get_all_values()
+        if len(gc_rows) > 1:
+            gc_hdr = gc_rows[0]
+            gc_cols = {h: i for i, h in enumerate(gc_hdr)}
+            seven_d = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+            gov_added = 0
+            for r in gc_rows[1:]:
+                if len(r) <= gc_cols.get("date", 0) or r[gc_cols["date"]] < seven_d:
+                    continue
+                tk = r[gc_cols["ticker"]].strip().upper()
+                if tk and tk not in tickers:
+                    tickers.add(tk)
+                    gov_added += 1
+            if gov_added:
+                logger.info(f"  +{gov_added} tickers from gov_confluence_signals")
+    except Exception as e:
+        logger.warning(f"gov_confluence_signals: {e}")
+
     # Filter SGX-only tickers (yfinance needs .SI suffix and we don't write those to scan_results)
     SGX = {"C6L", "G3B", "D05", "O39", "U11", "Z74", "V03"}
     tickers = {t for t in tickers if t not in SGX and len(t) <= 5 and t.isalpha()}
