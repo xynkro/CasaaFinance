@@ -1,0 +1,50 @@
+name: Refresh Exit Plans — daily stop/target recompute (both accounts)
+
+# Independent of the IBKR-grab path (which only covers Caspar). Reads
+# positions directly from positions_caspar + positions_sarah sheets,
+# pulls fresh yfinance indicators, and produces fresh exit_plans rows
+# for the PWA Exit Plan card / WSR reasoning.
+#
+# Why this exists: daily_tracker.py reads positions from the IBKR grab
+# JSON. Sarah's IBKR isn't connected, so her exit_plans went stale.
+# This script side-steps the grab and reads positions directly.
+
+on:
+  schedule:
+    # 22:30 UTC = 06:30 SGT — after the 06:22 SGT yahoo_grab tranche
+    # finishes refreshing positions, before the 07:00 SGT confluence
+    # screener and 07:30 SGT brain briefs read exit_plans.
+    - cron: "30 22 * * *"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refresh-exit-plans
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Refresh exit_plans
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          python scripts/refresh_exit_plans.py $ARGS
