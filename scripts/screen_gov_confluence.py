@@ -513,37 +513,84 @@ def _recommend_strategy(score: float, tier: str) -> str:
 
 
 def _build_action_text(ts: TickerStats, score: float, strategy: str) -> str:
-    """Build a one-line trader-actionable summary."""
+    """One-line actionable summary for ping subject lines / log lines.
+
+    Distinct from `_build_thesis` (which writes prose): this is the
+    Telegram subject-line view — single line, dense stats, includes
+    the recommended strategy and total score for at-a-glance scan.
+    """
     parts = []
     if ts.contracts:
-        n = len(ts.contracts)
-        parts.append(f"${ts.contract_total_30d/1e6:.1f}M in contracts ({n})")
+        parts.append(f"${ts.contract_total_30d/1e6:.1f}M contracts ({len(ts.contracts)})")
     if ts.congress_buys:
-        n = len(ts.congress_buys)
-        parts.append(f"${ts.congress_amount_total/1e6:.2f}M Congress buys ({n})")
+        parts.append(f"${ts.congress_amount_total/1e6:.2f}M Congress ({len(ts.congress_buys)})")
     if ts.insider_buys:
-        n = len(ts.insider_buys)
-        parts.append(f"${ts.insider_value_total/1e6:.2f}M insider buys ({n})")
+        parts.append(f"${ts.insider_value_total/1e6:.2f}M insider ({len(ts.insider_buys)})")
     body = " · ".join(parts)
-    return f"{strategy or 'WATCH'} · {body}" if body else (strategy or "WATCH")
+    label = strategy or "WATCH"
+    return f"{label} · score {score:.0f} · {body}" if body else f"{label} · score {score:.0f}"
 
 
 def _build_thesis(ts: TickerStats, contract_score: float, congress_score: float, insider_score: float) -> str:
-    """One-line thesis for brief / Telegram."""
-    bits = []
-    if ts.has_multi_year:
-        bits.append("multi-yr IDIQ")
-    if ts.has_recent_award:
-        bits.append("fresh award <7d")
-    if ts.has_recent_congress:
-        bits.append("Congress <14d")
-    if ts.has_insider_cluster:
-        bits.append("insider cluster")
-    flags = ", ".join(bits) if bits else ""
-    return (
-        f"Contract {contract_score:.0f} · Congress {congress_score:.0f} · Insider {insider_score:.0f}"
-        + (f" ({flags})" if flags else "")
+    """Multi-sentence prose thesis in WSJ/Bloomberg style.
+
+    Mirrors QuiverQuant's ChatGPT-Enhanced strategy format: 1-2 concise
+    sentences citing the strongest catalyst(s) per signal, not a stat
+    dump. Brain may rewrite/expand this at brief time; this is the
+    rules-based default used for Telegram digests that fire BEFORE
+    the brain runs.
+
+    Source style ref: https://www.quiverquant.com/strategies/s/ChatGPT%20-%20Quiver%20Enhanced/
+    """
+    sentences: list[str] = []
+
+    # Contract sentence — lead with the strongest contract fact.
+    if ts.contracts:
+        n = len(ts.contracts)
+        total_m = ts.contract_total_30d / 1e6
+        max_m = ts.contract_max_single / 1e6
+        # Choose noun based on multi-year flag (IDIQ implies "contract")
+        noun = "multi-year IDIQ" if ts.has_multi_year else "contract"
+        sector_suffix = " in a top federal-spending sector" if ts.has_priority_naics else ""
+        recency = "in the last 7 days" if ts.has_recent_award else "in the trailing 30 days"
+        if n == 1:
+            sentences.append(
+                f"Captured a ${max_m:.1f}M {noun}{sector_suffix} {recency}."
+            )
+        else:
+            # For stacks the noun is always plural "contracts"
+            stack_suffix = " (multi-year IDIQ)" if ts.has_multi_year else ""
+            sentences.append(
+                f"Stacked {n} contracts totaling ${total_m:.1f}M (largest ${max_m:.1f}M){stack_suffix}{sector_suffix} {recency}."
+            )
+
+    # Confluence sentence — Congress + insider together.
+    conf_bits: list[str] = []
+    if ts.congress_buys:
+        n_cg = len(ts.congress_buys)
+        amt_m = ts.congress_amount_total / 1e6
+        if ts.has_congress_cluster:
+            conf_bits.append(f"{n_cg} Congress buys from 3+ distinct members totaling ${amt_m:.2f}M/30d")
+        elif ts.has_recent_congress:
+            conf_bits.append(f"{n_cg} Congress buys (${amt_m:.2f}M) with filings in last 14d")
+        else:
+            conf_bits.append(f"{n_cg} Congress buys totaling ${amt_m:.2f}M")
+    if ts.insider_buys:
+        n_ib = len(ts.insider_buys)
+        ival_m = ts.insider_value_total / 1e6
+        if ts.has_insider_cluster:
+            conf_bits.append(f"insider cluster ({ts.insider_unique_count} unique buyers, ${ival_m:.2f}M)")
+        else:
+            conf_bits.append(f"{n_ib} insider buys worth ${ival_m:.2f}M")
+    if conf_bits:
+        sentences.append("Aligned " + " and ".join(conf_bits) + ".")
+
+    # Score footer for transparency — terse breakdown.
+    sentences.append(
+        f"Score breakdown — contract {contract_score:.0f} / congress {congress_score:.0f} / insider {insider_score:.0f}."
     )
+
+    return " ".join(sentences)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
