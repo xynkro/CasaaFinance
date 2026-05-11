@@ -219,6 +219,7 @@ SEED_DATA: list[tuple[str, str, str, str]] = [
     ("FLUOR CORPORATION", "FLR", "high", "parent"),
     ("JACOBS ENGINEERING GROUP INC", "J", "high", "parent"),
     ("JACOBS TECHNOLOGY INC", "J", "high", "subsidiary"),
+    ("JACOBS GOVERNMENT SERVICES COMPANY", "J", "high", "subsidiary"),
     ("BECHTEL NATIONAL INC", "", "low", "private — no ticker"),
     ("BECHTEL NATIONAL, INC.", "", "low", "private — no ticker"),
     ("BECHTEL CORPORATION", "", "low", "private"),
@@ -253,7 +254,11 @@ SEED_DATA: list[tuple[str, str, str, str]] = [
 
     # ─────────── Defense IT / niche ───────────
     ("ENGILITY CORPORATION", "SAIC", "medium", "merged into SAIC 2019"),
-    ("PERSPECTA INC", "PSN", "medium", "acquired by Peraton (private)"),
+    ("PERSPECTA INC", "", "low", "acquired by Peraton (private) — no public ticker"),
+    ("PAE GOVERNMENT SERVICES, INC.", "", "low", "acquired by Amentum (private)"),
+    ("PAE INCORPORATED", "", "low", "acquired by Amentum (private)"),
+    ("PAE LABAT-ANDERSON LLC", "", "low", "PAE subsidiary (private)"),
+    ("ONYX GOVERNMENT SERVICES, LLC", "", "low", "Amentum subsidiary (private)"),
 ]
 
 

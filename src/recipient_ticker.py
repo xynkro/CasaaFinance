@@ -133,6 +133,19 @@ def _load_map() -> dict[str, str]:
     return out
 
 
+def _token_overlap(a: str, b: str) -> float:
+    """Jaccard similarity on token sets — prevents false matches where
+    two names share boilerplate tokens ('GOVERNMENT', 'SERVICES') but
+    differ on the actual company name.
+
+    Returns 0.0-1.0.
+    """
+    sa, sb = set(a.split()), set(b.split())
+    if not sa or not sb:
+        return 0.0
+    return len(sa & sb) / len(sa | sb)
+
+
 def resolve(recipient_name: str, fuzzy: bool = True) -> str:
     """Resolve a recipient name to a ticker. Returns "" if not mapped.
 
@@ -140,7 +153,9 @@ def resolve(recipient_name: str, fuzzy: bool = True) -> str:
         recipient_name: raw name as it appears in USAspending (any case,
             with or without punctuation/suffixes).
         fuzzy: if True (default) and exact normalized match misses, try
-            difflib.get_close_matches with cutoff 0.85.
+            difflib.get_close_matches with cutoff 0.90, gated by a
+            token-overlap check (≥ 0.50 Jaccard) to prevent false
+            matches on boilerplate tokens like "GOVERNMENT SERVICES".
 
     Returns:
         Uppercase ticker symbol, or "" if no mapping found.
@@ -156,8 +171,11 @@ def resolve(recipient_name: str, fuzzy: bool = True) -> str:
     if key in mapping:
         return mapping[key]
     if fuzzy:
-        matches = get_close_matches(key, list(mapping.keys()), n=1, cutoff=0.85)
-        if matches:
+        # Cutoff 0.90 (was 0.85) + token overlap gate to prevent
+        # "GOVERNMENT PAE SERVICES" → "GOVERNMENT PARSONS SERVICES"
+        matches = get_close_matches(key, list(mapping.keys()), n=1, cutoff=0.90)
+        if matches and _token_overlap(key, matches[0]) >= 0.50:
+            log.debug("fuzzy: %r → %r (%s)", key, matches[0], mapping[matches[0]])
             return mapping[matches[0]]
     return ""
 

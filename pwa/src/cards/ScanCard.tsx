@@ -1,6 +1,6 @@
 import type { ScanResultRow, OptionRecommendationRow } from "../data";
 import { Card } from "./Card";
-import { Radar, Zap, TrendingUp, TrendingDown } from "lucide-react";
+import { Radar, Zap, TrendingUp, TrendingDown, Rocket } from "lucide-react";
 import { useState } from "react";
 
 function fmtPrice(v: string | number, prefix = "$"): string {
@@ -60,6 +60,7 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
   const composite = Number(cand.composite_score);
   const catalyst = cand.catalyst_flag === "TRUE";
   const isCall = cand.right === "C";
+  const isLongCall = cand.strategy === "LONG_CALL";
 
   return (
     <button
@@ -70,18 +71,25 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
       {/* Top row: ticker + strike + composite ring */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          {isCall ? (
+          {isLongCall ? (
+            <Rocket size={11} className="text-violet-400 shrink-0" />
+          ) : isCall ? (
             <TrendingDown size={11} className="text-amber-400 shrink-0" />
           ) : (
             <TrendingUp size={11} className="text-emerald-400 shrink-0" />
           )}
           <span className="text-[length:var(--t-sm)] font-bold text-white">{cand.ticker}</span>
+          {isLongCall && (
+            <span className="text-[length:var(--t-2xs)] font-semibold uppercase tracking-wide text-violet-300">
+              Long Call
+            </span>
+          )}
           <span className="text-[length:var(--t-2xs)] font-semibold text-slate-500">
             ${strike.toFixed(strike < 10 ? 1 : 0)}{cand.right}
           </span>
           <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExp(cand.expiry)}</span>
           {catalyst && (
-            <Zap size={10} className="text-orange-400 shrink-0" />
+            <Zap size={10} className={isLongCall ? "text-violet-400 shrink-0" : "text-orange-400 shrink-0"} />
           )}
         </div>
         <CompositeGauge value={composite} />
@@ -91,8 +99,14 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
       <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
         <span>Δ <span className="text-slate-300 tabular-nums">{delta.toFixed(2)}</span></span>
         <span>Prem <span className="text-slate-300 tabular-nums">{fmtPrice(prem)}</span></span>
-        <span>Yield <span className="text-emerald-400 tabular-nums font-semibold">{yld.toFixed(0)}%</span></span>
-        <span>Cash <span className="text-slate-300 tabular-nums">{fmtPrice(cash)}</span></span>
+        {isLongCall ? (
+          <span>Cost <span className="text-violet-400 tabular-nums font-semibold">{fmtPrice(cash)}</span></span>
+        ) : (
+          <>
+            <span>Yield <span className="text-emerald-400 tabular-nums font-semibold">{yld.toFixed(0)}%</span></span>
+            <span>Cash <span className="text-slate-300 tabular-nums">{fmtPrice(cash)}</span></span>
+          </>
+        )}
       </div>
 
       {expanded && (
@@ -143,9 +157,11 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
             Stock: <span className="text-slate-300 tabular-nums">{fmtPrice(cand.underlying_last)}</span>
           </div>
           {catalyst && (
-            <div className="flex items-center gap-1 text-orange-400 text-[length:var(--t-2xs)]">
+            <div className={`flex items-center gap-1 text-[length:var(--t-2xs)] ${isLongCall ? "text-violet-400" : "text-orange-400"}`}>
               <Zap size={10} />
-              <span className="font-semibold">Catalyst — volatility elevated</span>
+              <span className="font-semibold">
+                {isLongCall ? "Gov Confluence — directional catalyst" : "Catalyst — volatility elevated"}
+              </span>
             </div>
           )}
         </div>
@@ -248,7 +264,7 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
 }
 
 type Source = "my-tickers" | "broad";
-type StratTab = "CSP" | "CC";
+type StratTab = "CSP" | "CC" | "LONG_CALL";
 
 export function ScanCard({
   candidates,
@@ -271,6 +287,10 @@ export function ScanCard({
     .filter((c) => c.strategy === "CC")
     .sort((a, b) => Number(b.composite_score) - Number(a.composite_score))
     .slice(0, 8);
+  const lcList = candidates
+    .filter((c) => c.strategy === "LONG_CALL")
+    .sort((a, b) => Number(b.composite_score) - Number(a.composite_score))
+    .slice(0, 8);
 
   // ----- "Broad" lists -----
   // market_scan produces multiple strategies; we still split by CSP/CC for the
@@ -283,9 +303,10 @@ export function ScanCard({
   };
   const broadCsp = broad.filter((c) => c.strategy === "CSP").sort(broadSort).slice(0, 12);
   const broadCc = broad.filter((c) => c.strategy === "CC").sort(broadSort).slice(0, 12);
+  const broadLc = broad.filter((c) => c.strategy === "LONG_CALL").sort(broadSort).slice(0, 12);
 
-  const myActive = tab === "CSP" ? cspList : ccList;
-  const broadActive = tab === "CSP" ? broadCsp : broadCc;
+  const myActive = tab === "LONG_CALL" ? lcList : tab === "CSP" ? cspList : ccList;
+  const broadActive = tab === "LONG_CALL" ? broadLc : tab === "CSP" ? broadCsp : broadCc;
 
   const onMyTickers = source === "my-tickers";
   const empty =
@@ -319,6 +340,16 @@ export function ScanCard({
             }`}
           >
             CC ({onMyTickers ? ccList.length : broadCc.length})
+          </button>
+          <button
+            onClick={() => setTab("LONG_CALL")}
+            className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
+              tab === "LONG_CALL"
+                ? "bg-violet-500/20 text-violet-400 border border-violet-500/30"
+                : "text-slate-500 hover:text-slate-300 border border-transparent"
+            }`}
+          >
+            Calls ({onMyTickers ? lcList.length : broadLc.length})
           </button>
         </div>
       </div>
