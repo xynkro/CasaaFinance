@@ -280,6 +280,86 @@ def _read_insider_buys(client, today: date) -> dict[str, list[dict]]:
     return by_ticker
 
 
+def _read_congress_sells(client, today: date) -> dict[str, list[dict]]:
+    """Read congress_trades rows where transaction_type=sell in last 30d.
+
+    Mirrors _read_congress_trades shape but flipped to sells. Used for
+    Tweak #2 — TRIM candidate emission on currently-held tickers.
+    """
+    cutoff_iso = (today - timedelta(days=30)).isoformat()
+    ss = sh._open_sheet(client)
+    try:
+        ws = ss.worksheet(S.CongressTradeRow.TAB_NAME)
+    except Exception:
+        log.warning("congress_trades worksheet missing — empty sells data")
+        return {}
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return {}
+    hdr = rows[0]
+    cols = {h: i for i, h in enumerate(hdr)}
+    needed = ["ticker", "filing_date", "transaction_type", "amount_min", "amount_max", "filing_id"]
+    if not all(c in cols for c in needed):
+        log.warning("congress_trades schema mismatch — skipping sells")
+        return {}
+
+    by_ticker: dict[str, list[dict]] = defaultdict(list)
+    for r in rows[1:]:
+        ticker = (r[cols["ticker"]] if len(r) > cols["ticker"] else "").upper()
+        if not ticker:
+            continue
+        ttype = (r[cols["transaction_type"]] if len(r) > cols["transaction_type"] else "").lower()
+        if ttype != "sell":
+            continue
+        filing_date = (r[cols["filing_date"]] if len(r) > cols["filing_date"] else "")[:10]
+        if not filing_date or filing_date < cutoff_iso:
+            continue
+        amt_min = _safe_float(r[cols["amount_min"]] if len(r) > cols["amount_min"] else "0")
+        amt_max = _safe_float(r[cols["amount_max"]] if len(r) > cols["amount_max"] else "0")
+        midpoint = (amt_min + amt_max) / 2.0
+        by_ticker[ticker].append({
+            "filing_id": (r[cols["filing_id"]] if len(r) > cols["filing_id"] else ""),
+            "filing_date": filing_date,
+            "midpoint": midpoint,
+            "politician_name": (r[cols.get("politician_name", -1)] if cols.get("politician_name", -1) >= 0 and len(r) > cols.get("politician_name", -1) else ""),
+        })
+    log.info(f"congress_trades sells: {sum(len(v) for v in by_ticker.values())} rows across {len(by_ticker)} tickers")
+    return by_ticker
+
+
+def _read_held_tickers(client) -> set[str]:
+    """Set of tickers currently held in either account (latest snapshot).
+
+    Used to gate TRIM emission — we only emit TRIM signals for tickers
+    we actually hold (Congress sells of stocks we don't own carry no
+    actionable information for a long-only book).
+    """
+    ss = sh._open_sheet(client)
+    held: set[str] = set()
+    for tab in ("positions_caspar", "positions_sarah"):
+        try:
+            ws = ss.worksheet(tab)
+        except Exception:
+            continue
+        rows = ws.get_all_values()
+        if len(rows) < 2:
+            continue
+        hdr = rows[0]
+        try:
+            c_date = hdr.index("date")
+            c_tk = hdr.index("ticker")
+        except ValueError:
+            continue
+        latest = max((r[c_date] for r in rows[1:] if len(r) > c_date and r[c_date]), default="")
+        if not latest:
+            continue
+        for r in rows[1:]:
+            if len(r) > max(c_date, c_tk) and r[c_date] == latest and r[c_tk]:
+                held.add(r[c_tk].strip().upper())
+    log.info(f"held tickers across both accounts: {len(held)}")
+    return held
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Scoring
 # ─────────────────────────────────────────────────────────────────────────────
@@ -607,6 +687,119 @@ def _append_to_decision_queue(client, signals: list[S.GovConfluenceSignalRow], l
     return len(new_rows)
 
 
+# Thresholds for SELL → TRIM emission (Tweak #2).
+# Conservative — we don't want noise. Either 2+ distinct politicians
+# selling OR a single politician selling >= $500K midpoint qualifies.
+TRIM_MIN_POLITICIANS = 2
+TRIM_MIN_AMOUNT = 500_000.0
+
+
+def _append_sell_signals_to_queue(
+    client,
+    sells_by_ticker: dict[str, list[dict]],
+    held_tickers: set[str],
+    today_iso: str,
+    logger: logging.Logger,
+) -> int:
+    """Emit TRIM rows to decision_queue for currently-held tickers with
+    a cluster of Congress sells. Long-only equivalent of QuiverQuant's
+    Congress L/S short side — we don't short, but Congress sells of a
+    name we OWN carry trim information.
+
+    Gate: ticker must be currently held AND (>=2 unique politicians OR
+    cumulative midpoint >= $500K). Brain reviews next morning before
+    any actual trim action.
+    """
+    candidates: list[tuple[str, list[dict]]] = []
+    for ticker, sells in sells_by_ticker.items():
+        if ticker not in held_tickers:
+            continue
+        unique_politicians = {
+            (s.get("politician_name") or "").upper()
+            for s in sells
+            if s.get("politician_name")
+        }
+        total_midpoint = sum(s["midpoint"] for s in sells)
+        if len(unique_politicians) >= TRIM_MIN_POLITICIANS or total_midpoint >= TRIM_MIN_AMOUNT:
+            candidates.append((ticker, sells))
+
+    if not candidates:
+        logger.info("  · no Congress-sell TRIM candidates among held tickers")
+        return 0
+
+    ss = sh._open_sheet(client)
+    try:
+        ws = ss.worksheet(S.DecisionRow.TAB_NAME)
+    except Exception:
+        sh.ensure_headers(client, S.DecisionRow.TAB_NAME, S.DecisionRow.HEADERS)
+        ws = ss.worksheet(S.DecisionRow.TAB_NAME)
+    existing = ws.get_all_values()
+    today_existing: set[tuple[str, str]] = set()
+    if len(existing) > 1:
+        hdr = existing[0]
+        try:
+            c_date = hdr.index("date")
+            c_tk = hdr.index("ticker")
+            c_src = hdr.index("source") if "source" in hdr else -1
+        except ValueError:
+            c_date = c_tk = c_src = -1
+        if c_date >= 0 and c_tk >= 0:
+            for r in existing[1:]:
+                if len(r) > max(c_date, c_tk):
+                    src_ok = (c_src < 0) or (len(r) > c_src and r[c_src] == "gov_confluence_sell")
+                    if src_ok:
+                        today_existing.add((r[c_date], r[c_tk]))
+
+    new_rows = []
+    for ticker, sells in candidates:
+        if (today_iso, ticker) in today_existing:
+            continue
+        unique_politicians = {
+            (s.get("politician_name") or "").upper()
+            for s in sells
+            if s.get("politician_name")
+        }
+        n_pol = len(unique_politicians)
+        total = sum(s["midpoint"] for s in sells)
+        thesis = f"Congress sells: ${total/1e6:.2f}M from {n_pol} politician(s)/30d"
+        d = S.DecisionRow(
+            date=today_iso,
+            account="caspar",  # brain reassigns to actual holder at brief time
+            ticker=ticker,
+            bucket="GOV_CONFLUENCE_TRIM",
+            thesis_1liner=thesis,
+            conv=2,  # lower than buys — review required
+            entry=0.0,
+            target=0.0,
+            status="watching",
+            strategy="TRIM",
+            right="",
+            strike=0.0,
+            expiry="",
+            premium_per_share=0.0,
+            delta=0.0,
+            annual_yield_pct=0.0,
+            breakeven=0.0,
+            cash_required=0.0,
+            iv_rank=0.0,
+            thesis_confidence=0.5,
+            thesis=thesis,
+            source="gov_confluence_sell",
+            qty=0,
+            accumulation_plan="",
+            gates="[]",
+        )
+        new_rows.append(d.to_row())
+
+    if not new_rows:
+        logger.info(f"  · {len(candidates)} TRIM candidates all already in decision_queue today")
+        return 0
+
+    sh.append_rows(client, S.DecisionRow.TAB_NAME, new_rows)
+    logger.info(f"  ✓ appended {len(new_rows)} TRIM rows to {S.DecisionRow.TAB_NAME}")
+    return len(new_rows)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
@@ -627,9 +820,11 @@ def main() -> int:
     contracts = _read_gov_contracts(client, today)
     congress = _read_congress_trades(client, today)
     insider = _read_insider_buys(client, today)
+    # Tweak #2 — also pull Congress sells for the TRIM emitter.
+    sells = _read_congress_sells(client, today)
 
-    if not (contracts or congress or insider):
-        logger.info("All three feeds empty — nothing to score")
+    if not (contracts or congress or insider or sells):
+        logger.info("All feeds empty — nothing to score")
         return 0
 
     stats = _build_stats(contracts, congress, insider, today)
@@ -647,13 +842,37 @@ def main() -> int:
                 f"({s.thesis_oneliner})"
             )
 
+    # Tweak #2 — gate TRIM emission on currently-held tickers.
+    held = _read_held_tickers(client)
+
     if args.dry:
         logger.info("[DRY] no writes performed")
+        # Report what TRIM emission WOULD do so we can verify behaviour pre-flight.
+        sell_candidates = [
+            (t, len({(s.get("politician_name") or "").upper() for s in v if s.get("politician_name")}),
+                sum(s["midpoint"] for s in v))
+            for t, v in sells.items()
+            if t in held
+            and (
+                len({(s.get("politician_name") or "").upper() for s in v if s.get("politician_name")}) >= TRIM_MIN_POLITICIANS
+                or sum(s["midpoint"] for s in v) >= TRIM_MIN_AMOUNT
+            )
+        ]
+        if sell_candidates:
+            logger.info(f"[DRY] would emit {len(sell_candidates)} TRIM candidates:")
+            for t, n_pol, total in sell_candidates:
+                logger.info(f"  · {t}: {n_pol} politicians, ${total/1e6:.2f}M total")
+        else:
+            logger.info("[DRY] no TRIM candidates (no overlap of Congress sells with held tickers)")
         return 0
 
     _upsert_signals(client, signals, logger)
     appended = _append_to_decision_queue(client, signals, logger)
-    logger.info(f"screen_gov_confluence done — {len(signals)} signals, {appended} new decisions")
+    trim_appended = _append_sell_signals_to_queue(client, sells, held, today_iso, logger)
+    logger.info(
+        f"screen_gov_confluence done — {len(signals)} signals, "
+        f"{appended} new BUY decisions, {trim_appended} new TRIM decisions"
+    )
 
     return 0
 
