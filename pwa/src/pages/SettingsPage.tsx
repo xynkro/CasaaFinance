@@ -345,6 +345,256 @@ function DecisionStatusGlossary() {
           })}
         </div>
       </div>
+
+      {/* Strategy types — what each STRATEGY token in decision_queue means.
+          Important: "HOLD" doesn't appear here as a strategy. It's a
+          recommendation verb that means "don't act today", not a trade
+          structure. See Exit Plan recommendations below for that. */}
+      <div className="mt-5 pt-5 border-t border-white/5">
+        <div className="flex items-center gap-2 mb-3">
+          <Info size={12} className="text-emerald-400" />
+          <h4 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider">
+            Strategy types
+          </h4>
+        </div>
+        <p className="text-[length:var(--t-xs)] text-slate-500 mb-3 leading-relaxed">
+          The <code className="text-slate-300">strategy</code> column on each
+          decision is the trade STRUCTURE, not whether to act today (that's
+          the status pill). These are the strategies the brain selects from:
+        </p>
+        <div className="flex flex-col gap-2.5">
+          {[
+            {
+              label: "BUY_DIP",
+              color: "#34d399",
+              bg: "rgba(52,211,153,0.10)",
+              body:
+                "Buy shares outright at the entry price. The simplest " +
+                "long entry — usually accumulation tranches into a " +
+                "compounder or a tactical pullback play. Cash account, no leverage.",
+            },
+            {
+              label: "TRIM",
+              color: "#fbbf24",
+              bg: "rgba(251,191,36,0.10)",
+              body:
+                "Sell PART of an existing position (typically 1/3 or 1/2). " +
+                "Fired on T1_HIT, on RP overweight, or when confluence " +
+                "shifts negative (e.g. 2+ Congress sells inside 30d). " +
+                "NOT a full exit — it's risk-reduction.",
+            },
+            {
+              label: "CSP",
+              color: "#60a5fa",
+              bg: "rgba(96,165,250,0.10)",
+              body:
+                "Cash-Secured Put. SELL a put at strike X — collect " +
+                "premium, get assigned at X-premium if price drops. Used " +
+                "to acquire wheel-stocks at a discount OR pure premium-harvest " +
+                "on stocks we'd be OK to own. Gated by TV signal + analyst " +
+                "consensus — won't fire on STRONG_SELL or HOLD-consensus names.",
+            },
+            {
+              label: "CC",
+              color: "#a78bfa",
+              bg: "rgba(167,139,250,0.10)",
+              body:
+                "Covered Call. SELL a call against shares we hold — caps " +
+                "upside in exchange for premium. Used on stagnating positions, " +
+                "bag-managing positions (BBAI/BTBT-style), or as the second " +
+                "leg of a wheel post-CSP assignment. Blocked on core/blue_chip " +
+                "buckets (don't cap a compounder) and on STRONG_BUY signals.",
+            },
+            {
+              label: "LONG_CALL",
+              color: "#f472b6",
+              bg: "rgba(244,114,182,0.10)",
+              body:
+                "BUY a call — directional bullish bet with capped downside " +
+                "(premium = max loss). Used by gov_confluence when score ≥ 80 " +
+                "for a Tier-B signal. Brain picks delta (0.50 / 0.60) and " +
+                "DTE (30-45d) at brief time. Higher conviction than BUY_DIP " +
+                "because we're paying for leverage.",
+            },
+            {
+              label: "PMCC",
+              color: "#fb923c",
+              bg: "rgba(251,146,60,0.10)",
+              body:
+                "Poor Man's Covered Call. Long deep-ITM LEAPS call + short " +
+                "near-term OTM call against it. Capital-efficient way to " +
+                "wheel a name without owning 100 shares. Used at score 90+ " +
+                "when IV is also elevated.",
+            },
+            {
+              label: "LONG_PUT",
+              color: "#f87171",
+              bg: "rgba(248,113,113,0.10)",
+              body:
+                "BUY a put — bearish bet OR hedge on an existing long. " +
+                "Currently rarely fires (book is long-only) but exists in " +
+                "the schema for future short/hedge ideas.",
+            },
+          ].map((it) => (
+            <div
+              key={it.label}
+              className="rounded-lg p-2.5"
+              style={{ background: it.bg, border: `1px solid ${it.color}22` }}
+            >
+              <span
+                className="inline-block px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-bold uppercase tracking-wide mb-1"
+                style={{
+                  background: `${it.color}18`,
+                  border: `1px solid ${it.color}33`,
+                  color: it.color,
+                }}
+              >
+                {it.label}
+              </span>
+              <p className="text-[length:var(--t-xs)] text-slate-400 leading-relaxed">
+                {it.body}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Exit Plan / Action Queue verbs — what HOLD, EXIT, WARNING etc.
+          mean on the Action Queue and Exit Plan cards. This is the
+          section the user keeps asking about because "HOLD" and "EXIT"
+          look like trade commands but they're actually position-status
+          read-outs from exit_plans, NOT new orders to place. */}
+      <div className="mt-5 pt-5 border-t border-white/5">
+        <div className="flex items-center gap-2 mb-3">
+          <AlertTriangle size={12} className="text-amber-400" />
+          <h4 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider">
+            Action Queue / Exit Plan verbs
+          </h4>
+        </div>
+        <p className="text-[length:var(--t-xs)] text-slate-500 mb-3 leading-relaxed">
+          These appear on the Action Queue and on the Exit Plan column of
+          a position. They describe what the system thinks about a
+          position you ALREADY hold — NOT a new trade to place. The
+          status (HEALTHY / WARNING / BAG / etc.) is the system's read
+          on the position; the recommendation (HOLD / EXIT / TRIM) is
+          the suggested response.
+        </p>
+        <div className="flex flex-col gap-2.5">
+          {[
+            {
+              label: "HEALTHY",
+              color: "#34d399",
+              bg: "rgba(52,211,153,0.10)",
+              body:
+                "Price is comfortably above stop, no targets hit yet. " +
+                "Nothing to do — let it run. Default state for any " +
+                "position with positive trajectory.",
+            },
+            {
+              label: "T1_HIT",
+              color: "#a7f3d0",
+              bg: "rgba(167,243,208,0.10)",
+              body:
+                "Price reached target_1. For BLUE-CHIP / ETF positions: " +
+                "the recommendation is LET WINNER RUN — don't sell. For " +
+                "speculative names: the rec is TRIM 1/3, raise stop to " +
+                "breakeven. NOT an exit signal — it's the first profit checkpoint.",
+            },
+            {
+              label: "T2_HIT",
+              color: "#86efac",
+              bg: "rgba(134,239,172,0.10)",
+              body:
+                "Price reached target_2 (Fib 1.382 extension or T1 + 2×ATR). " +
+                "Recommendation is TRIM / TRAIL — take more profit or " +
+                "tighten the stop to T1. Strong positive outcome.",
+            },
+            {
+              label: "WARNING",
+              color: "#fbbf24",
+              bg: "rgba(251,191,36,0.10)",
+              body:
+                "Within 3% of stop_loss, OR price has broken below SMA-50/200. " +
+                "Recommendation is HOLD WITH CAUTION. Doesn't mean exit — " +
+                "means re-read the thesis and prepare for a stop trigger.",
+            },
+            {
+              label: "STOP_TRIGGERED",
+              color: "#f87171",
+              bg: "rgba(248,113,113,0.10)",
+              body:
+                "Live price has crossed below stop_loss. Recommendation " +
+                "is EXIT — honor the stop or revise the thesis with a new stop " +
+                "level. Letting losers run past the stop is what turns -19% " +
+                "into -40%.",
+            },
+            {
+              label: "BAG",
+              color: "#f43f5e",
+              bg: "rgba(244,63,94,0.10)",
+              body:
+                "Already past the percentage hard stop (-25% by default, " +
+                "-30% for speculatives, -10% for blue-chip). Position is " +
+                "too far underwater for a clean exit. Recommendation: if " +
+                "wheeling (CC at breakeven+), manage through assignment; " +
+                "if not wheeling, take the L and free the capital.",
+            },
+            {
+              label: "CATALYST_WARNING",
+              color: "#fb923c",
+              bg: "rgba(251,146,60,0.10)",
+              body:
+                "Position has an earnings event / FDA decision / Fed " +
+                "minute inside the option DTE. Recommendation: consider " +
+                "closing the option pre-event. Binary catalysts can negate " +
+                "all the IV-decay math.",
+            },
+            {
+              label: "TIME_STOP",
+              color: "#94a3b8",
+              bg: "rgba(148,163,184,0.10)",
+              body:
+                "Position has been held longer than time_stop_days (45 " +
+                "default) without reaching T1. Recommendation: REASSESS " +
+                "the thesis. Stale positions waste capital that could be " +
+                "compounding elsewhere.",
+            },
+          ].map((it) => (
+            <div
+              key={it.label}
+              className="rounded-lg p-2.5"
+              style={{ background: it.bg, border: `1px solid ${it.color}22` }}
+            >
+              <span
+                className="inline-block px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-bold uppercase tracking-wide mb-1"
+                style={{
+                  background: `${it.color}18`,
+                  border: `1px solid ${it.color}33`,
+                  color: it.color,
+                }}
+              >
+                {it.label}
+              </span>
+              <p className="text-[length:var(--t-xs)] text-slate-400 leading-relaxed">
+                {it.body}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Disambiguation card — directly addresses the "HOLD on a Buy
+            Ideas card" confusion. */}
+        <div className="mt-4 rounded-lg p-3" style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+          <p className="text-[length:var(--t-2xs)] text-slate-400 leading-relaxed">
+            <strong className="text-slate-200">Why "HOLD" can be confusing:</strong>{" "}
+            "HOLD" on a position you already own means <em>keep what you have,
+            no new action</em>. "HOLD" on an idea you don't yet own means{" "}
+            <em>don't buy yet — preconditions not met</em>. Same word, opposite
+            implication. The card label tells you which: Action Queue / Exit
+            Plan = position status; Watching / Fresh Ideas = entry status.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
