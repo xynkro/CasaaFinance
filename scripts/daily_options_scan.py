@@ -292,11 +292,60 @@ def main() -> int:
         logger.error("No tickers to scan")
         return 1
 
+    # Load gov confluence signals for catalyst tagging + directional gate
+    from src.sync import load_env
+    from src import sheets as sh
+    from src import schema as S
+    load_env()
+    client = sh.authenticate()
+    gov_data: dict[str, dict] = {}
+    try:
+        import datetime as _dt
+        ss = sh._open_sheet(client)
+        ws_gc = ss.worksheet(S.GovConfluenceSignalRow.TAB_NAME)
+        gc_rows = ws_gc.get_all_values()
+        if len(gc_rows) > 1:
+            gc_hdr = gc_rows[0]
+            gc_cols = {h: i for i, h in enumerate(gc_hdr)}
+            seven_d = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+            for r in gc_rows[1:]:
+                if len(r) <= gc_cols.get("date", 0) or r[gc_cols["date"]] < seven_d:
+                    continue
+                tk = r[gc_cols["ticker"]].upper()
+                try:
+                    sc = float(r[gc_cols["confluence_score"]] or 0)
+                except (TypeError, ValueError):
+                    sc = 0
+                prev = gov_data.get(tk)
+                if prev is None or sc > prev.get("score", 0):
+                    gov_data[tk] = {
+                        "score": sc,
+                        "tier": r[gc_cols.get("tier", len(r))] if "tier" in gc_cols and gc_cols["tier"] < len(r) else "",
+                        "strategy": r[gc_cols.get("recommended_strategy", len(r))] if "recommended_strategy" in gc_cols and gc_cols["recommended_strategy"] < len(r) else "",
+                    }
+            logger.info(f"  loaded {len(gov_data)} gov confluence signals for catalyst tagging")
+    except Exception as e:
+        logger.warning(f"  gov confluence unavailable ({e}) — no catalyst tagging")
+
     all_candidates: list[dict] = []
     for ticker in watchlist:
         try:
             cands = scan_ticker(ticker, logger)
-            all_candidates.extend(cands)
+            # Tag candidates with gov confluence catalyst flag
+            gov_info = gov_data.get(ticker, {})
+            for c in cands:
+                if gov_info:
+                    c["catalyst_flag"] = True
+                    gov_strategy = gov_info.get("strategy", "")
+                    # Block CSPs where Congress is selling (TRIM signal)
+                    if c["strategy"] == "CSP" and gov_strategy == "TRIM":
+                        logger.info(f"  {ticker}: CSP blocked — Congress cluster selling")
+                        continue
+                    # Block CCs where gov confluence says BUY (Tier A/B catalyst)
+                    if c["strategy"] == "CC" and gov_info.get("tier") in ("A", "B") and gov_strategy in ("BUY_DIP", "LONG_CALL"):
+                        logger.info(f"  {ticker}: CC blocked — gov confluence Tier {gov_info['tier']} {gov_strategy}")
+                        continue
+                all_candidates.append(c)
         except Exception as e:
             logger.debug(f"  {ticker}: {e}")
 
@@ -312,12 +361,7 @@ def main() -> int:
         logger.warning("No candidates met threshold — sheet not updated")
         return 0
 
-    # Write to scan_results
-    from src.sync import load_env
-    from src import sheets as sh
-    from src import schema as S
-    load_env()
-    client = sh.authenticate()
+    # Write to scan_results (client already authenticated above)
     sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
 
     today_iso = datetime.now().strftime("%Y-%m-%d")

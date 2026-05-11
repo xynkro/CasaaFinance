@@ -240,7 +240,24 @@ thesis is worth more than a score-70 signal in a broken chart.
 Include up to 5 picks. If ALL signals are genuinely uninteresting, say so
 with a brief reason ("all defense primes, no edge vs priced-in").
 
-Also update `decision_queue` for any actionable picks. Use this Bash:
+**IMPORTANT**: Gov confluence is ONE indicator among many — not a standalone
+decision. When you write to `decision_queue`, your thesis MUST blend
+gov data with the full indicator stack:
+  - Technical: RSI, SMA50/200, EMA, %K/%D stochastics, price action
+  - Fundamental: P/E, EBITDA, revenue growth, analyst consensus
+  - Volatility: WVF (Williams VIX Fix), IV rank, HV30
+  - Gov/insider: contract size, Congress trades, insider buys (from
+    gov_confluence_signals)
+
+A good thesis: "AVAV BUY_DIP — $35M Army drone IDIQ (5% rev), RSI 42
+at SMA50 support, Congress cluster buy (Pelosi+Scott), P/E 28 vs
+sector 35. Entry $215 dip."
+
+A BAD thesis: "Congress sells: $0.02M from 2 politicians/30d" ← this
+is worthless without technicals. Never write gov-only thesis.
+
+To update `decision_queue`, use `push_decisions.py` (pass JSON via stdin)
+or modify existing rows via Bash:
 ```bash
 python -c "
 from src.sync import load_env; from src import sheets as sh

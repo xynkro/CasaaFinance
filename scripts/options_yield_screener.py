@@ -475,17 +475,20 @@ TV_BULLISH = {"BUY", "STRONG_BUY"}
 ANALYST_CSP_MIN_SCORE = 0.5
 
 
-def _load_signal_gates(logger: logging.Logger) -> tuple[dict[str, str], dict[str, float]]:
-    """Read TV daily signals + analyst consensus per-ticker.
+def _load_signal_gates(logger: logging.Logger) -> tuple[dict[str, str], dict[str, float], dict[str, dict]]:
+    """Read TV daily signals + analyst consensus + gov confluence per-ticker.
 
     Returns:
-        (tv_daily_by_ticker, analyst_score_by_ticker)
-        Missing tickers default to NEUTRAL TV and 0.0 analyst (no veto).
+        (tv_daily_by_ticker, analyst_score_by_ticker, gov_confluence_by_ticker)
+        Missing tickers default to NEUTRAL TV, 0.0 analyst, {} gov (no veto).
+        Gov confluence dict per ticker: {score, tier, congress_sell_count,
+        contract_dollars, strategy}.
     """
     from src import sheets as sh
 
     tv_daily: dict[str, str] = {}
     analyst: dict[str, float] = {}
+    gov: dict[str, dict] = {}
 
     client = sh.authenticate()
     ss = sh._open_sheet(client)
@@ -539,7 +542,37 @@ def _load_signal_gates(logger: logging.Logger) -> tuple[dict[str, str], dict[str
     except Exception as e:
         logger.warning(f"  signal gates: analyst consensus unavailable ({e}) — analyst gate disabled")
 
-    return tv_daily, analyst
+    # gov_confluence_signals — latest score + congress sell context per ticker
+    try:
+        import datetime
+        ws = ss.worksheet(S.GovConfluenceSignalRow.TAB_NAME)
+        rows = ws.get_all_values()
+        if len(rows) > 1:
+            hdr = rows[0]
+            cols = {h: i for i, h in enumerate(hdr)}
+            seven_d = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+            for r in rows[1:]:
+                if len(r) <= cols.get("date", 0):
+                    continue
+                if r[cols["date"]] < seven_d:
+                    continue
+                tk = r[cols["ticker"]].upper()
+                try:
+                    score = float(r[cols["confluence_score"]] or 0)
+                except (TypeError, ValueError):
+                    score = 0.0
+                prev = gov.get(tk)
+                if prev is None or score > prev.get("score", 0):
+                    gov[tk] = {
+                        "score": score,
+                        "tier": r[cols.get("tier", len(r))] if "tier" in cols and cols["tier"] < len(r) else "",
+                        "strategy": r[cols.get("recommended_strategy", len(r))] if "recommended_strategy" in cols and cols["recommended_strategy"] < len(r) else "",
+                    }
+            logger.info(f"  signal gates: loaded {len(gov)} gov confluence signals (last 7d)")
+    except Exception as e:
+        logger.warning(f"  signal gates: gov confluence unavailable ({e}) — gov gate disabled")
+
+    return tv_daily, analyst, gov
 
 
 def _signal_gate(
@@ -547,25 +580,38 @@ def _signal_gate(
     ticker: str,
     tv_daily: dict[str, str],
     analyst: dict[str, float],
+    gov: dict[str, dict] | None = None,
 ) -> tuple[bool, str]:
     """Return (blocked, reason). Empty reason when allowed.
 
     CSP blocked when:
       - TV daily ∈ {SELL, STRONG_SELL}  (selling puts into a downtrend)
       - Analyst consensus < 0.5         (Wall St not even leaning BUY)
+      - Congress cluster selling (gov confluence indicates TRIM)
     CC blocked when:
       - TV daily ∈ {BUY, STRONG_BUY}    (selling calls in a real breakout)
+      - Gov confluence Tier A/B BUY_DIP  (don't cap a govt-contract winner)
     """
     tv = tv_daily.get(ticker, "")  # missing → no veto
+    gov_info = (gov or {}).get(ticker, {})
+    gov_strategy = gov_info.get("strategy", "")
+
     if strategy == "CSP":
         if tv in TV_BEARISH:
             return True, f"CSP blocked: TV daily = {tv} (don't sell puts into a downtrend)"
         score = analyst.get(ticker, 0.0)
         if score < ANALYST_CSP_MIN_SCORE:
             return True, f"CSP blocked: analyst consensus {score:.2f} < {ANALYST_CSP_MIN_SCORE} (not enough Wall St conviction)"
+        # Congress selling a name we'd sell puts on → red flag
+        if gov_strategy == "TRIM":
+            return True, f"CSP blocked: Congress cluster selling (gov confluence → TRIM)"
     elif strategy == "CC":
         if tv in TV_BULLISH:
             return True, f"CC blocked: TV daily = {tv} (don't cap a winner)"
+        # Don't sell calls on names with fresh gov contract catalysts
+        gov_tier = gov_info.get("tier", "")
+        if gov_tier in ("A", "B") and gov_strategy in ("BUY_DIP", "LONG_CALL", "PMCC"):
+            return True, f"CC blocked: gov confluence Tier {gov_tier} {gov_strategy} (don't cap a contract catalyst)"
     return False, ""
 
 
@@ -641,18 +687,18 @@ def scan_ticker(
     csp_blocked, csp_reason = csp_blocked_by_bucket(ticker)
     bucket = _bucket_for(ticker)
 
-    # Apply signal gates (TV daily + analyst consensus). These are layered
-    # on top of bucket gates — bucket says "is this name CSP/CC-eligible
-    # in principle?" while the signal gate says "given current technicals/
-    # consensus, is the trade aligned today?"
+    # Apply signal gates (TV daily + analyst consensus + gov confluence).
+    # These are layered on top of bucket gates — bucket says "is this name
+    # CSP/CC-eligible in principle?" while the signal gate says "given
+    # current technicals/consensus/gov data, is the trade aligned today?"
     if tv_daily is not None and analyst is not None:
         if not csp_blocked:
-            blocked, reason = _signal_gate("CSP", ticker, tv_daily, analyst)
+            blocked, reason = _signal_gate("CSP", ticker, tv_daily, analyst, gov)
             if blocked:
                 csp_blocked, csp_reason = True, reason
                 logger.debug(f"  {ticker}: {reason}")
         if not cc_blocked:
-            blocked, reason = _signal_gate("CC", ticker, tv_daily, analyst)
+            blocked, reason = _signal_gate("CC", ticker, tv_daily, analyst, gov)
             if blocked:
                 cc_blocked, cc_reason = True, reason
                 logger.debug(f"  {ticker}: {reason}")
@@ -772,7 +818,7 @@ def main() -> int:
 
     # Load TV daily + analyst consensus once for the directional gates.
     # Missing sheets are non-fatal — the gates just no-op.
-    tv_daily, analyst = _load_signal_gates(logger)
+    tv_daily, analyst, gov = _load_signal_gates(logger)
 
     all_candidates: list[dict] = []
 

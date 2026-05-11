@@ -1030,11 +1030,15 @@ def main() -> int:
         return 0
 
     _upsert_signals(client, signals, logger)
-    appended = _append_to_decision_queue(client, signals, logger)
-    trim_appended = _append_sell_signals_to_queue(client, sells, held, today_iso, logger)
+    # NOTE: we no longer write directly to decision_queue here.
+    # Gov confluence is ONE signal among many (RSI, EMA, SMA, P/E, etc.).
+    # The brain (daily brief / WSR) reads gov_confluence_signals alongside
+    # all other indicators and makes its own decisions with full technical
+    # context.  Direct decision_queue writes from the screener produced
+    # bare-bones rows ("Congress sells: $0.02M") with no technicals.
     logger.info(
-        f"screen_gov_confluence done — {len(signals)} signals, "
-        f"{appended} new BUY decisions, {trim_appended} new TRIM decisions"
+        f"screen_gov_confluence done — {len(signals)} signals written to "
+        f"gov_confluence_signals (brain incorporates into decisions)"
     )
 
     return 0
