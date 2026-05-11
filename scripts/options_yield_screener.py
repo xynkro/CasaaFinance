@@ -456,6 +456,119 @@ def score_candidate(c: dict) -> float:
 
 # ──────────────────── CC eligibility ────────────────────────────────────
 
+# ──────────────────── Signal gates (TV + analyst) ────────────────────────
+# Mid-flight gates so we don't propose CSPs on STRONG_SELL names (where
+# assignment becomes likely at a loss to fair value) or CCs on STRONG_BUY
+# names (where we'd cap upside in a real breakout). Reads two sheets once
+# at startup and caches per-ticker for the scan loop.
+
+# TV recommendations we treat as "directional veto":
+#   - CSP must NOT see these (selling puts in a downtrend = paid to catch a falling knife)
+#   - CC must NOT see the inverse (selling calls in an uptrend = capping a winner)
+TV_BEARISH = {"SELL", "STRONG_SELL"}
+TV_BULLISH = {"BUY", "STRONG_BUY"}
+
+# Analyst consensus floor for CSPs. consensus_score range is [-2, +2]:
+#   -2 = STRONG_SELL, -1 = SELL, 0 = HOLD, +1 = BUY, +2 = STRONG_BUY
+# Requiring >= 0.5 means at least "leaning BUY" — we won't be assigned to
+# a name Wall St considers HOLD-or-worse.
+ANALYST_CSP_MIN_SCORE = 0.5
+
+
+def _load_signal_gates(logger: logging.Logger) -> tuple[dict[str, str], dict[str, float]]:
+    """Read TV daily signals + analyst consensus per-ticker.
+
+    Returns:
+        (tv_daily_by_ticker, analyst_score_by_ticker)
+        Missing tickers default to NEUTRAL TV and 0.0 analyst (no veto).
+    """
+    from src import sheets as sh
+
+    tv_daily: dict[str, str] = {}
+    analyst: dict[str, float] = {}
+
+    client = sh.authenticate()
+    ss = sh._open_sheet(client)
+
+    # tv_signals — keep only interval=1d, latest row per ticker
+    try:
+        ws = ss.worksheet(S.TvSignalRow.TAB_NAME)
+        rows = ws.get_all_values()
+        if len(rows) > 1:
+            hdr = rows[0]
+            c_tk = hdr.index("ticker")
+            c_iv = hdr.index("interval")
+            c_rec = hdr.index("recommendation")
+            c_date = hdr.index("date") if "date" in hdr else -1
+            # Take latest date per (ticker, interval=1d). Use string sort
+            # since audit_ts is YYYY-MM-DDTHHMMSS-sortable.
+            by_ticker: dict[str, tuple[str, str]] = {}
+            for r in rows[1:]:
+                if len(r) <= max(c_tk, c_iv, c_rec):
+                    continue
+                if r[c_iv] != "1d":
+                    continue
+                tk = r[c_tk].upper()
+                ts = r[c_date] if c_date >= 0 and len(r) > c_date else ""
+                rec = r[c_rec].upper()
+                prev = by_ticker.get(tk)
+                if prev is None or ts > prev[0]:
+                    by_ticker[tk] = (ts, rec)
+            tv_daily = {tk: rec for tk, (_, rec) in by_ticker.items()}
+            logger.info(f"  signal gates: loaded {len(tv_daily)} TV daily signals")
+    except Exception as e:
+        logger.warning(f"  signal gates: TV signals unavailable ({e}) — directional gate disabled")
+
+    # analyst_consensus — upserted by ticker so every row is current
+    try:
+        ws = ss.worksheet(S.AnalystConsensusRow.TAB_NAME)
+        rows = ws.get_all_values()
+        if len(rows) > 1:
+            hdr = rows[0]
+            c_tk = hdr.index("ticker")
+            c_score = hdr.index("consensus_score")
+            for r in rows[1:]:
+                if len(r) <= max(c_tk, c_score):
+                    continue
+                tk = r[c_tk].upper()
+                try:
+                    analyst[tk] = float(r[c_score])
+                except (ValueError, TypeError):
+                    pass
+            logger.info(f"  signal gates: loaded {len(analyst)} analyst consensus scores")
+    except Exception as e:
+        logger.warning(f"  signal gates: analyst consensus unavailable ({e}) — analyst gate disabled")
+
+    return tv_daily, analyst
+
+
+def _signal_gate(
+    strategy: str,
+    ticker: str,
+    tv_daily: dict[str, str],
+    analyst: dict[str, float],
+) -> tuple[bool, str]:
+    """Return (blocked, reason). Empty reason when allowed.
+
+    CSP blocked when:
+      - TV daily ∈ {SELL, STRONG_SELL}  (selling puts into a downtrend)
+      - Analyst consensus < 0.5         (Wall St not even leaning BUY)
+    CC blocked when:
+      - TV daily ∈ {BUY, STRONG_BUY}    (selling calls in a real breakout)
+    """
+    tv = tv_daily.get(ticker, "")  # missing → no veto
+    if strategy == "CSP":
+        if tv in TV_BEARISH:
+            return True, f"CSP blocked: TV daily = {tv} (don't sell puts into a downtrend)"
+        score = analyst.get(ticker, 0.0)
+        if score < ANALYST_CSP_MIN_SCORE:
+            return True, f"CSP blocked: analyst consensus {score:.2f} < {ANALYST_CSP_MIN_SCORE} (not enough Wall St conviction)"
+    elif strategy == "CC":
+        if tv in TV_BULLISH:
+            return True, f"CC blocked: TV daily = {tv} (don't cap a winner)"
+    return False, ""
+
+
 def cc_blocked_by_bucket(ticker: str) -> tuple[bool, str]:
     """
     Return (blocked, reason). True if this ticker is in a bucket where CC
@@ -488,10 +601,19 @@ def csp_blocked_by_bucket(ticker: str) -> tuple[bool, str]:
 
 # ──────────────────── Per-ticker pipeline ────────────────────────────────
 
-def scan_ticker(ticker: str, logger: logging.Logger) -> list[dict]:
+def scan_ticker(
+    ticker: str,
+    logger: logging.Logger,
+    tv_daily: dict[str, str] | None = None,
+    analyst: dict[str, float] | None = None,
+) -> list[dict]:
     """
     Returns a list of fully-scored candidate dicts (CSP and/or CC) for one
     ticker. Empty list if nothing qualifies.
+
+    `tv_daily` and `analyst` are the per-ticker signal gates loaded once at
+    startup (see `_load_signal_gates`). Missing dicts disables the gates —
+    useful for unit tests / one-off scans.
     """
     import yfinance as yf
 
@@ -519,15 +641,31 @@ def scan_ticker(ticker: str, logger: logging.Logger) -> list[dict]:
     csp_blocked, csp_reason = csp_blocked_by_bucket(ticker)
     bucket = _bucket_for(ticker)
 
+    # Apply signal gates (TV daily + analyst consensus). These are layered
+    # on top of bucket gates — bucket says "is this name CSP/CC-eligible
+    # in principle?" while the signal gate says "given current technicals/
+    # consensus, is the trade aligned today?"
+    if tv_daily is not None and analyst is not None:
+        if not csp_blocked:
+            blocked, reason = _signal_gate("CSP", ticker, tv_daily, analyst)
+            if blocked:
+                csp_blocked, csp_reason = True, reason
+                logger.debug(f"  {ticker}: {reason}")
+        if not cc_blocked:
+            blocked, reason = _signal_gate("CC", ticker, tv_daily, analyst)
+            if blocked:
+                cc_blocked, cc_reason = True, reason
+                logger.debug(f"  {ticker}: {reason}")
+
     raw_candidates: list[dict] = []
     for exp in target_exps:
-        # CSPs (skip if bucket blocks — e.g. lottery/leveraged_etf)
+        # CSPs (skip if bucket OR signal gate blocks)
         if not csp_blocked:
             for c in _candidates_from_chain(ticker, exp, "P", spot, sigma_proxy, logger):
                 c["strategy"] = "CSP"
                 c["bucket"] = bucket
                 raw_candidates.append(c)
-        # CCs (skip if bucket blocks)
+        # CCs (skip if bucket OR signal gate blocks)
         if not cc_blocked:
             for c in _candidates_from_chain(ticker, exp, "C", spot, sigma_proxy, logger):
                 c["strategy"] = "CC"
@@ -632,6 +770,10 @@ def main() -> int:
     us_universe = [t for t in universe if "." not in t and "-" not in t.replace("-B", "")]
     logger.info(f"scanning {len(us_universe)} US-listed tickers (from {len(universe)} total)")
 
+    # Load TV daily + analyst consensus once for the directional gates.
+    # Missing sheets are non-fatal — the gates just no-op.
+    tv_daily, analyst = _load_signal_gates(logger)
+
     all_candidates: list[dict] = []
 
     # Run with bounded concurrency. yfinance is slow; ThreadPoolExecutor
@@ -639,7 +781,7 @@ def main() -> int:
     # Yahoo's rate-limiter (max_workers=3 + sleep between submissions).
     def _wrapped(t: str) -> list[dict]:
         try:
-            return scan_ticker(t, logger)
+            return scan_ticker(t, logger, tv_daily=tv_daily, analyst=analyst)
         except Exception as e:
             logger.warning(f"  {t}: scan_ticker raised {e}")
             return []
