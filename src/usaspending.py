@@ -240,7 +240,24 @@ def get_total_outlays(row: dict) -> float:
 
 
 def get_action_date(row: dict) -> str:
-    return str(row.get("Action Date") or "")[:10]
+    """Date the award action occurred.
+
+    USAspending's API frequently returns `Action Date: None` even when
+    the field is requested — the open-source API appears to populate it
+    inconsistently across award types. Fall back to `Last Modified Date`
+    (when the record was last touched, which is a good proxy since our
+    `time_period` filter is on action_date anyway) and finally `Start Date`.
+    Returning empty string when ALL three are missing means downstream
+    screener filters drop the row — preferable to silently inserting
+    today's date.
+    """
+    raw = (
+        row.get("Action Date")
+        or row.get("Last Modified Date")
+        or row.get("Start Date")
+        or ""
+    )
+    return str(raw)[:10]
 
 
 def get_period_start(row: dict) -> str:

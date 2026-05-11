@@ -122,8 +122,9 @@ def _aggregate_unmapped(awards: list[dict]) -> list[S.GovUnmappedRecipientRow]:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--dry", action="store_true", help="Print plan, no sheet write")
-    p.add_argument("--days", type=int, default=1,
-                   help="Number of trailing days to fetch (default 1 = yesterday only)")
+    p.add_argument("--days", type=int, default=7,
+                   help="Number of trailing days to fetch (default 7 = handles weekends + "
+                        "1-2 day outages safely thanks to award_id dedup; bump to 14+ for backfill)")
     p.add_argument("--end", type=str, default=None,
                    help="ISO end date (YYYY-MM-DD); default = yesterday SGT")
     args = p.parse_args()
@@ -144,11 +145,20 @@ def main() -> int:
     awards = us.fetch_awards(start_iso, end_iso)
     logger.info(f"  · pulled {len(awards)} awards")
 
-    if not awards:
-        logger.info("No awards returned — nothing to write")
-        return 0
-
     load_env()  # only matters if we'll touch sheets; harmless in --dry mode
+
+    # Always ensure the sheet exists with headers, even on 0-award days.
+    # Otherwise downstream readers (screen_gov_confluence) error out and
+    # silent gaps look like the strategy is broken when really it's just
+    # quiet (e.g. weekend day with no contract awards).
+    if not args.dry:
+        client = sh.authenticate()
+        sh.ensure_headers(client, S.GovContractRow.TAB_NAME, S.GovContractRow.HEADERS)
+        sh.ensure_headers(client, S.GovUnmappedRecipientRow.TAB_NAME, S.GovUnmappedRecipientRow.HEADERS)
+
+    if not awards:
+        logger.info("No awards returned — sheet headers ensured but no rows written")
+        return 0
 
     # Resolve tickers and build rows
     rows: list[S.GovContractRow] = []
@@ -184,15 +194,53 @@ def main() -> int:
         logger.info("[DRY] no writes performed")
         return 0
 
-    client = sh.authenticate()
-    sh.ensure_headers(client, S.GovContractRow.TAB_NAME, S.GovContractRow.HEADERS)
-    sh.append_rows(client, S.GovContractRow.TAB_NAME, [r.to_row() for r in rows])
-    logger.info(f"  ✓ wrote {len(rows)} rows to {S.GovContractRow.TAB_NAME}")
+    # Dedup against existing award_id rows so overlapping 7-day windows
+    # don't duplicate. Read existing sheet once, skip rows whose award_id
+    # we've already written.
+    ss = sh._open_sheet(client)
+    ws = ss.worksheet(S.GovContractRow.TAB_NAME)
+    existing = ws.get_all_values()
+    existing_ids: set[str] = set()
+    if len(existing) > 1:
+        hdr = existing[0]
+        try:
+            c_aid = hdr.index("award_id")
+            for r in existing[1:]:
+                if len(r) > c_aid and r[c_aid]:
+                    existing_ids.add(r[c_aid])
+        except ValueError:
+            pass  # legacy sheet without award_id col — fall through to no-dedup
+
+    new_rows = [r for r in rows if r.award_id not in existing_ids]
+    skipped = len(rows) - len(new_rows)
+    if skipped:
+        logger.info(f"  · {skipped} awards already in sheet, skipping (dedup by award_id)")
+
+    if new_rows:
+        sh.append_rows(client, S.GovContractRow.TAB_NAME, [r.to_row() for r in new_rows])
+        logger.info(f"  ✓ wrote {len(new_rows)} new rows to {S.GovContractRow.TAB_NAME}")
+    else:
+        logger.info(f"  · all {len(rows)} awards already present — nothing new to write")
 
     if unmapped_rows:
-        sh.ensure_headers(client, S.GovUnmappedRecipientRow.TAB_NAME, S.GovUnmappedRecipientRow.HEADERS)
-        sh.append_rows(client, S.GovUnmappedRecipientRow.TAB_NAME, [u.to_row() for u in unmapped_rows])
-        logger.info(f"  ✓ wrote {len(unmapped_rows)} rows to {S.GovUnmappedRecipientRow.TAB_NAME}")
+        # Unmapped recipients are aggregated per-recipient per-run, not
+        # per-award, so dedup by recipient_name (latest run wins for amounts).
+        ws_u = ss.worksheet(S.GovUnmappedRecipientRow.TAB_NAME)
+        existing_u = ws_u.get_all_values()
+        existing_unmapped: set[str] = set()
+        if len(existing_u) > 1:
+            hdr_u = existing_u[0]
+            try:
+                c_name = hdr_u.index("recipient_name")
+                for r in existing_u[1:]:
+                    if len(r) > c_name and r[c_name]:
+                        existing_unmapped.add(r[c_name])
+            except ValueError:
+                pass
+        new_unmapped = [u for u in unmapped_rows if u.recipient_name not in existing_unmapped]
+        if new_unmapped:
+            sh.append_rows(client, S.GovUnmappedRecipientRow.TAB_NAME, [u.to_row() for u in new_unmapped])
+            logger.info(f"  ✓ wrote {len(new_unmapped)} new unmapped rows for review")
 
     return 0
 

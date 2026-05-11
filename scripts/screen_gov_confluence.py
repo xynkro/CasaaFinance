@@ -48,7 +48,12 @@ CONGRESS_LOOKBACK_DAYS = 60
 INSIDER_LOOKBACK_DAYS = 90
 
 # Score thresholds
-MIN_SCORE_TO_PERSIST = 60   # below this, don't even write to gov_confluence_signals
+# MIN_SCORE_TO_PERSIST=35 surfaces contract-only signals (LMT/BA/RTX-type
+# bulk contract activity, ~35 from single vector) into the
+# gov_confluence_signals sheet for brain review, even when no Congress/
+# insider confluence exists. Tier A/B (70/80) still gate auto-decisions
+# in decision_queue — brain reviews 35-69 manually each morning.
+MIN_SCORE_TO_PERSIST = 35
 TIER_A_MIN_SCORE = 70
 TIER_B_MIN_SCORE = 80
 TIER_A_MIN_IMPACT_PCT = 0.01  # 1% TTM rev
