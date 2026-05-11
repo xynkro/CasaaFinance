@@ -96,10 +96,10 @@ for r in it[1:]:
         except ValueError:
             pass
 
-# Government Spending Confluence — today's screener output
-# (gov_contracts + congress_trades + insider, scored 0-100)
+# Government Spending Confluence — ALL signals, not just high-scoring
+# The brain decides what's actionable, not the rules engine.
 print()
-print('GOV CONFLUENCE TODAY (top by score, tier-A/B picks have strategy):')
+print('GOV CONFLUENCE ALL SIGNALS (brain decides, rules-score is advisory):')
 try:
     gc = ss.worksheet('gov_confluence_signals').get_all_values()
     today_str = datetime.date.today().isoformat()
@@ -110,16 +110,18 @@ try:
         if r and len(r) > cols.get('date', 0) and r[cols['date']] == today_str:
             today_signals.append(r)
     today_signals.sort(key=lambda r: float(r[cols['confluence_score']] or 0), reverse=True)
-    for r in today_signals[:10]:
+    for r in today_signals[:15]:
         score = r[cols['confluence_score']]
         tk = r[cols['ticker']]
         tier = r[cols['tier']] or '-'
         strat = r[cols['recommended_strategy']] or 'WATCH'
         thesis = r[cols['thesis_oneliner']]
         action = r[cols['recommended_action']]
-        print(f'  {tk:6} score={score:>5} tier={tier:1} strat={strat:10} | {thesis} | {action[:80]}')
+        contract_usd = r[cols.get('contract_dollars', len(r))] if 'contract_dollars' in cols and cols['contract_dollars'] < len(r) else ''
+        congress_usd = r[cols.get('congress_dollars', len(r))] if 'congress_dollars' in cols and cols['congress_dollars'] < len(r) else ''
+        print(f'  {tk:6} score={score:>5} tier={tier:1} strat={strat:10} contracts=${contract_usd} congress=${congress_usd} | {thesis} | {action[:80]}')
     if not today_signals:
-        print('  (no signals scored >= 60 today)')
+        print('  (no signals today)')
 except Exception as e:
     print(f'  (gov_confluence_signals not available: {e})')
 
@@ -216,22 +218,29 @@ distinct chips.
 }
 ```
 
-**`gov_confluence` field guidance** — read `gov_confluence_signals` for
-today (output of `screen_gov_confluence` cron at 07:00 SGT). Up to 3
-top-scoring picks (Tier A or B). For each, format as:
-  `<TICKER> score <N> <Tier> → <STRATEGY> — <one-line thesis>`
+**`gov_confluence` field guidance** — YOU are the decision-maker, not the
+rules engine. The `gov_confluence_signals` tab shows ALL scored signals
+(the rules-based score is advisory context, not a filter). Read every
+signal and decide independently what's actionable based on:
+  - Contract $ size relative to company revenue (a $50M contract is huge
+    for a $2B company, irrelevant for MSFT)
+  - Congress trade patterns (cluster buys by multiple politicians >
+    single filing)
+  - Insider buying conviction (CEO/CFO buys > director sales)
+  - Technical setup (is the stock at support? breaking out? overbought?)
+  - Macro context (earnings imminent? FOMC blackout? sector rotation?)
 
-You **MAY override** the rules-based `recommended_strategy` if you spot
-context the rules miss:
-  - Earnings within 7 days → downgrade to "WAIT/SKIP" (note in thesis)
-  - High IV rank (>60) on a LONG_CALL → switch to PMCC
-  - Clear technical breakdown despite the catalyst → skip with reason
-  - Macro blackout active for the day → defer (note "post-FOMC")
+For each signal you deem noteworthy (regardless of rules-score), format:
+  `<TICKER> score <N> → <YOUR_STRATEGY> — <your reasoning>`
 
-If you change strategy or skip, also update the corresponding row in
-`decision_queue` (find by `source = "gov_confluence"`, today's date,
-matching ticker) — set `status` to `act_now` for high-conviction picks
-or `dormant` for skips. Use this Bash:
+Your strategy options: BUY_DIP, LONG_CALL, PMCC, CSP, WATCH, SKIP
+You are NOT limited to Tier A/B. A score-25 signal with a compelling
+thesis is worth more than a score-70 signal in a broken chart.
+
+Include up to 5 picks. If ALL signals are genuinely uninteresting, say so
+with a brief reason ("all defense primes, no edge vs priced-in").
+
+Also update `decision_queue` for any actionable picks. Use this Bash:
 ```bash
 python -c "
 from src.sync import load_env; from src import sheets as sh

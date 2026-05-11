@@ -415,8 +415,10 @@ Pull each field from the latest `regime_signals`, `exposure_posture`, and `risk_
 **Government Spending & Insider Confluence Deep Dive (REQUIRED section):**
 
 Emit a `gov_confluence_deep_dive` array at top level of the synthesis JSON.
-Pick the top 1–3 highest-scoring picks from `gov_confluence_signals` (last
-7 days). For each, write a full thesis covering:
+Read ALL `gov_confluence_signals` from the last 7 days (no score filter —
+the rules-score is advisory context, not a gate). Pick 1–3 signals YOU
+find most compelling based on contract size, Congress patterns, insider
+conviction, and technical setup. For each, write a full thesis covering:
 
 ```json
 "gov_confluence_deep_dive": [
@@ -460,8 +462,9 @@ for tk, data in sorted(seen.items(), key=lambda x: -x[1][0])[:3]:
 "
 ```
 
-If no signals scored ≥70 in the last 7 days, emit an empty array. Don't
-fabricate picks. The deep-dive is supplemental; the main weekly verdict
+If there are genuinely no interesting signals in the last 7 days, emit an
+empty array with a brief reason. Don't fabricate picks. The deep-dive is
+supplemental; the main weekly verdict
 still drives action.
 
 ### 6. Format and push (TWO writes — markdown + unified decision queue)

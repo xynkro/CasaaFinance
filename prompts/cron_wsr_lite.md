@@ -280,12 +280,14 @@ Output a JSON matching this schema (pass to Sonnet template at `prompts/sonnet_f
 }
 ```
 
-**`gov_confluence_leaderboard` field** — read `gov_confluence_signals`
-for the last 7 days, take the top 5 by max-score-this-week, and emit
-each as `{ticker, score, tier, strategy, summary}`. Skip if the table
-is empty (return empty list, don't omit the field — Sonnet handles
-empty arrays). One-line summary should mention the contract size +
-Congress/insider context.
+**`gov_confluence_leaderboard` field** — read ALL `gov_confluence_signals`
+for the last 7 days (no score filter — the rules-score is advisory, YOU
+decide what's interesting). Take the top 5 by max-score-this-week and
+emit each as `{ticker, score, tier, strategy, summary}`. You MAY override
+the rules-based strategy if you have a better read on the name. Skip if
+the table is empty (return empty list, don't omit the field — Sonnet
+handles empty arrays). One-line summary should mention the contract size +
+Congress/insider context + YOUR take on whether it's actionable.
 
 ```bash
 # Quick read:

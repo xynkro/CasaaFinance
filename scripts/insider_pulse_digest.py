@@ -185,12 +185,14 @@ def main() -> int:
     logger = _setup_logging()
     logger.info(f"insider_pulse_digest start (dry={args.dry})")
 
-    if tg.INSIDER_TRADING_TOPIC is None and not args.dry:
+    # Fallback: when Insider Trading topic isn't configured yet, route
+    # the digest to Multi Day Swing so it still reaches Telegram.
+    use_fallback = tg.INSIDER_TRADING_TOPIC is None
+    if use_fallback and not args.dry:
         logger.info(
             "TELEGRAM_INSIDER_TRADING_TOPIC not configured — "
-            "skipping send (graceful no-op). Configure the secret to enable."
+            "falling back to Multi Day Swing topic"
         )
-        return 0
 
     load_env()
     client = sh.authenticate()
@@ -213,17 +215,29 @@ def main() -> int:
         return 0
 
     try:
-        result = tg.ping_insider_pulse(
-            date=today_iso,
-            confluence_picks=picks,
-            capitol_filings=filings,
-            unmapped=unmapped,
-            pwa_url=PWA_URL,
-        )
+        if use_fallback:
+            # Route to Multi Day Swing topic as fallback
+            result = tg.ping_insider_pulse(
+                date=today_iso,
+                confluence_picks=picks,
+                capitol_filings=filings,
+                unmapped=unmapped,
+                pwa_url=PWA_URL,
+                fallback_topic=tg.MULTI_DAY_SWING_TOPIC,
+            )
+        else:
+            result = tg.ping_insider_pulse(
+                date=today_iso,
+                confluence_picks=picks,
+                capitol_filings=filings,
+                unmapped=unmapped,
+                pwa_url=PWA_URL,
+            )
         if result.get("skipped"):
             logger.info(f"  · {result['skipped']}")
         else:
-            logger.info("  ✓ digest sent to Insider Trading topic")
+            topic = "Multi Day Swing (fallback)" if use_fallback else "Insider Trading"
+            logger.info(f"  ✓ digest sent to {topic} topic")
     except Exception as e:
         logger.error(f"  ✗ digest send failed: {e}")
         return 1

@@ -114,6 +114,8 @@ def ping_daily_ready(
     bullets: list[str] | None = None,
     posture: str = "",
     drive_url: str | None = None,
+    gov_confluence: list[str] | None = None,
+    insider_alert: list[str] | None = None,
 ) -> dict:
     """
     Daily-brief Telegram digest. Routed to Multi Day Swing topic so the
@@ -123,6 +125,9 @@ def ping_daily_ready(
     so the user can read the topic and skip opening the PWA. The full
     brief is still in the Drive doc + the daily_brief_latest sheet tab.
 
+    gov_confluence and insider_alert are brain-curated picks that the
+    brain decided are worth surfacing — no rules-engine gatekeeping.
+
     Args:
         date: brief date "YYYY-MM-DD"
         pwa_url: PWA link (added as footer)
@@ -131,37 +136,58 @@ def ping_daily_ready(
         bullets: up to 3 takeaway bullets
         posture: cash/exposure recommendation 1-liner
         drive_url: link to full brief markdown in Drive
+        gov_confluence: brain-curated gov confluence picks (free-text lines)
+        insider_alert: brain-curated insider trading alerts (free-text lines)
     """
-    lines = [f"📰 Daily Brief · {date}"]
+    import html as _html
+
+    lines = [f"<b>📰 Daily Brief</b> · {_html.escape(date)}"]
     if headline:
-        lines.append(headline.strip())
+        lines.append(_html.escape(headline.strip()))
     if verdict:
-        lines.append(f"verdict: {verdict.strip()}")
+        lines.append(f"<b>verdict:</b> {_html.escape(verdict.strip())}")
     if bullets:
         lines.append("")
         for b in bullets[:3]:
             b = (b or "").strip()
             if not b:
                 continue
-            # Truncate per-bullet to keep the Telegram preview readable.
             if len(b) > 140:
                 b = b[:137] + "..."
-            lines.append(f"• {b}")
+            lines.append(f"• {_html.escape(b)}")
     if posture:
         lines.append("")
-        lines.append(f"posture: {posture.strip()[:120]}")
+        lines.append(f"<b>posture:</b> {_html.escape(posture.strip()[:120])}")
+
+    # ── Gov Confluence — brain-curated picks ─────────────────────────
+    gc = list(gov_confluence or [])
+    if gc:
+        lines.append("")
+        lines.append("🏛 <b>GOV CONFLUENCE</b>")
+        for item in gc[:5]:
+            lines.append(f"  · {_html.escape(str(item).strip()[:160])}")
+
+    # ── Insider alerts — brain-curated ───────────────────────────────
+    ia = list(insider_alert or [])
+    if ia:
+        lines.append("")
+        lines.append("👤 <b>INSIDER ALERT</b>")
+        for item in ia[:3]:
+            lines.append(f"  · {_html.escape(str(item).strip()[:160])}")
+
     footer_bits = []
     if drive_url:
-        footer_bits.append(f"📄 {drive_url}")
+        footer_bits.append(f'📄 <a href="{_html.escape(drive_url)}">Full Brief</a>')
     if pwa_url:
-        footer_bits.append(f"📱 {pwa_url}")
+        footer_bits.append(f'📱 <a href="{_html.escape(pwa_url)}">PWA</a>')
     if footer_bits:
         lines.append("")
         lines.extend(footer_bits)
     return send(
         "\n".join(lines),
-        parse_mode="none",
+        parse_mode="HTML",
         message_thread_id=MULTI_DAY_SWING_TOPIC,
+        disable_web_page_preview=True,
     )
 
 
@@ -477,6 +503,7 @@ def ping_insider_pulse(
     capitol_filings: list[dict] | None = None,
     unmapped: list[dict] | None = None,
     pwa_url: str | None = None,
+    fallback_topic: int | None = None,
 ) -> dict:
     """
     Daily Insider Trading topic digest. Single message containing:
@@ -495,15 +522,19 @@ def ping_insider_pulse(
         unmapped: list of dicts with keys {recipient_name, total_amount,
             agency} for the unmapped-recipients review queue
         pwa_url: optional PWA link for footer
+        fallback_topic: when INSIDER_TRADING_TOPIC is not configured, use
+            this topic ID instead (e.g. MULTI_DAY_SWING_TOPIC). If also
+            None, returns {"skipped": ...}.
 
     Returns:
-        Telegram API response dict, or {"skipped": ...} if topic not configured.
+        Telegram API response dict, or {"skipped": ...} if no topic available.
 
     HTML parse mode + disable_web_page_preview to keep formatting tight
     and avoid auto-link cards under the message.
     """
-    if INSIDER_TRADING_TOPIC is None:
-        return {"skipped": "TELEGRAM_INSIDER_TRADING_TOPIC not configured"}
+    target_topic = INSIDER_TRADING_TOPIC or fallback_topic
+    if target_topic is None:
+        return {"skipped": "No Insider Trading or fallback topic configured"}
 
     import html
     lines = [f"📊 <b>INSIDER PULSE</b> · {html.escape(date)}"]
@@ -530,7 +561,7 @@ def ping_insider_pulse(
     else:
         lines.append("")
         lines.append("🎯 <b>CONFLUENCE PICKS</b>")
-        lines.append("   <i>no signals scored ≥70 today</i>")
+        lines.append("   <i>no signals today</i>")
 
     # ── Capitol Trades ────────────────────────────────────────────────
     filings = list(capitol_filings or [])
@@ -569,6 +600,6 @@ def ping_insider_pulse(
     return send(
         "\n".join(lines),
         parse_mode="HTML",
-        message_thread_id=INSIDER_TRADING_TOPIC,
+        message_thread_id=target_topic,
         disable_web_page_preview=True,
     )
