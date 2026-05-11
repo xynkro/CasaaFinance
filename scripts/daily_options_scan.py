@@ -49,6 +49,15 @@ MIN_PRICE       = 3.0
 MAX_PRICE       = 800
 MAX_PER_TICKER  = 2       # at most 1 CSP + 1 CC per ticker
 
+# LONG_CALL — directional play for gov confluence catalysts
+# When Congress is cluster buying + fresh contracts, a long call
+# captures the upside thesis the confluence data implies.
+LC_DTE_RANGE    = (30, 60)       # 30-60 DTE for swing thesis
+LC_TARGET_DTE   = 45
+LC_DELTA_RANGE  = (0.35, 0.65)   # ATM-ish, 0.40-0.60 sweet spot
+LC_MAX_PREMIUM_PCT = 0.05        # max 5% of underlying as premium
+LC_MIN_OI       = 20             # lower bar than income trades
+
 
 def _setup_logging() -> logging.Logger:
     logger = logging.getLogger("daily-scan")
@@ -139,7 +148,7 @@ def _hv30(yt) -> float:
         return 0.0
 
 
-def _best_expiry(expiries: tuple[str, ...]) -> str | None:
+def _best_expiry(expiries: tuple[str, ...], dte_range: tuple[int, int] = (15, 50), target: int = TARGET_DTE) -> str | None:
     today = date.today()
     best: str | None = None
     best_diff = 9999
@@ -149,8 +158,8 @@ def _best_expiry(expiries: tuple[str, ...]) -> str | None:
         except ValueError:
             continue
         dte = (exp - today).days
-        if 15 <= dte <= 50:
-            diff = abs(dte - TARGET_DTE)
+        if dte_range[0] <= dte <= dte_range[1]:
+            diff = abs(dte - target)
             if diff < best_diff:
                 best_diff = diff
                 best = exp_str
@@ -165,8 +174,13 @@ def _option_mid(row) -> float:
     return float(row.get("lastPrice", 0) or 0)
 
 
-def scan_ticker(ticker: str, logger: logging.Logger) -> list[dict[str, Any]]:
-    """Return CSP + CC candidates for a single ticker."""
+def scan_ticker(ticker: str, logger: logging.Logger, gov_info: dict | None = None) -> list[dict[str, Any]]:
+    """Return CSP + CC + LONG_CALL candidates for a single ticker.
+
+    gov_info: optional dict from gov_confluence_signals with keys
+    {score, tier, strategy}. When present with bullish signals,
+    triggers LONG_CALL scanning alongside CSP/CC.
+    """
     import yfinance as yf
     try:
         yt = yf.Ticker(ticker)
@@ -292,13 +306,115 @@ def scan_ticker(ticker: str, logger: logging.Logger) -> list[dict[str, Any]]:
     except Exception as e:
         logger.debug(f"  {ticker}: CC error — {e}")
 
+    # ── LONG_CALL — only when gov confluence is bullish ────────────────
+    # Congress cluster buying + fresh contracts = directional catalyst.
+    # Scan for 0.40-0.60 delta calls, 30-60 DTE.
+    # Gov bullish = has contract activity AND not a TRIM signal.
+    # Most signals have empty strategy (below Tier A/B threshold) —
+    # that's fine, the contracts themselves are the catalyst.
+    gov_bullish = (
+        gov_info is not None
+        and gov_info.get("score", 0) >= 30
+        and gov_info.get("strategy", "") != "TRIM"
+    )
+    if gov_bullish:
+        try:
+            lc_expiry = _best_expiry(expiries, dte_range=LC_DTE_RANGE, target=LC_TARGET_DTE)
+            if lc_expiry and lc_expiry != expiry:
+                lc_chain = yt.option_chain(lc_expiry)
+                lc_dte = (datetime.strptime(lc_expiry, "%Y-%m-%d").date() - today).days
+                lc_expiry_iso = lc_expiry.replace("-", "")
+            else:
+                lc_chain = chain
+                lc_dte = dte
+                lc_expiry_iso = expiry_iso
+
+            calls = lc_chain.calls.copy()
+            calls = calls[calls["openInterest"] >= LC_MIN_OI]
+            calls["mid"] = calls.apply(_option_mid, axis=1)
+            calls = calls[calls["mid"] >= MIN_MID]
+            # Filter for delta range (ATM-ish)
+            if "delta" in calls.columns:
+                calls = calls.copy()
+                calls["abs_delta"] = calls["delta"].abs()
+                calls = calls[
+                    (calls["abs_delta"] >= LC_DELTA_RANGE[0]) &
+                    (calls["abs_delta"] <= LC_DELTA_RANGE[1])
+                ]
+            else:
+                # No delta column — approximate via moneyness
+                calls = calls[
+                    (calls["strike"] >= price * 0.95) &
+                    (calls["strike"] <= price * 1.10)
+                ]
+            # Cap premium at 5% of underlying (don't overpay)
+            calls = calls[calls["mid"] <= price * LC_MAX_PREMIUM_PCT]
+
+            if not calls.empty:
+                # Pick the call closest to 0.50 delta (or closest to ATM)
+                if "abs_delta" in calls.columns:
+                    calls = calls.copy()
+                    calls["delta_dist"] = (calls["abs_delta"] - 0.50).abs()
+                    best = calls.sort_values("delta_dist").iloc[0]
+                else:
+                    calls = calls.copy()
+                    calls["moneyness"] = (calls["strike"] / price - 1.0).abs()
+                    best = calls.sort_values("moneyness").iloc[0]
+
+                r = best
+                bid = float(r.get("bid", 0) or 0)
+                ask = float(r.get("ask", 0) or 0)
+                mid = float(r["mid"])
+                spread_pct = 0.0
+                if mid > 0 and bid > 0 and ask > 0:
+                    spread_pct = (ask - bid) / mid * 100
+
+                # For long calls, "yield" = potential return if underlying
+                # moves to breakeven + 1 ATR. Use gov confluence score as
+                # a proxy for composite_score.
+                gov_score = float(gov_info.get("score", 0))
+                out.append({
+                    "ticker": ticker,
+                    "strategy": "LONG_CALL",
+                    "right": "C",
+                    "strike": float(r["strike"]),
+                    "expiry": lc_expiry_iso,
+                    "dte": lc_dte,
+                    "delta": float(r.get("delta", 0) or 0),
+                    "premium": round(mid, 2),
+                    "bid": round(bid, 2),
+                    "ask": round(ask, 2),
+                    "annual_yield_pct": 0.0,  # N/A for directional
+                    "cash_required": round(mid * 100, 2),  # premium × 100
+                    "breakeven": round(float(r["strike"]) + mid, 2),
+                    "iv": round(float(r.get("impliedVolatility", 0) or 0) * 100, 1),
+                    "iv_rank": 0.0,
+                    "spread_pct": round(spread_pct, 2),
+                    "underlying_last": round(price, 2),
+                    "technical_score": 0.0,
+                    "composite_score": round(gov_score, 1),
+                    "catalyst_flag": True,
+                    "hv30": round(hv30, 1),
+                })
+        except Exception as e:
+            logger.debug(f"  {ticker}: LONG_CALL error — {e}")
+
     if out:
         for c in out:
-            logger.info(
-                f"  ✓ {c['ticker']:6} {c['strategy']} ${c['strike']:7.2f} "
-                f"{c['dte']}DTE  prem=${c['premium']:5.2f}  yield={c['annual_yield_pct']:5.1f}%  "
-                f"u=${c['underlying_last']:.2f}"
-            )
+            label = c['strategy']
+            if label == "LONG_CALL":
+                logger.info(
+                    f"  ✓ {c['ticker']:6} {label} ${c['strike']:7.2f} "
+                    f"{c['dte']}DTE  prem=${c['premium']:5.2f}  "
+                    f"BE=${c['breakeven']:.2f}  gov_score={c['composite_score']:.0f}  "
+                    f"u=${c['underlying_last']:.2f}"
+                )
+            else:
+                logger.info(
+                    f"  ✓ {c['ticker']:6} {label} ${c['strike']:7.2f} "
+                    f"{c['dte']}DTE  prem=${c['premium']:5.2f}  yield={c['annual_yield_pct']:5.1f}%  "
+                    f"u=${c['underlying_last']:.2f}"
+                )
     return out
 
 
@@ -354,12 +470,13 @@ def main() -> int:
     all_candidates: list[dict] = []
     for ticker in watchlist:
         try:
-            cands = scan_ticker(ticker, logger)
-            # Tag candidates with gov confluence catalyst flag
-            gov_info = gov_data.get(ticker, {})
+            gov_info = gov_data.get(ticker) or None
+            cands = scan_ticker(ticker, logger, gov_info=gov_info)
+            # Tag candidates with gov confluence catalyst flag + gate
             for c in cands:
                 if gov_info:
-                    c["catalyst_flag"] = True
+                    if not c.get("catalyst_flag"):
+                        c["catalyst_flag"] = True
                     gov_strategy = gov_info.get("strategy", "")
                     # Block CSPs where Congress is selling (TRIM signal)
                     if c["strategy"] == "CSP" and gov_strategy == "TRIM":
