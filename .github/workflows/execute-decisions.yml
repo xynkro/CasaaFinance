@@ -18,7 +18,7 @@ on:
     inputs:
       dry:
         type: boolean
-        default: true
+        default: false
         description: "Dry run (print plan, no orders)"
 
 permissions:
