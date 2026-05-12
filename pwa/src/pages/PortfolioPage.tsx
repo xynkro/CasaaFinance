@@ -4,8 +4,11 @@ import type {
   TechnicalScoreRow,
   ExitPlanRow,
   LivePriceRow,
+  AlpacaSnapshotRow,
+  AlpacaPositionRow,
 } from "../data";
 import { PnlCard } from "../cards/PnlCard";
+import { AlpacaPaperCard } from "../cards/AlpacaPaperCard";
 import { PositionsTable } from "../components/PositionsTable";
 import { SwipeTabs } from "../components/SwipeTabs";
 
@@ -41,6 +44,8 @@ export function PortfolioPage({
   livePrices,
   livePricesUpdatedAt,
   usdSgd,
+  alpacaSnapshot,
+  alpacaPositions,
   loading,
 }: {
   casparSnapshot: SnapshotRow | null;
@@ -52,9 +57,9 @@ export function PortfolioPage({
   exitPlans: ExitPlanRow[];
   livePrices: Map<string, LivePriceRow>;
   livePricesUpdatedAt: string;
-  /** USD/SGD spot from the latest macro row. Drives SGX-FX adjustment so
-      Caspar's mixed-currency book displays a USD-equivalent NLV. */
   usdSgd: number;
+  alpacaSnapshot: AlpacaSnapshotRow | null;
+  alpacaPositions: AlpacaPositionRow[];
   loading: boolean;
 }) {
   const CasparPanel = (
@@ -115,10 +120,22 @@ export function PortfolioPage({
     </div>
   );
 
+  const AlpacaPanel = (
+    <div className="flex flex-col gap-4 px-4 pb-4">
+      <div className="fade-up fade-up-1">
+        <AlpacaPaperCard
+          snapshot={alpacaSnapshot}
+          positions={alpacaPositions}
+          loading={loading}
+        />
+      </div>
+    </div>
+  );
+
   return (
     <SwipeTabs
-      tabs={[{ label: "Caspar" }, { label: "Sarah" }]}
-      panels={[CasparPanel, SarahPanel]}
+      tabs={[{ label: "Caspar" }, { label: "Sarah" }, { label: "Paper" }]}
+      panels={[CasparPanel, SarahPanel, AlpacaPanel]}
       defaultIndex={0}
       persistKey={PORTFOLIO_SUB_KEY}
     />

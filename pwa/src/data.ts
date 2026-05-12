@@ -64,6 +64,10 @@ const GIDS: Record<string, string> = {
   // scripts/api_usage_scrape.py parsing claude-code-action's result
   // JSON. Settings tab renders MTD spend + per-workflow breakdown.
   api_usage: "1292394805",
+  gov_confluence_signals: "1590812475",
+  congress_trades: "870416250",
+  snapshot_alpaca: "2094087184",
+  positions_alpaca: "1331088115",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -140,6 +144,12 @@ export interface DailyBriefRow {
   posture?: string;
   watch?: string;
   raw_md?: string;      // full original markdown brief
+  // Structured chip fields (pipe-separated, from Finnhub + gov data)
+  earnings_today?: string;
+  macro_today?: string;
+  negative_news?: string;
+  insider_alert?: string;
+  gov_confluence?: string;
 }
 
 export interface SnapshotRow {
@@ -747,6 +757,62 @@ export interface ApiUsageRow {
   updated_at: string;
 }
 
+export interface GovConfluenceRow {
+  date: string;
+  ticker: string;
+  confluence_score: string;
+  contract_score: string;
+  congress_score: string;
+  insider_score: string;
+  analyst_score: string;
+  tier: string;
+  recommended_strategy: string;
+  recommended_action: string;
+  thesis_oneliner: string;
+  contributing_contracts: string;
+  contributing_congress_trades: string;
+  contributing_insider_buys: string;
+  updated_at: string;
+}
+
+export interface AlpacaSnapshotRow {
+  date: string;
+  net_liq: string;
+  cash: string;
+  buying_power: string;
+  long_value: string;
+  short_value: string;
+}
+
+export interface AlpacaPositionRow {
+  date: string;
+  ticker: string;
+  qty: string;
+  avg_cost: string;
+  last: string;
+  mkt_val: string;
+  upl: string;
+  upl_pct: string;
+  side: string;
+}
+
+export interface CongressTradeRow {
+  audit_ts: string;
+  filing_id: string;
+  politician_id: string;
+  politician_name: string;
+  party: string;
+  chamber: string;
+  committees: string;
+  ticker: string;
+  issuer_name: string;
+  transaction_date: string;
+  filing_date: string;
+  transaction_type: string;
+  amount_min: string;
+  amount_max: string;
+}
+
 /**
  * Earnings calendar row — one upserted per (ticker, year, quarter).
  * Refreshed daily by `finnhub-calendars.yml`. PWA Decision cards show
@@ -1094,6 +1160,10 @@ export interface DashboardData {
   insiderByTicker: Map<string, InsiderSummary>;
   analystByTicker: Map<string, AnalystConsensusRow>;
   apiUsage: ApiUsageRow[];               // raw rows; Settings panel aggregates
+  govConfluence: GovConfluenceRow[];     // today's gov confluence signals (score ≥ 10)
+  congressTrades: CongressTradeRow[];    // recent politician trades (last 7 days)
+  alpaca: AlpacaSnapshotRow | null;
+  alpacaPositions: AlpacaPositionRow[];
   error: string | null;
 }
 
@@ -1164,6 +1234,10 @@ export async function fetchDashboard(): Promise<DashboardData> {
       insiderRows,
       analystRows,
       apiUsageRows,
+      govConfRows,
+      congressRows,
+      alpacaSnapRaw,
+      alpacaPosRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -1172,6 +1246,10 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTab<InsiderTransactionRow>("insider_transactions").catch(() => [] as InsiderTransactionRow[]),
       fetchTab<AnalystConsensusRow>("analyst_consensus").catch(() => [] as AnalystConsensusRow[]),
       fetchTab<ApiUsageRow>("api_usage").catch(() => [] as ApiUsageRow[]),
+      fetchTab<GovConfluenceRow>("gov_confluence_signals").catch(() => [] as GovConfluenceRow[]),
+      fetchTab<CongressTradeRow>("congress_trades").catch(() => [] as CongressTradeRow[]),
+      fetchTab<Record<string, string>>("snapshot_alpaca").catch(() => [] as Record<string, string>[]),
+      fetchTab<AlpacaPositionRow>("positions_alpaca").catch(() => [] as AlpacaPositionRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -1247,6 +1325,20 @@ export async function fetchDashboard(): Promise<DashboardData> {
       insiderByTicker,
       analystByTicker,
       apiUsage: apiUsageRows,
+      govConfluence: latestGroup(govConfRows)
+        .filter((r) => Number(r.confluence_score) >= 10)
+        .sort((a, b) => Number(b.confluence_score) - Number(a.confluence_score)),
+      congressTrades: (() => {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+        return congressRows
+          .filter((r) => (r.transaction_date || r.filing_date || "") >= sevenDaysAgo && r.ticker)
+          .sort((a, b) => (b.transaction_date || b.filing_date || "").localeCompare(a.transaction_date || a.filing_date || ""));
+      })(),
+      alpaca: (() => {
+        const rows = normalizeSnapshot(alpacaSnapRaw) as unknown as AlpacaSnapshotRow[];
+        return rows.length ? rows.reduce((a, b) => (a.date > b.date ? a : b)) : null;
+      })(),
+      alpacaPositions: latestGroup(alpacaPosRows),
       error: null,
     };
   } catch (e) {
@@ -1271,6 +1363,10 @@ export async function fetchDashboard(): Promise<DashboardData> {
       insiderByTicker: new Map(),
       analystByTicker: new Map(),
       apiUsage: [],
+      govConfluence: [],
+      congressTrades: [],
+      alpaca: null,
+      alpacaPositions: [],
       error: String(e),
     };
   }

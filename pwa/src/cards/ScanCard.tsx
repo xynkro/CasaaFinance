@@ -387,11 +387,34 @@ export function ScanCard({
               : "No Broad candidates yet"}
           </span>
         </div>
+      ) : (onMyTickers ? myActive : broadActive).length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-4 text-slate-500">
+          {tab === "LONG_CALL" ? (
+            <>
+              <Rocket size={20} className="text-slate-600" />
+              <span className="text-[length:var(--t-sm)] text-center">
+                No qualifying setups — waiting for trend confirmation
+              </span>
+              <span className="text-[length:var(--t-2xs)] text-slate-600 text-center">
+                Long calls require SMA50/200 uptrend + quality score {"≥"} 40
+              </span>
+            </>
+          ) : (
+            <>
+              <Radar size={20} className="text-slate-600" />
+              <span className="text-[length:var(--t-sm)]">
+                No {tab} candidates today
+              </span>
+            </>
+          )}
+        </div>
       ) : (
         <>
           <p className="text-[length:var(--t-2xs)] text-slate-600 mb-3 leading-relaxed">
             {onMyTickers
-              ? "My Tickers — composite = 40% technical + 25% yield + 20% IV rank + 10% cash eff + 5% liquidity."
+              ? tab === "LONG_CALL"
+                ? "Gov confluence + trend quality — score = materiality (30) + SMA trend (30) + multi-signal (25) + confirmation (15)."
+                : "My Tickers — composite = 40% technical + 25% yield + 20% IV rank + 10% cash eff + 5% liquidity."
               : "Broad — LunarCrush trending + WSB + quality watchlist (sorted by thesis confidence)."}
           </p>
 

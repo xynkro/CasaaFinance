@@ -1,6 +1,6 @@
 import type { DailyBriefRow } from "../data";
 import { Card } from "./Card";
-import { Newspaper, ChevronRight } from "lucide-react";
+import { Newspaper, ChevronRight, Calendar, BarChart3, AlertTriangle, Users, Landmark } from "lucide-react";
 import { SENTIMENT } from "../lib/emojis";
 
 function Skeleton() {
@@ -24,6 +24,28 @@ function truncate(s: string | undefined, n = 240): string {
   const cleaned = s.trim();
   if (cleaned.length <= n) return cleaned;
   return cleaned.slice(0, n - 1).trim() + "…";
+}
+
+function ChipRow({ icon: Icon, color, items }: {
+  icon: typeof Calendar;
+  color: string;
+  items?: string;
+}) {
+  if (!items) return null;
+  const chips = items.split("|").map((s) => s.trim()).filter(Boolean);
+  if (!chips.length) return null;
+  return (
+    <div className="flex items-start gap-1.5 mt-2">
+      <Icon size={12} className={`${color} shrink-0 mt-0.5`} />
+      <div className="flex flex-wrap gap-1">
+        {chips.map((c, i) => (
+          <span key={i} className="inline-block px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] bg-white/5 text-slate-300 leading-tight">
+            {c}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function DailyBriefCard({
@@ -81,6 +103,13 @@ export function DailyBriefCard({
             {summaryText}
           </p>
         )}
+
+        {/* Structured chips — Finnhub-sourced data rendered as compact tags */}
+        <ChipRow icon={Calendar} color="text-blue-400" items={row.earnings_today} />
+        <ChipRow icon={BarChart3} color="text-cyan-400" items={row.macro_today} />
+        <ChipRow icon={AlertTriangle} color="text-red-400" items={row.negative_news} />
+        <ChipRow icon={Users} color="text-amber-400" items={row.insider_alert} />
+        <ChipRow icon={Landmark} color="text-violet-400" items={row.gov_confluence} />
 
         {/* Tap-to-expand affordance */}
         {onOpen && (

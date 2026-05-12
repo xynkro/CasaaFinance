@@ -23,6 +23,7 @@ function Dashboard() {
   const { settings, update: updateSettings } = useSettings();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [tab, setTab] = useState(settings.defaultTab);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [lookupOpen, setLookupOpen] = useState(false);
@@ -34,6 +35,7 @@ function Dashboard() {
     return fetchDashboard().then((d) => {
       setData(d);
       setLoading(false);
+      setLastRefresh(new Date());
     });
   };
 
@@ -93,6 +95,8 @@ function Dashboard() {
             livePrices={data?.livePrices ?? new Map()}
             livePricesUpdatedAt={data?.livePricesUpdatedAt ?? ""}
             usdSgd={Number(data?.macro?.usd_sgd) || 1.30}
+            alpacaSnapshot={data?.alpaca ?? null}
+            alpacaPositions={data?.alpacaPositions ?? []}
             loading={loading && !data}
           />
         );
@@ -174,6 +178,11 @@ function Dashboard() {
             </h1>
             <span className="text-[length:var(--t-xs)] text-slate-500 font-medium">Casaa Finance</span>
             <span className="text-[8px] text-slate-700 font-mono">b{import.meta.env.VITE_BUILD ?? "dev"}</span>
+            {lastRefresh && (
+              <span className="text-[8px] text-slate-700 font-mono">
+                {lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
           </div>
           {tab !== SETTINGS_TAB && (
             <div className="flex items-center gap-2">

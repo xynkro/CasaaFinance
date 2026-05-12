@@ -8,6 +8,8 @@ import { WsrSummaryCard } from "../cards/WsrSummaryCard";
 import { WsrLiteCard } from "../cards/WsrLiteCard";
 import { UpcomingCalendarsCard } from "../cards/UpcomingCalendarsCard";
 import { ConcentrationCard } from "../cards/ConcentrationCard";
+import { GovConfluenceCard } from "../cards/GovConfluenceCard";
+import { CongressTradesCard } from "../cards/CongressTradesCard";
 import { TldrTodayCard } from "../cards/TldrTodayCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
@@ -177,6 +179,14 @@ export function HomePage({
             sarahPositions={data?.sarahPositions ?? []}
             macro={data?.macro ?? null}
           />
+        </div>
+
+        <div className="fade-up fade-up-4 mt-4">
+          <GovConfluenceCard signals={data?.govConfluence ?? []} />
+        </div>
+
+        <div className="fade-up fade-up-4 mt-4">
+          <CongressTradesCard trades={data?.congressTrades ?? []} />
         </div>
       </div>
 

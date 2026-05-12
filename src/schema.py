@@ -197,6 +197,8 @@ class DailyBriefRow:
         "date", "bullet_1", "bullet_2", "bullet_3", "verdict", "sentiment",
         "headline", "overnight", "premarket", "catalysts", "commodities",
         "posture", "watch", "raw_md",
+        "earnings_today", "macro_today", "negative_news", "insider_alert",
+        "gov_confluence",
     ]
 
     date: str
@@ -213,6 +215,11 @@ class DailyBriefRow:
     posture: str = ""       # free text, e.g. "POSTURE CHANGE: YES. ..."
     watch: str = ""         # pipe-separated watchlist items
     raw_md: str = ""        # full original brief text for in-app detail view
+    earnings_today: str = ""   # pipe-separated, e.g. "NVDA AMC est $1.79|WIX BMO est $1.26"
+    macro_today: str = ""      # pipe-separated, e.g. "13:30 US CPI MoM est 0.3%|Fed Cook 09:45 ET"
+    negative_news: str = ""    # pipe-separated, e.g. "BYND -0.7 'Restructuring talks fail'"
+    insider_alert: str = ""    # pipe-separated, e.g. "NVDA Huang sold 50k @ $213 = $10.6M"
+    gov_confluence: str = ""   # pipe-separated, e.g. "AVAV score 87 Tier-A → BUY_DIP"
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
@@ -220,6 +227,8 @@ class DailyBriefRow:
             d, self.bullet_1, self.bullet_2, self.bullet_3, self.verdict, self.sentiment,
             self.headline, self.overnight, self.premarket, self.catalysts, self.commodities,
             self.posture, self.watch, self.raw_md,
+            self.earnings_today, self.macro_today, self.negative_news,
+            self.insider_alert, self.gov_confluence,
         ]
 
 
@@ -2027,3 +2036,42 @@ class GovConfluenceSignalRow:
             self.contributing_insider_buys,
             self.updated_at,
         ]
+
+
+@dataclass
+class AlpacaSnapshotRow:
+    """Paper account snapshot — written by sync_alpaca.py on each run."""
+    TAB_NAME = "snapshot_alpaca"
+    HEADERS = ["date", "net_liq", "cash", "buying_power", "long_value", "short_value"]
+
+    date: str
+    net_liq: str = "0"
+    cash: str = "0"
+    buying_power: str = "0"
+    long_value: str = "0"
+    short_value: str = "0"
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [d, self.net_liq, self.cash, self.buying_power, self.long_value, self.short_value]
+
+
+@dataclass
+class AlpacaPositionRow:
+    """One row per open Alpaca paper position."""
+    TAB_NAME = "positions_alpaca"
+    HEADERS = ["date", "ticker", "qty", "avg_cost", "last", "mkt_val", "upl", "upl_pct", "side"]
+
+    date: str
+    ticker: str
+    qty: str = "0"
+    avg_cost: str = "0"
+    last: str = "0"
+    mkt_val: str = "0"
+    upl: str = "0"
+    upl_pct: str = "0"
+    side: str = "long"
+
+    def to_row(self) -> List[str]:
+        return [self.date, self.ticker, self.qty, self.avg_cost, self.last,
+                self.mkt_val, self.upl, self.upl_pct, self.side]

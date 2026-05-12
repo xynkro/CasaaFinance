@@ -6,7 +6,7 @@ You are running on a schedule (every weekday 07:00 SGT). Generate today's market
 
 ### 1. Date & context
 
-- Today is `$(date +%Y-%m-%d)` (use `date` Bash command to confirm).
+- Today is `$(TZ=Asia/Singapore date +%Y-%m-%d)` (use `TZ=Asia/Singapore date` to confirm — the runner is UTC, you need SGT).
 - Yesterday SPX/NDX close already happened in US — search the news for it.
 - US pre-market is happening RIGHT NOW (it's 07:00 SGT = 19:00 ET previous day, or 18:30 ET on weekdays after DST shift).
 
@@ -23,11 +23,12 @@ cd /Users/xynkro/Documents/Trading/FinancePWA && source .venv/bin/activate
 python3 -c "
 from src.sync import load_env
 from src import sheets as sh
-import datetime
+import datetime, zoneinfo
 load_env()
 client = sh.authenticate()
 ss = sh._open_sheet(client)
-today = datetime.date.today().isoformat()
+_sgt = zoneinfo.ZoneInfo('Asia/Singapore')
+today = datetime.datetime.now(_sgt).strftime('%Y-%m-%d')
 
 # Latest macro
 macro = ss.worksheet('macro').get_all_values()[-1]
@@ -58,7 +59,7 @@ for r in ec[1:]:
 
 # Earnings within 7 days — flag any portfolio ticker with ER inside option DTE
 print('EARNINGS NEXT 7 DAYS:')
-end_7d = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
+end_7d = (datetime.datetime.now(_sgt).date() + datetime.timedelta(days=7)).isoformat()
 for r in ec[1:]:
     if r and today <= r[0] <= end_7d:
         print(f'  {r[0]} {r[1]:6} {r[2]} (est {r[5]})')
@@ -84,7 +85,7 @@ for r in ns[1:]:
 
 # Insider unusual activity — last 7 days, |value| > \$1M
 import datetime as dt
-seven_d = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+seven_d = (datetime.datetime.now(_sgt).date() - datetime.timedelta(days=7)).isoformat()
 it = ss.worksheet('insider_transactions').get_all_values()
 print('INSIDER LAST 7 DAYS (|value| > \$1M):')
 for r in it[1:]:
@@ -102,7 +103,7 @@ print()
 print('GOV CONFLUENCE ALL SIGNALS (brain decides, rules-score is advisory):')
 try:
     gc = ss.worksheet('gov_confluence_signals').get_all_values()
-    today_str = datetime.date.today().isoformat()
+    today_str = today
     gc_hdr = gc[0] if gc else []
     cols = {h: i for i, h in enumerate(gc_hdr)}
     today_signals = []
@@ -130,7 +131,7 @@ print()
 print('CAPITOL TRADES (filings last 3 days, top by amount):')
 try:
     ct = ss.worksheet('congress_trades').get_all_values()
-    three_d = (datetime.date.today() - datetime.timedelta(days=3)).isoformat()
+    three_d = (datetime.datetime.now(_sgt).date() - datetime.timedelta(days=3)).isoformat()
     ct_hdr = ct[0] if ct else []
     ct_cols = {h: i for i, h in enumerate(ct_hdr)}
     recent = []

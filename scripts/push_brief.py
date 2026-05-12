@@ -127,6 +127,12 @@ def _push_daily(payload: dict, logger: logging.Logger, no_drive: bool = False) -
 
     # Build the row (left-pad bullets to 3 entries to match schema)
     bullets = payload.get("bullets", []) + ["", "", ""]
+    def _join(field: str) -> str:
+        v = payload.get(field, "")
+        if isinstance(v, list):
+            return "|".join(str(x) for x in v)
+        return str(v) if v else ""
+
     row = S.DailyBriefRow(
         date=payload["date"],
         bullet_1=bullets[0],
@@ -142,6 +148,11 @@ def _push_daily(payload: dict, logger: logging.Logger, no_drive: bool = False) -
         posture=payload.get("posture", ""),
         watch=payload.get("watch", ""),
         raw_md=payload.get("raw_md", ""),
+        earnings_today=_join("earnings_today"),
+        macro_today=_join("macro_today"),
+        negative_news=_join("negative_news"),
+        insider_alert=_join("insider_alert"),
+        gov_confluence=_join("gov_confluence"),
     )
     sh.ensure_headers(client, S.DailyBriefRow.TAB_NAME, S.DailyBriefRow.HEADERS)
     sh.append_row(client, S.DailyBriefRow.TAB_NAME, row.to_row())
