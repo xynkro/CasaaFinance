@@ -97,6 +97,11 @@ def send(
         payload["disable_web_page_preview"] = True
 
     r = requests.post(url, json=payload, timeout=15)
+    if not r.ok:
+        import logging as _log
+        _log.getLogger(__name__).error(
+            "Telegram %s → %s", r.status_code, r.text[:500]
+        )
     r.raise_for_status()
     body = r.json()
     if not body.get("ok"):
@@ -678,7 +683,7 @@ def ping_options_intel(
         "PMCC": (
             "LEAPS 70Δ ITM 9+mo · short 25Δ OTM 30-45 DTE",
             "Roll short at 50% profit or 21 DTE · extrinsic value rule",
-            "Close if LEAPS < 6mo remaining · stop if LEAPS breached",
+            "Close if LEAPS under 6mo remaining · stop if LEAPS breached",
         ),
     }
 
@@ -708,7 +713,7 @@ def ping_options_intel(
         # 3-phase rules — compact one-liner per strategy
         entry_r, manage_r, exit_r = mgmt_rules.get(strat_key, ("", "", ""))
         if manage_r:
-            lines.append(f"  <i>📋 {manage_r} · {exit_r}</i>")
+            lines.append(f"  <i>📋 {_html.escape(manage_r)} · {_html.escape(exit_r)}</i>")
 
         for c in items[:max_show]:
             tk = _html.escape(str(c.get("ticker", "?")))
