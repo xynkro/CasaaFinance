@@ -687,10 +687,10 @@ def ping_options_intel(
         "CSP":       ("💰", "CASH-SECURED PUTS",    "annual_yield_pct", 5),
         "CC":        ("📞", "COVERED CALLS",         "annual_yield_pct", 5),
         "LONG_CALL": ("🚀", "LONG CALLS",            "composite_score",  5),
-        "PCS":       ("📉", "PUT CREDIT SPREADS",    "annual_yield_pct", 4),
-        "CCS":       ("📈", "CALL CREDIT SPREADS",   "annual_yield_pct", 4),
-        "IC":        ("🦅", "IRON CONDORS",           "annual_yield_pct", 3),
-        "PMCC":      ("🔗", "POOR MAN'S CC",         "composite_score",  3),
+        "PCS":       ("📉", "PUT CREDIT SPREADS",    "annual_yield_pct", 5),
+        "CCS":       ("📈", "CALL CREDIT SPREADS",   "annual_yield_pct", 5),
+        "IC":        ("🦅", "IRON CONDORS",           "annual_yield_pct", 5),
+        "PMCC":      ("🔗", "POOR MAN'S CC",         "composite_score",  5),
     }
 
     lines = [f"<b>🔬 OPTIONS INTEL</b> · {_html.escape(date)}"]
