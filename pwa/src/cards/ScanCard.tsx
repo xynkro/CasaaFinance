@@ -3,6 +3,17 @@ import { Card } from "./Card";
 import { Radar, Zap, TrendingUp, TrendingDown, Rocket } from "lucide-react";
 import { useState } from "react";
 
+// ── 3-phase management rules (tastytrade) ────────────────────
+const MGMT_RULES: Record<string, { entry: string; manage: string; exit: string }> = {
+  CSP:       { entry: "35 DTE · 20-30Δ · yield ≥12%",       manage: "Close at 50% profit · roll down+out if tested",          exit: "50% profit OR assignment → wheel into CC" },
+  CC:        { entry: "35 DTE · 10-20Δ · yield ≥10%",       manage: "Close at 50% profit · let ride if far OTM",              exit: "50% profit OR assignment → wheel into CSP" },
+  PCS:       { entry: "42 DTE · 25Δ · credit ≥⅓ width",     manage: "Close at 50% profit · roll if short tested",             exit: "50% profit OR 21 DTE mech close · stop 2× credit" },
+  CCS:       { entry: "42 DTE · 25Δ · credit ≥⅓ width",     manage: "Close at 50% profit · roll if short tested",             exit: "50% profit OR 21 DTE mech close · stop 2× credit" },
+  IC:        { entry: "45 DTE · 20Δ shorts · cr/w ≥30%",    manage: "Close at 50% profit · roll untested if one side tested", exit: "50% profit OR 21 DTE mech close · stop 2× credit" },
+  LONG_CALL: { entry: "45 DTE · 50Δ ATM · quality ≥40",     manage: "Trail stop at 50% max gain · re-eval at 21 DTE",        exit: "Take profit 50-100% gain · stop at 50% loss" },
+  PMCC:      { entry: "LEAPS 70Δ ITM 9+mo · short 25Δ OTM", manage: "Roll short at 50% or 21 DTE · extrinsic rule",          exit: "Close if LEAPS <6mo · stop if LEAPS breached" },
+};
+
 function fmtPrice(v: string | number, prefix = "$"): string {
   const n = Number(v);
   if (isNaN(n)) return "—";
@@ -184,6 +195,23 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
               <span className="font-semibold">
                 {isLongCall ? "Gov Confluence — directional catalyst" : "Catalyst — volatility elevated"}
               </span>
+            </div>
+          )}
+          {/* 3-phase management rules */}
+          {MGMT_RULES[cand.strategy] && (
+            <div className="pt-1.5 border-t border-white/5 space-y-1">
+              <div className="text-[length:var(--t-2xs)]">
+                <span className="text-emerald-500 font-semibold">ENTRY</span>{" "}
+                <span className="text-slate-500">{MGMT_RULES[cand.strategy].entry}</span>
+              </div>
+              <div className="text-[length:var(--t-2xs)]">
+                <span className="text-amber-500 font-semibold">MANAGE</span>{" "}
+                <span className="text-slate-500">{MGMT_RULES[cand.strategy].manage}</span>
+              </div>
+              <div className="text-[length:var(--t-2xs)]">
+                <span className="text-red-400 font-semibold">EXIT</span>{" "}
+                <span className="text-slate-500">{MGMT_RULES[cand.strategy].exit}</span>
+              </div>
             </div>
           )}
         </div>

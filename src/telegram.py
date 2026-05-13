@@ -641,6 +641,47 @@ def ping_options_intel(
         s = c.get("strategy", "OTHER")
         by_strat.setdefault(s, []).append(c)
 
+    # ── 3-phase management rules (tastytrade) ──────────────────
+    # Each strategy has entry, manage, and exit rules so the
+    # Telegram push includes the full lifecycle, not just signals.
+    mgmt_rules: dict[str, tuple[str, str, str]] = {
+        "CSP": (
+            "35 DTE · 20-30Δ OTM · yield ≥12% ann",
+            "Close at 50% profit · roll down+out if challenged",
+            "50% profit OR assignment → wheel into CC",
+        ),
+        "CC": (
+            "35 DTE · 10-20Δ OTM · yield ≥10% ann",
+            "Close at 50% profit · let ride if far OTM",
+            "50% profit OR assignment → wheel into CSP",
+        ),
+        "PCS": (
+            "42 DTE · 25Δ short put · credit ≥1/3 width · IVR≥25",
+            "Close at 50% profit · roll if short strike tested",
+            "50% profit OR 21 DTE mech close · stop at 2× credit",
+        ),
+        "CCS": (
+            "42 DTE · 25Δ short call · credit ≥1/3 width · IVR≥25",
+            "Close at 50% profit · roll if short strike tested",
+            "50% profit OR 21 DTE mech close · stop at 2× credit",
+        ),
+        "IC": (
+            "45 DTE · 20Δ short strikes · credit/width ≥30% · IVR>40",
+            "Close at 50% profit · roll untested side if one tested",
+            "50% profit OR 21 DTE mech close · stop at 2× credit",
+        ),
+        "LONG_CALL": (
+            "45 DTE · 50Δ ATM · quality ≥40 · catalyst-driven",
+            "Trail stop at 50% of max gain · re-evaluate at 21 DTE",
+            "Take profit at 50-100% gain · stop at 50% loss",
+        ),
+        "PMCC": (
+            "LEAPS 70Δ ITM 9+mo · short 25Δ OTM 30-45 DTE",
+            "Roll short at 50% profit or 21 DTE · extrinsic value rule",
+            "Close if LEAPS < 6mo remaining · stop if LEAPS breached",
+        ),
+    }
+
     # Strategy display config: (emoji, label, sort_key, max_show)
     strat_config = {
         "CSP":       ("💰", "CASH-SECURED PUTS",    "annual_yield_pct", 5),
@@ -664,6 +705,10 @@ def ping_options_intel(
 
         lines.append("")
         lines.append(f"{emoji} <b>{label}</b> ({len(items)})")
+        # 3-phase rules — compact one-liner per strategy
+        entry_r, manage_r, exit_r = mgmt_rules.get(strat_key, ("", "", ""))
+        if manage_r:
+            lines.append(f"  <i>📋 {manage_r} · {exit_r}</i>")
 
         for c in items[:max_show]:
             tk = _html.escape(str(c.get("ticker", "?")))
