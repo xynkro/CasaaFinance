@@ -281,6 +281,7 @@ export interface ScanResultRow {
   technical_score: string;
   composite_score: string;
   catalyst_flag: string;
+  notes?: string;             // multi-leg detail (IC/PCS/CCS/PMCC)
 }
 
 export interface OptionRecommendationRow {

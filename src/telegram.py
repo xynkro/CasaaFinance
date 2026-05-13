@@ -643,16 +643,19 @@ def ping_options_intel(
 
     # Strategy display config: (emoji, label, sort_key, max_show)
     strat_config = {
-        "CSP":       ("💰", "CASH-SECURED PUTS",  "annual_yield_pct", 5),
-        "CC":        ("📞", "COVERED CALLS",       "annual_yield_pct", 5),
-        "LONG_CALL": ("🚀", "LONG CALLS",          "composite_score",  5),
-        "PMCC":      ("🔗", "POOR MAN'S CC",       "composite_score",  3),
+        "CSP":       ("💰", "CASH-SECURED PUTS",    "annual_yield_pct", 5),
+        "CC":        ("📞", "COVERED CALLS",         "annual_yield_pct", 5),
+        "LONG_CALL": ("🚀", "LONG CALLS",            "composite_score",  5),
+        "PCS":       ("📉", "PUT CREDIT SPREADS",    "annual_yield_pct", 4),
+        "CCS":       ("📈", "CALL CREDIT SPREADS",   "annual_yield_pct", 4),
+        "IC":        ("🦅", "IRON CONDORS",           "annual_yield_pct", 3),
+        "PMCC":      ("🔗", "POOR MAN'S CC",         "composite_score",  3),
     }
 
     lines = [f"<b>🔬 OPTIONS INTEL</b> · {_html.escape(date)}"]
     lines.append(f"{len(candidates)} candidate{'s' if len(candidates) != 1 else ''} found")
 
-    for strat_key in ["CSP", "CC", "LONG_CALL", "PMCC"]:
+    for strat_key in ["CSP", "CC", "PCS", "CCS", "IC", "LONG_CALL", "PMCC"]:
         items = by_strat.pop(strat_key, [])
         if not items:
             continue
@@ -683,18 +686,38 @@ def ping_options_intel(
                     f" · {yld:.0f}% ann"
                     f" · Δ{delta:.2f} · IV {iv:.0f}%"
                 )
+            elif strat_key in ("PCS", "CCS", "IC"):
+                # Multi-leg income — show credit, yield, notes (leg detail)
+                yld = float(c.get("annual_yield_pct", 0))
+                ivr = float(c.get("iv_rank", 0))
+                notes = _html.escape(str(c.get("notes", "")))
+                lines.append(
+                    f"  <b>${tk}</b> {notes} ({dte}d)"
+                    f" · <code>${prem:.2f}</code> cr"
+                    f" · {yld:.0f}% ann"
+                    f" · IVR≈{ivr:.0f}"
+                )
             else:
                 # LONG_CALL / PMCC — show quality score + catalyst
                 quality = float(c.get("composite_score", 0))
                 cash = float(c.get("cash_required", 0))
                 be = float(c.get("breakeven", 0))
                 catalyst = " ⚡" if c.get("catalyst_flag") else ""
-                lines.append(
-                    f"  <b>${tk}</b> ${strike:.0f}C {exp} ({dte}d)"
-                    f" · <code>${prem:.2f}</code>"
-                    f" · Q{quality:.0f}{catalyst}"
-                    f" · BE ${be:.0f} · ${cash:.0f} risk"
-                )
+                notes_str = str(c.get("notes", ""))
+                if notes_str:
+                    lines.append(
+                        f"  <b>${tk}</b> {_html.escape(notes_str)} ({dte}d)"
+                        f" · <code>${prem:.2f}</code>"
+                        f" · Q{quality:.0f}{catalyst}"
+                        f" · ${cash:.0f} risk"
+                    )
+                else:
+                    lines.append(
+                        f"  <b>${tk}</b> ${strike:.0f}C {exp} ({dte}d)"
+                        f" · <code>${prem:.2f}</code>"
+                        f" · Q{quality:.0f}{catalyst}"
+                        f" · BE ${be:.0f} · ${cash:.0f} risk"
+                    )
 
         if len(items) > max_show:
             lines.append(f"  <i>+{len(items) - max_show} more in PWA</i>")

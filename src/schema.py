@@ -471,7 +471,7 @@ class ScanResultRow:
         "annual_yield_pct", "cash_required", "breakeven",
         "iv", "iv_rank", "spread_pct",
         "underlying_last", "technical_score", "composite_score",
-        "catalyst_flag",
+        "catalyst_flag", "notes",
     ]
 
     date: str
@@ -495,6 +495,7 @@ class ScanResultRow:
     technical_score: float
     composite_score: float     # 0-100
     catalyst_flag: bool
+    notes: str = ""            # multi-leg detail (IC/PCS/CCS/PMCC legs)
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
@@ -509,6 +510,7 @@ class ScanResultRow:
             _num(self.underlying_last, 4),
             _num(self.technical_score, 1), _num(self.composite_score, 1),
             "TRUE" if self.catalyst_flag else "",
+            self.notes,
         ]
 
 

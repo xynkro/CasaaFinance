@@ -61,6 +61,15 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
   const catalyst = cand.catalyst_flag === "TRUE";
   const isCall = cand.right === "C";
   const isLongCall = cand.strategy === "LONG_CALL";
+  const isMultiLeg = ["IC", "PCS", "CCS", "PMCC"].includes(cand.strategy);
+  const isDirectional = isLongCall || cand.strategy === "PMCC";
+  const notes = cand.notes || "";
+
+  // Strategy badge colors
+  const stratBadge: Record<string, string> = {
+    PCS: "text-cyan-300", CCS: "text-rose-300",
+    IC: "text-sky-300", PMCC: "text-fuchsia-300",
+  };
 
   return (
     <button
@@ -71,40 +80,53 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
       {/* Top row: ticker + strike + composite ring */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          {isLongCall ? (
+          {isLongCall || cand.strategy === "PMCC" ? (
             <Rocket size={11} className="text-violet-400 shrink-0" />
           ) : isCall ? (
             <TrendingDown size={11} className="text-amber-400 shrink-0" />
+          ) : cand.strategy === "IC" ? (
+            <Radar size={11} className="text-sky-400 shrink-0" />
           ) : (
             <TrendingUp size={11} className="text-emerald-400 shrink-0" />
           )}
           <span className="text-[length:var(--t-sm)] font-bold text-white">{cand.ticker}</span>
-          {isLongCall && (
-            <span className="text-[length:var(--t-2xs)] font-semibold uppercase tracking-wide text-violet-300">
-              Long Call
+          {(isLongCall || isMultiLeg) && (
+            <span className={`text-[length:var(--t-2xs)] font-semibold uppercase tracking-wide ${
+              stratBadge[cand.strategy] || "text-violet-300"
+            }`}>
+              {cand.strategy === "LONG_CALL" ? "Long Call" : cand.strategy}
             </span>
           )}
-          <span className="text-[length:var(--t-2xs)] font-semibold text-slate-500">
-            ${strike.toFixed(strike < 10 ? 1 : 0)}{cand.right}
-          </span>
+          {!isMultiLeg && (
+            <span className="text-[length:var(--t-2xs)] font-semibold text-slate-500">
+              ${strike.toFixed(strike < 10 ? 1 : 0)}{cand.right}
+            </span>
+          )}
           <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExp(cand.expiry)}</span>
           {catalyst && (
-            <Zap size={10} className={isLongCall ? "text-violet-400 shrink-0" : "text-orange-400 shrink-0"} />
+            <Zap size={10} className={isDirectional ? "text-violet-400 shrink-0" : "text-orange-400 shrink-0"} />
           )}
         </div>
         <CompositeGauge value={composite} />
       </div>
 
+      {/* Notes for multi-leg — show compact leg structure */}
+      {notes && (
+        <div className="text-[length:var(--t-2xs)] text-slate-500 font-mono">{notes}</div>
+      )}
+
       {/* Key metrics */}
       <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
-        <span>Δ <span className="text-slate-300 tabular-nums">{delta.toFixed(2)}</span></span>
-        <span>Prem <span className="text-slate-300 tabular-nums">{fmtPrice(prem)}</span></span>
-        {isLongCall ? (
+        {!isMultiLeg && (
+          <span>Δ <span className="text-slate-300 tabular-nums">{delta.toFixed(2)}</span></span>
+        )}
+        <span>{isMultiLeg ? "Credit" : "Prem"} <span className="text-slate-300 tabular-nums">{fmtPrice(prem)}</span></span>
+        {isDirectional ? (
           <span>Cost <span className="text-violet-400 tabular-nums font-semibold">{fmtPrice(cash)}</span></span>
         ) : (
           <>
             <span>Yield <span className="text-emerald-400 tabular-nums font-semibold">{yld.toFixed(0)}%</span></span>
-            <span>Cash <span className="text-slate-300 tabular-nums">{fmtPrice(cash)}</span></span>
+            <span>{isMultiLeg ? "Max Risk" : "Cash"} <span className="text-slate-300 tabular-nums">{fmtPrice(cash)}</span></span>
           </>
         )}
       </div>
@@ -157,7 +179,7 @@ function CandidateItem({ cand }: { cand: ScanResultRow }) {
             Stock: <span className="text-slate-300 tabular-nums">{fmtPrice(cand.underlying_last)}</span>
           </div>
           {catalyst && (
-            <div className={`flex items-center gap-1 text-[length:var(--t-2xs)] ${isLongCall ? "text-violet-400" : "text-orange-400"}`}>
+            <div className={`flex items-center gap-1 text-[length:var(--t-2xs)] ${isDirectional ? "text-violet-400" : "text-orange-400"}`}>
               <Zap size={10} />
               <span className="font-semibold">
                 {isLongCall ? "Gov Confluence — directional catalyst" : "Catalyst — volatility elevated"}
@@ -264,7 +286,7 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
 }
 
 type Source = "my-tickers" | "broad";
-type StratTab = "CSP" | "CC" | "LONG_CALL";
+type StratTab = "CSP" | "CC" | "PCS" | "CCS" | "IC" | "LONG_CALL" | "PMCC";
 
 export function ScanCard({
   candidates,
@@ -278,24 +300,19 @@ export function ScanCard({
 
   const broad = broadCandidates ?? [];
 
-  // ----- "My Tickers" lists (unchanged behavior) -----
-  const cspList = candidates
-    .filter((c) => c.strategy === "CSP")
-    .sort((a, b) => Number(b.composite_score) - Number(a.composite_score))
-    .slice(0, 8);
-  const ccList = candidates
-    .filter((c) => c.strategy === "CC")
-    .sort((a, b) => Number(b.composite_score) - Number(a.composite_score))
-    .slice(0, 8);
-  const lcList = candidates
-    .filter((c) => c.strategy === "LONG_CALL")
-    .sort((a, b) => Number(b.composite_score) - Number(a.composite_score))
-    .slice(0, 8);
+  const sortByComposite = (a: ScanResultRow, b: ScanResultRow) =>
+    Number(b.composite_score) - Number(a.composite_score);
+
+  // ----- "My Tickers" lists -----
+  const cspList = candidates.filter((c) => c.strategy === "CSP").sort(sortByComposite).slice(0, 8);
+  const ccList = candidates.filter((c) => c.strategy === "CC").sort(sortByComposite).slice(0, 8);
+  const lcList = candidates.filter((c) => c.strategy === "LONG_CALL").sort(sortByComposite).slice(0, 8);
+  const pcsList = candidates.filter((c) => c.strategy === "PCS").sort(sortByComposite).slice(0, 8);
+  const ccsList = candidates.filter((c) => c.strategy === "CCS").sort(sortByComposite).slice(0, 8);
+  const icList = candidates.filter((c) => c.strategy === "IC").sort(sortByComposite).slice(0, 8);
+  const pmccList = candidates.filter((c) => c.strategy === "PMCC").sort(sortByComposite).slice(0, 8);
 
   // ----- "Broad" lists -----
-  // market_scan produces multiple strategies; we still split by CSP/CC for the
-  // strategy pill but show all broad candidates that match the active strategy.
-  // Sort by thesis_confidence desc, then yield.
   const broadSort = (a: OptionRecommendationRow, b: OptionRecommendationRow) => {
     const cd = Number(b.thesis_confidence) - Number(a.thesis_confidence);
     if (!isNaN(cd) && cd !== 0) return cd;
@@ -305,8 +322,15 @@ export function ScanCard({
   const broadCc = broad.filter((c) => c.strategy === "CC").sort(broadSort).slice(0, 12);
   const broadLc = broad.filter((c) => c.strategy === "LONG_CALL").sort(broadSort).slice(0, 12);
 
-  const myActive = tab === "LONG_CALL" ? lcList : tab === "CSP" ? cspList : ccList;
-  const broadActive = tab === "LONG_CALL" ? broadLc : tab === "CSP" ? broadCsp : broadCc;
+  const myLists: Record<StratTab, ScanResultRow[]> = {
+    CSP: cspList, CC: ccList, PCS: pcsList, CCS: ccsList,
+    IC: icList, LONG_CALL: lcList, PMCC: pmccList,
+  };
+  const broadLists: Record<string, OptionRecommendationRow[]> = {
+    CSP: broadCsp, CC: broadCc, LONG_CALL: broadLc,
+  };
+  const myActive = myLists[tab] ?? [];
+  const broadActive = broadLists[tab] ?? [];
 
   const onMyTickers = source === "my-tickers";
   const empty =
@@ -320,37 +344,31 @@ export function ScanCard({
           <Radar size={14} className="text-indigo-400" />
           <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Daily Scan</h2>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setTab("CSP")}
-            className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
-              tab === "CSP"
-                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                : "text-slate-500 hover:text-slate-300 border border-transparent"
-            }`}
-          >
-            CSP ({onMyTickers ? cspList.length : broadCsp.length})
-          </button>
-          <button
-            onClick={() => setTab("CC")}
-            className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
-              tab === "CC"
-                ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                : "text-slate-500 hover:text-slate-300 border border-transparent"
-            }`}
-          >
-            CC ({onMyTickers ? ccList.length : broadCc.length})
-          </button>
-          <button
-            onClick={() => setTab("LONG_CALL")}
-            className={`px-2.5 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all ${
-              tab === "LONG_CALL"
-                ? "bg-violet-500/20 text-violet-400 border border-violet-500/30"
-                : "text-slate-500 hover:text-slate-300 border border-transparent"
-            }`}
-          >
-            Calls ({onMyTickers ? lcList.length : broadLc.length})
-          </button>
+        <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          {([
+            { key: "CSP"  as StratTab, label: "CSP",  active: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
+            { key: "CC"   as StratTab, label: "CC",   active: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
+            { key: "PCS"  as StratTab, label: "PCS",  active: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" },
+            { key: "CCS"  as StratTab, label: "CCS",  active: "bg-rose-500/20 text-rose-400 border-rose-500/30" },
+            { key: "IC"   as StratTab, label: "IC",   active: "bg-sky-500/20 text-sky-400 border-sky-500/30" },
+            { key: "LONG_CALL" as StratTab, label: "LC", active: "bg-violet-500/20 text-violet-400 border-violet-500/30" },
+            { key: "PMCC" as StratTab, label: "PMCC", active: "bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30" },
+          ] as const).map(({ key, label, active }) => {
+            const count = onMyTickers
+              ? (myLists[key]?.length ?? 0)
+              : (broadLists[key]?.length ?? 0);
+            return (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                className={`px-2 py-1 rounded-md text-[length:var(--t-2xs)] font-semibold transition-all whitespace-nowrap border ${
+                  tab === key ? active : "text-slate-500 hover:text-slate-300 border-transparent"
+                }`}
+              >
+                {label}{count > 0 ? ` (${count})` : ""}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -389,14 +407,26 @@ export function ScanCard({
         </div>
       ) : (onMyTickers ? myActive : broadActive).length === 0 ? (
         <div className="flex flex-col items-center gap-2 py-4 text-slate-500">
-          {tab === "LONG_CALL" ? (
+          {tab === "LONG_CALL" || tab === "PMCC" ? (
             <>
               <Rocket size={20} className="text-slate-600" />
               <span className="text-[length:var(--t-sm)] text-center">
                 No qualifying setups — waiting for trend confirmation
               </span>
               <span className="text-[length:var(--t-2xs)] text-slate-600 text-center">
-                Long calls require SMA50/200 uptrend + quality score {"≥"} 40
+                {tab === "LONG_CALL"
+                  ? "Long calls require SMA50/200 uptrend + quality score ≥ 40"
+                  : "PMCC requires LEAPS 9+ months + short call OTM, cost < 80% width"}
+              </span>
+            </>
+          ) : tab === "IC" ? (
+            <>
+              <Radar size={20} className="text-slate-600" />
+              <span className="text-[length:var(--t-sm)] text-center">
+                No iron condor setups — IV may be too low
+              </span>
+              <span className="text-[length:var(--t-2xs)] text-slate-600 text-center">
+                IVR {"≥"} 40 + credit/width {"≥"} 30% required (tastytrade rules)
               </span>
             </>
           ) : (
@@ -414,7 +444,13 @@ export function ScanCard({
             {onMyTickers
               ? tab === "LONG_CALL"
                 ? "Gov confluence + trend quality — score = materiality (30) + SMA trend (30) + multi-signal (25) + confirmation (15)."
-                : "My Tickers — composite = 40% technical + 25% yield + 20% IV rank + 10% cash eff + 5% liquidity."
+                : tab === "IC"
+                  ? "Iron condor — tastytrade rules: ~20Δ short strikes, $5-$10 wings, 45 DTE, IVR > 40, credit/width ≥ 30%."
+                  : tab === "PCS" || tab === "CCS"
+                    ? "Credit spread — tastytrade rules: 25Δ short, $5-$10 wing, 42 DTE, credit ≥ 1/3 width, IVR ≥ 25%."
+                    : tab === "PMCC"
+                      ? "Diagonal — LEAPS 0.70Δ ITM 9+ mo + short call 0.25Δ OTM 35 DTE, cost < 80% strike width."
+                      : "My Tickers — composite = 40% technical + 25% yield + 20% IV rank + 10% cash eff + 5% liquidity."
               : "Broad — LunarCrush trending + WSB + quality watchlist (sorted by thesis confidence)."}
           </p>
 

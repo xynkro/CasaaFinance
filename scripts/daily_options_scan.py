@@ -59,6 +59,35 @@ LC_MAX_PREMIUM_PCT = 0.05        # max 5% of underlying as premium
 LC_MIN_OI       = 20             # lower bar than income trades
 LC_MIN_QUALITY  = 40             # minimum quality score to emit a LONG_CALL
 
+# IRON CONDOR — neutral range-bound play, tastytrade criteria
+IC_DTE_RANGE    = (30, 55)
+IC_TARGET_DTE   = 45
+IC_OTM_RANGE    = (0.07, 0.16)   # 7-16% OTM ≈ ~15-25Δ
+IC_WING_WIDTHS  = [5, 10]        # try $5 wings first, then $10
+IC_MIN_CREDIT_RATIO = 0.30       # credit/width ≥ 30%
+IC_MIN_IVR      = 40             # need elevated IV environment
+IC_MIN_OI       = 20
+IC_MIN_QUALITY  = 30
+
+# CREDIT SPREADS — directional plays, tastytrade criteria
+CS_DTE_RANGE    = (25, 50)
+CS_TARGET_DTE   = 42
+CS_OTM_RANGE    = (0.04, 0.12)   # 4-12% OTM ≈ ~20-35Δ
+CS_WING_WIDTHS  = [5, 10]
+CS_MIN_CREDIT_RATIO = 0.28       # ~1/3 width credit
+CS_MIN_IVR      = 25             # lower bar than IC
+CS_MIN_OI       = 20
+CS_MIN_QUALITY  = 25
+
+# PMCC — Poor Man's Covered Call (diagonal spread)
+PMCC_LEAPS_MIN_DTE  = 270        # 9+ months out
+PMCC_LEAPS_ITM      = (0.05, 0.20)   # 5-20% ITM ≈ 0.65-0.85Δ
+PMCC_SHORT_DTE_RANGE = (25, 50)
+PMCC_SHORT_OTM      = (0.04, 0.12)   # 4-12% OTM ≈ 0.20-0.35Δ
+PMCC_MAX_COST_RATIO = 0.80       # LEAPS cost < 80% of strike width
+PMCC_MIN_OI         = 10
+PMCC_MIN_QUALITY    = 30
+
 
 def _setup_logging() -> logging.Logger:
     logger = logging.getLogger("daily-scan")
@@ -201,6 +230,57 @@ def _option_mid(row) -> float:
     if bid > 0 or ask > 0:
         return (bid + ask) / 2
     return float(row.get("lastPrice", 0) or 0)
+
+
+def _estimate_ivr(iv_pct: float, hv30_pct: float) -> float:
+    """IV Rank proxy from IV/HV ratio. Returns 0-100.
+
+    True IV Rank needs 52-week IV data (IBKR has this); this heuristic
+    uses the current IV vs realised vol ratio as a stand-in:
+      ratio 1.0 → IVR ≈ 50, ratio 1.5 → IVR ≈ 75, ratio 0.7 → IVR ≈ 35
+    """
+    if hv30_pct <= 0:
+        return 50.0  # neutral when HV unknown
+    ratio = iv_pct / hv30_pct
+    return max(0, min(100, 50 + (ratio - 1.0) * 50))
+
+
+def _atm_iv(puts_df, calls_df, price: float) -> float:
+    """ATM implied vol from near-the-money options. Returns % (e.g. 30.0)."""
+    near = 0.05  # within 5% of price
+    ivs: list[float] = []
+    for df in [puts_df, calls_df]:
+        if df.empty or "impliedVolatility" not in df.columns:
+            continue
+        near_df = df[
+            (df["strike"] >= price * (1 - near)) &
+            (df["strike"] <= price * (1 + near))
+        ]
+        iv_vals = near_df["impliedVolatility"].dropna()
+        if not iv_vals.empty:
+            ivs.extend(iv_vals.tolist())
+    if ivs:
+        return float(sum(ivs) / len(ivs)) * 100
+    return 0.0
+
+
+def _best_leaps_expiry(expiries: tuple[str, ...], min_dte: int = 270) -> str | None:
+    """Find LEAPS expiry >= min_dte days out, closest to 365 days."""
+    today = date.today()
+    best: str | None = None
+    best_diff = 9999
+    for exp_str in expiries:
+        try:
+            exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        dte = (exp - today).days
+        if dte >= min_dte:
+            diff = abs(dte - 365)
+            if diff < best_diff:
+                best_diff = diff
+                best = exp_str
+    return best
 
 
 def _long_call_quality(
@@ -408,6 +488,7 @@ def scan_ticker(
                 "composite_score": round(float(r["ann_yield"]), 2),
                 "catalyst_flag": False,
                 "hv30": round(hv30, 1),
+                "notes": "",
             })
     except Exception as e:
         logger.debug(f"  {ticker}: CSP error — {e}")
@@ -455,6 +536,7 @@ def scan_ticker(
                 "composite_score": round(float(r["ann_yield"]), 2),
                 "catalyst_flag": False,
                 "hv30": round(hv30, 1),
+                "notes": "",
             })
     except Exception as e:
         logger.debug(f"  {ticker}: CC error — {e}")
@@ -606,6 +688,7 @@ def scan_ticker(
                         "composite_score": round(lc_quality, 1),
                         "catalyst_flag": True,
                         "hv30": round(hv30, 1),
+                        "notes": "",
                     })
                     logger.info(
                         f"  {ticker}: LONG_CALL quality={lc_quality:.0f} "
@@ -614,6 +697,355 @@ def scan_ticker(
                     )
             except Exception as e:
                 logger.debug(f"  {ticker}: LONG_CALL error — {e}")
+
+    # ── IRON CONDOR — neutral range-bound play ──────────────────────
+    # Tastytrade: ~20Δ short strikes, $5-$10 wings, 45 DTE,
+    # IVR > 40 (proxy), credit/width ≥ 30%, manage at 50% profit.
+    try:
+        ic_expiry = _best_expiry(expiries, dte_range=IC_DTE_RANGE, target=IC_TARGET_DTE)
+        if ic_expiry:
+            ic_dte = (datetime.strptime(ic_expiry, "%Y-%m-%d").date() - today).days
+            ic_expiry_iso = ic_expiry.replace("-", "")
+            ic_chain = chain if ic_expiry == expiry else yt.option_chain(ic_expiry)
+
+            ic_puts = ic_chain.puts.copy()
+            ic_calls = ic_chain.calls.copy()
+            ic_puts["mid"] = ic_puts.apply(_option_mid, axis=1)
+            ic_calls["mid"] = ic_calls.apply(_option_mid, axis=1)
+            ic_puts = ic_puts[(ic_puts["openInterest"] >= IC_MIN_OI) & (ic_puts["mid"] >= MIN_MID)]
+            ic_calls = ic_calls[(ic_calls["openInterest"] >= IC_MIN_OI) & (ic_calls["mid"] >= MIN_MID)]
+
+            atm_iv_ic = _atm_iv(ic_puts, ic_calls, price)
+            est_ivr_ic = _estimate_ivr(atm_iv_ic, hv30)
+
+            if est_ivr_ic >= IC_MIN_IVR and not ic_puts.empty and not ic_calls.empty:
+                # Short put: 7-16% below price (~15-25Δ)
+                sp_cands = ic_puts[
+                    (ic_puts["strike"] >= price * (1 - IC_OTM_RANGE[1])) &
+                    (ic_puts["strike"] <= price * (1 - IC_OTM_RANGE[0]))
+                ]
+                # Short call: 7-16% above price
+                sc_cands = ic_calls[
+                    (ic_calls["strike"] >= price * (1 + IC_OTM_RANGE[0])) &
+                    (ic_calls["strike"] <= price * (1 + IC_OTM_RANGE[1]))
+                ]
+
+                if not sp_cands.empty and not sc_cands.empty:
+                    short_put = sp_cands.sort_values("mid", ascending=False).iloc[0]
+                    short_call = sc_cands.sort_values("mid", ascending=False).iloc[0]
+                    sp_strike = float(short_put["strike"])
+                    sc_strike = float(short_call["strike"])
+                    sp_mid = float(short_put["mid"])
+                    sc_mid = float(short_call["mid"])
+
+                    for wing_w in IC_WING_WIDTHS:
+                        lp_target = sp_strike - wing_w
+                        lp_near = ic_puts[(ic_puts["strike"] - lp_target).abs() <= wing_w * 0.4]
+                        if lp_near.empty:
+                            continue
+                        long_put = lp_near.loc[(lp_near["strike"] - lp_target).abs().idxmin()]
+
+                        lc_target = sc_strike + wing_w
+                        lc_near = ic_calls[(ic_calls["strike"] - lc_target).abs() <= wing_w * 0.4]
+                        if lc_near.empty:
+                            continue
+                        long_call = lc_near.loc[(lc_near["strike"] - lc_target).abs().idxmin()]
+
+                        lp_mid = _option_mid(long_put)
+                        lc_mid = _option_mid(long_call)
+                        net_credit = (sp_mid + sc_mid) - (lp_mid + lc_mid)
+                        actual_width = max(
+                            sp_strike - float(long_put["strike"]),
+                            float(long_call["strike"]) - sc_strike,
+                        )
+                        if actual_width <= 0 or net_credit <= 0:
+                            continue
+                        credit_ratio = net_credit / actual_width
+
+                        if credit_ratio >= IC_MIN_CREDIT_RATIO:
+                            max_risk = actual_width - net_credit
+                            ann_yield = (net_credit / max_risk) * (365 / ic_dte) * 100 if max_risk > 0 else 0
+                            ic_score = min(100, credit_ratio * 120 + min(est_ivr_ic, 100) * 0.25 + (10 if ann_yield >= 25 else 0))
+
+                            if ic_score >= IC_MIN_QUALITY:
+                                lp_s = float(long_put["strike"])
+                                lc_s = float(long_call["strike"])
+                                notes = (
+                                    f"SP:{sp_strike:.0f}/LP:{lp_s:.0f}"
+                                    f"/SC:{sc_strike:.0f}/LC:{lc_s:.0f}"
+                                    f" W:${actual_width:.0f}"
+                                )
+                                out.append({
+                                    "ticker": ticker, "strategy": "IC", "right": "",
+                                    "strike": sp_strike, "expiry": ic_expiry_iso,
+                                    "dte": ic_dte, "delta": 0.0,
+                                    "premium": round(net_credit, 2),
+                                    "bid": 0.0, "ask": 0.0,
+                                    "annual_yield_pct": round(ann_yield, 2),
+                                    "cash_required": round(max_risk * 100, 2),
+                                    "breakeven": round(sp_strike - net_credit, 2),
+                                    "iv": round(atm_iv_ic, 1),
+                                    "iv_rank": round(est_ivr_ic, 1),
+                                    "spread_pct": 0.0,
+                                    "underlying_last": round(price, 2),
+                                    "technical_score": 0.0,
+                                    "composite_score": round(ic_score, 1),
+                                    "catalyst_flag": False,
+                                    "hv30": round(hv30, 1),
+                                    "notes": notes,
+                                })
+                                logger.info(
+                                    f"  ✓ {ticker:6} IC   {notes}  "
+                                    f"{ic_dte}DTE  credit=${net_credit:.2f}  "
+                                    f"ratio={credit_ratio:.0%}  IVR≈{est_ivr_ic:.0f}"
+                                )
+                                break  # prefer narrower wings
+    except Exception as e:
+        logger.debug(f"  {ticker}: IC error — {e}")
+
+    # ── PUT CREDIT SPREAD — bullish directional ─────────────────────
+    # Tastytrade: 20-30Δ short put, $5-$10 wings, 35-49 DTE,
+    # credit ≥ 1/3 width, IVR ≥ 25, manage at 50% profit.
+    try:
+        cs_expiry = _best_expiry(expiries, dte_range=CS_DTE_RANGE, target=CS_TARGET_DTE)
+        if cs_expiry:
+            cs_dte = (datetime.strptime(cs_expiry, "%Y-%m-%d").date() - today).days
+            cs_expiry_iso = cs_expiry.replace("-", "")
+            cs_chain = chain if cs_expiry == expiry else yt.option_chain(cs_expiry)
+
+            cs_puts = cs_chain.puts.copy()
+            cs_calls_for_iv = cs_chain.calls.copy()
+            cs_puts["mid"] = cs_puts.apply(_option_mid, axis=1)
+            cs_puts = cs_puts[(cs_puts["openInterest"] >= CS_MIN_OI) & (cs_puts["mid"] >= MIN_MID)]
+
+            atm_iv_cs = _atm_iv(cs_puts, cs_calls_for_iv, price)
+            est_ivr_cs = _estimate_ivr(atm_iv_cs, hv30)
+
+            if est_ivr_cs >= CS_MIN_IVR and not cs_puts.empty:
+                sp_cands = cs_puts[
+                    (cs_puts["strike"] >= price * (1 - CS_OTM_RANGE[1])) &
+                    (cs_puts["strike"] <= price * (1 - CS_OTM_RANGE[0]))
+                ]
+                if not sp_cands.empty:
+                    short_put = sp_cands.sort_values("mid", ascending=False).iloc[0]
+                    sp_strike = float(short_put["strike"])
+                    sp_mid = float(short_put["mid"])
+
+                    for wing_w in CS_WING_WIDTHS:
+                        lp_target = sp_strike - wing_w
+                        lp_near = cs_puts[(cs_puts["strike"] - lp_target).abs() <= wing_w * 0.4]
+                        if lp_near.empty:
+                            continue
+                        long_put = lp_near.loc[(lp_near["strike"] - lp_target).abs().idxmin()]
+                        lp_mid = _option_mid(long_put)
+                        actual_width = sp_strike - float(long_put["strike"])
+                        net_credit = sp_mid - lp_mid
+
+                        if actual_width <= 0 or net_credit <= 0:
+                            continue
+                        credit_ratio = net_credit / actual_width
+                        if credit_ratio >= CS_MIN_CREDIT_RATIO:
+                            max_risk = actual_width - net_credit
+                            ann_yield = (net_credit / max_risk) * (365 / cs_dte) * 100 if max_risk > 0 else 0
+                            pcs_score = min(100, credit_ratio * 100 + min(est_ivr_cs, 100) * 0.2 + (15 if ann_yield >= 20 else 0))
+
+                            if pcs_score >= CS_MIN_QUALITY:
+                                lp_s = float(long_put["strike"])
+                                notes = f"SP:{sp_strike:.0f}/LP:{lp_s:.0f} W:${actual_width:.0f}"
+                                out.append({
+                                    "ticker": ticker, "strategy": "PCS", "right": "P",
+                                    "strike": sp_strike, "expiry": cs_expiry_iso,
+                                    "dte": cs_dte,
+                                    "delta": float(short_put.get("delta", 0) or 0),
+                                    "premium": round(net_credit, 2),
+                                    "bid": 0.0, "ask": 0.0,
+                                    "annual_yield_pct": round(ann_yield, 2),
+                                    "cash_required": round(max_risk * 100, 2),
+                                    "breakeven": round(sp_strike - net_credit, 2),
+                                    "iv": round(atm_iv_cs, 1),
+                                    "iv_rank": round(est_ivr_cs, 1),
+                                    "spread_pct": 0.0,
+                                    "underlying_last": round(price, 2),
+                                    "technical_score": 0.0,
+                                    "composite_score": round(pcs_score, 1),
+                                    "catalyst_flag": False,
+                                    "hv30": round(hv30, 1),
+                                    "notes": notes,
+                                })
+                                logger.info(
+                                    f"  ✓ {ticker:6} PCS  {notes}  "
+                                    f"{cs_dte}DTE  credit=${net_credit:.2f}  "
+                                    f"ratio={credit_ratio:.0%}  IVR≈{est_ivr_cs:.0f}"
+                                )
+                                break
+    except Exception as e:
+        logger.debug(f"  {ticker}: PCS error — {e}")
+
+    # ── CALL CREDIT SPREAD — bearish directional ────────────────────
+    # Mirror of PCS on the call side. Same tastytrade criteria.
+    try:
+        # Reuse cs_expiry/cs_chain if already fetched, else fetch
+        ccs_expiry = _best_expiry(expiries, dte_range=CS_DTE_RANGE, target=CS_TARGET_DTE)
+        if ccs_expiry:
+            ccs_dte = (datetime.strptime(ccs_expiry, "%Y-%m-%d").date() - today).days
+            ccs_expiry_iso = ccs_expiry.replace("-", "")
+            ccs_chain = chain if ccs_expiry == expiry else yt.option_chain(ccs_expiry)
+
+            ccs_calls = ccs_chain.calls.copy()
+            ccs_puts_for_iv = ccs_chain.puts.copy()
+            ccs_calls["mid"] = ccs_calls.apply(_option_mid, axis=1)
+            ccs_calls = ccs_calls[(ccs_calls["openInterest"] >= CS_MIN_OI) & (ccs_calls["mid"] >= MIN_MID)]
+
+            atm_iv_ccs = _atm_iv(ccs_puts_for_iv, ccs_calls, price)
+            est_ivr_ccs = _estimate_ivr(atm_iv_ccs, hv30)
+
+            if est_ivr_ccs >= CS_MIN_IVR and not ccs_calls.empty:
+                sc_cands = ccs_calls[
+                    (ccs_calls["strike"] >= price * (1 + CS_OTM_RANGE[0])) &
+                    (ccs_calls["strike"] <= price * (1 + CS_OTM_RANGE[1]))
+                ]
+                if not sc_cands.empty:
+                    short_call = sc_cands.sort_values("mid", ascending=False).iloc[0]
+                    sc_strike = float(short_call["strike"])
+                    sc_mid = float(short_call["mid"])
+
+                    for wing_w in CS_WING_WIDTHS:
+                        lc_target = sc_strike + wing_w
+                        lc_near = ccs_calls[(ccs_calls["strike"] - lc_target).abs() <= wing_w * 0.4]
+                        if lc_near.empty:
+                            continue
+                        long_call = lc_near.loc[(lc_near["strike"] - lc_target).abs().idxmin()]
+                        lc_mid = _option_mid(long_call)
+                        actual_width = float(long_call["strike"]) - sc_strike
+                        net_credit = sc_mid - lc_mid
+
+                        if actual_width <= 0 or net_credit <= 0:
+                            continue
+                        credit_ratio = net_credit / actual_width
+                        if credit_ratio >= CS_MIN_CREDIT_RATIO:
+                            max_risk = actual_width - net_credit
+                            ann_yield = (net_credit / max_risk) * (365 / ccs_dte) * 100 if max_risk > 0 else 0
+                            ccs_score = min(100, credit_ratio * 100 + min(est_ivr_ccs, 100) * 0.2 + (15 if ann_yield >= 20 else 0))
+
+                            if ccs_score >= CS_MIN_QUALITY:
+                                lc_s = float(long_call["strike"])
+                                notes = f"SC:{sc_strike:.0f}/LC:{lc_s:.0f} W:${actual_width:.0f}"
+                                out.append({
+                                    "ticker": ticker, "strategy": "CCS", "right": "C",
+                                    "strike": sc_strike, "expiry": ccs_expiry_iso,
+                                    "dte": ccs_dte,
+                                    "delta": float(short_call.get("delta", 0) or 0),
+                                    "premium": round(net_credit, 2),
+                                    "bid": 0.0, "ask": 0.0,
+                                    "annual_yield_pct": round(ann_yield, 2),
+                                    "cash_required": round(max_risk * 100, 2),
+                                    "breakeven": round(sc_strike + net_credit, 2),
+                                    "iv": round(atm_iv_ccs, 1),
+                                    "iv_rank": round(est_ivr_ccs, 1),
+                                    "spread_pct": 0.0,
+                                    "underlying_last": round(price, 2),
+                                    "technical_score": 0.0,
+                                    "composite_score": round(ccs_score, 1),
+                                    "catalyst_flag": False,
+                                    "hv30": round(hv30, 1),
+                                    "notes": notes,
+                                })
+                                logger.info(
+                                    f"  ✓ {ticker:6} CCS  {notes}  "
+                                    f"{ccs_dte}DTE  credit=${net_credit:.2f}  "
+                                    f"ratio={credit_ratio:.0%}  IVR≈{est_ivr_ccs:.0f}"
+                                )
+                                break
+    except Exception as e:
+        logger.debug(f"  {ticker}: CCS error — {e}")
+
+    # ── PMCC — Poor Man's Covered Call (diagonal spread) ────────────
+    # Tastytrade: LEAPS 0.70-0.80Δ ITM 9+ months, short call 0.20-0.30Δ
+    # OTM 30-45 DTE, LEAPS cost < 80% strike width.
+    try:
+        leaps_expiry = _best_leaps_expiry(expiries, min_dte=PMCC_LEAPS_MIN_DTE)
+        pmcc_short_expiry = _best_expiry(expiries, dte_range=PMCC_SHORT_DTE_RANGE, target=CS_TARGET_DTE)
+        if leaps_expiry and pmcc_short_expiry and leaps_expiry != pmcc_short_expiry:
+            leaps_dte = (datetime.strptime(leaps_expiry, "%Y-%m-%d").date() - today).days
+            pmcc_s_dte = (datetime.strptime(pmcc_short_expiry, "%Y-%m-%d").date() - today).days
+            leaps_chain = yt.option_chain(leaps_expiry)
+            pmcc_s_chain = chain if pmcc_short_expiry == expiry else yt.option_chain(pmcc_short_expiry)
+
+            leaps_calls = leaps_chain.calls.copy()
+            leaps_calls["mid"] = leaps_calls.apply(_option_mid, axis=1)
+            leaps_calls = leaps_calls[(leaps_calls["openInterest"] >= PMCC_MIN_OI) & (leaps_calls["mid"] >= MIN_MID)]
+
+            pmcc_short_calls = pmcc_s_chain.calls.copy()
+            pmcc_short_calls["mid"] = pmcc_short_calls.apply(_option_mid, axis=1)
+            pmcc_short_calls = pmcc_short_calls[(pmcc_short_calls["openInterest"] >= PMCC_MIN_OI) & (pmcc_short_calls["mid"] >= MIN_MID)]
+
+            if not leaps_calls.empty and not pmcc_short_calls.empty:
+                # LEAPS: 5-20% ITM (strike below current price)
+                leaps_cands = leaps_calls[
+                    (leaps_calls["strike"] >= price * (1 - PMCC_LEAPS_ITM[1])) &
+                    (leaps_calls["strike"] <= price * (1 - PMCC_LEAPS_ITM[0]))
+                ]
+                # Short call: 4-12% OTM (above price)
+                pmcc_sc_cands = pmcc_short_calls[
+                    (pmcc_short_calls["strike"] >= price * (1 + PMCC_SHORT_OTM[0])) &
+                    (pmcc_short_calls["strike"] <= price * (1 + PMCC_SHORT_OTM[1]))
+                ]
+
+                if not leaps_cands.empty and not pmcc_sc_cands.empty:
+                    # LEAPS: pick closest to 10% ITM
+                    leaps_cands = leaps_cands.copy()
+                    leaps_cands["itm_dist"] = (1 - leaps_cands["strike"] / price - 0.10).abs()
+                    leaps_call = leaps_cands.sort_values("itm_dist").iloc[0]
+                    leaps_strike = float(leaps_call["strike"])
+                    leaps_mid = float(leaps_call["mid"])
+
+                    # Short call: pick closest to 8% OTM
+                    pmcc_sc_cands = pmcc_sc_cands.copy()
+                    pmcc_sc_cands["otm_dist"] = (pmcc_sc_cands["strike"] / price - 1.0 - 0.08).abs()
+                    pmcc_short = pmcc_sc_cands.sort_values("otm_dist").iloc[0]
+                    pmcc_sc_strike = float(pmcc_short["strike"])
+                    pmcc_sc_mid = float(pmcc_short["mid"])
+
+                    strike_width = pmcc_sc_strike - leaps_strike
+                    if strike_width > 0 and leaps_mid > 0:
+                        cost_ratio = leaps_mid / strike_width
+                        if cost_ratio <= PMCC_MAX_COST_RATIO:
+                            monthly_yield = (pmcc_sc_mid / leaps_mid) * (30 / pmcc_s_dte) * 100
+                            ann_yield = monthly_yield * 12
+                            pmcc_score = min(100, (1 - cost_ratio) * 80 + min(monthly_yield * 5, 30) + (10 if leaps_dte >= 365 else 0))
+
+                            if pmcc_score >= PMCC_MIN_QUALITY:
+                                leaps_exp_short = leaps_expiry[2:7].replace("-", "")  # YYMM
+                                pmcc_s_expiry_iso = pmcc_short_expiry.replace("-", "")
+                                notes = f"LEAPS:{leaps_strike:.0f}C {leaps_exp_short}/Short:{pmcc_sc_strike:.0f}C"
+                                out.append({
+                                    "ticker": ticker, "strategy": "PMCC", "right": "C",
+                                    "strike": leaps_strike,
+                                    "expiry": pmcc_s_expiry_iso,
+                                    "dte": pmcc_s_dte,
+                                    "delta": 0.0,
+                                    "premium": round(pmcc_sc_mid, 2),
+                                    "bid": 0.0, "ask": 0.0,
+                                    "annual_yield_pct": round(ann_yield, 2),
+                                    "cash_required": round(leaps_mid * 100, 2),
+                                    "breakeven": round(leaps_strike + leaps_mid, 2),
+                                    "iv": 0.0, "iv_rank": 0.0,
+                                    "spread_pct": 0.0,
+                                    "underlying_last": round(price, 2),
+                                    "technical_score": 0.0,
+                                    "composite_score": round(pmcc_score, 1),
+                                    "catalyst_flag": False,
+                                    "hv30": round(hv30, 1),
+                                    "notes": notes,
+                                })
+                                logger.info(
+                                    f"  ✓ {ticker:6} PMCC {notes}  "
+                                    f"short {pmcc_s_dte}DTE  income=${pmcc_sc_mid:.2f}  "
+                                    f"LEAPS ${leaps_mid:.2f} ({leaps_dte}d)  "
+                                    f"yield≈{ann_yield:.0f}%"
+                                )
+    except Exception as e:
+        logger.debug(f"  {ticker}: PMCC error — {e}")
 
     if out:
         for c in out:
@@ -624,6 +1056,12 @@ def scan_ticker(
                     f"{c['dte']}DTE  prem=${c['premium']:5.2f}  "
                     f"BE=${c['breakeven']:.2f}  gov_score={c['composite_score']:.0f}  "
                     f"u=${c['underlying_last']:.2f}"
+                )
+            elif label in ("IC", "PCS", "CCS", "PMCC"):
+                logger.info(
+                    f"  ✓ {c['ticker']:6} {label:4} {c.get('notes', '')}  "
+                    f"{c['dte']}DTE  prem=${c['premium']:5.2f}  yield={c['annual_yield_pct']:5.1f}%  "
+                    f"score={c['composite_score']:.0f}  u=${c['underlying_last']:.2f}"
                 )
             else:
                 logger.info(
@@ -826,6 +1264,7 @@ def main() -> int:
             technical_score=c["technical_score"],
             composite_score=c["composite_score"],
             catalyst_flag=c["catalyst_flag"],
+            notes=c.get("notes", ""),
         )
         rows_to_write.append(row.to_row())
 
