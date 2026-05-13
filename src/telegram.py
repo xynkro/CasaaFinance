@@ -35,7 +35,7 @@ ParseMode = Literal["none", "MarkdownV2", "HTML"]
 FINANCE_CHAT_ID = os.environ.get("TELEGRAM_FINANCE_CHAT_ID", "-1003942004211")
 MULTI_DAY_SWING_TOPIC = int(os.environ.get("TELEGRAM_MULTI_DAY_SWING_TOPIC", "3"))
 MACRO_NEWS_TOPIC = int(os.environ.get("TELEGRAM_MACRO_NEWS_TOPIC", "6"))
-OPTIONS_INTEL_TOPIC = int(os.environ.get("TELEGRAM_OPTIONS_INTEL_TOPIC", "60"))
+OPTIONS_INTEL_TOPIC = int(os.environ.get("TELEGRAM_OPTIONS_INTEL_TOPIC", "492"))
 
 # Insider Trading topic — created by Caspar manually in the Finance &
 # Trading supergroup. Topic ID discovered via getUpdates after first
