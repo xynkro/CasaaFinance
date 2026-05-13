@@ -117,36 +117,46 @@ def ping_daily_ready(
     drive_url: str | None = None,
     gov_confluence: list[str] | None = None,
     insider_alert: list[str] | None = None,
+    overnight: str | list[str] = "",
+    premarket: str | list[str] = "",
+    catalysts: str | list[str] = "",
+    commodities: str | list[str] = "",
+    watch: str | list[str] = "",
+    earnings_today: str | list[str] = "",
+    macro_today: str | list[str] = "",
+    negative_news: str | list[str] = "",
 ) -> dict:
     """
-    Daily-brief Telegram digest. Routed to Multi Day Swing topic so the
-    swing book has standing daily content beyond ACT_NOW transitions.
-
-    Includes the brief's headline + verdict + top bullets + posture inline
-    so the user can read the topic and skip opening the PWA. The full
-    brief is still in the Drive doc + the daily_brief_latest sheet tab.
-
-    gov_confluence and insider_alert are brain-curated picks that the
-    brain decided are worth surfacing — no rules-engine gatekeeping.
-
-    Args:
-        date: brief date "YYYY-MM-DD"
-        pwa_url: PWA link (added as footer)
-        headline: 1-line summary (e.g. "SPX +0.4%, semis lead")
-        verdict: brain-derived verdict ("constructive" / "cautious" / etc.)
-        bullets: up to 3 takeaway bullets
-        posture: cash/exposure recommendation 1-liner
-        drive_url: link to full brief markdown in Drive
-        gov_confluence: brain-curated gov confluence picks (free-text lines)
-        insider_alert: brain-curated insider trading alerts (free-text lines)
+    Full daily-brief Telegram digest. Routed to Multi Day Swing topic.
+    Includes all brief sections so the user gets the complete picture
+    without opening the PWA.
     """
     import html as _html
+
+    def _bullets(val) -> list[str]:
+        if not val:
+            return []
+        if isinstance(val, list):
+            return [str(v).strip() for v in val if str(v).strip()]
+        return [s.strip() for s in str(val).split("|") if s.strip()]
+
+    def _section(emoji: str, title: str, items: list[str], max_items: int = 5) -> None:
+        if not items:
+            return
+        lines.append("")
+        lines.append(f"{emoji} <b>{title}</b>")
+        for item in items[:max_items]:
+            if len(item) > 160:
+                item = item[:157] + "..."
+            lines.append(f"  · {_html.escape(item)}")
 
     lines = [f"<b>📰 Daily Brief</b> · {_html.escape(date)}"]
     if headline:
         lines.append(_html.escape(headline.strip()))
     if verdict:
         lines.append(f"<b>verdict:</b> {_html.escape(verdict.strip())}")
+
+    # Key takeaways
     if bullets:
         lines.append("")
         for b in bullets[:3]:
@@ -156,25 +166,28 @@ def ping_daily_ready(
             if len(b) > 140:
                 b = b[:137] + "..."
             lines.append(f"• {_html.escape(b)}")
+
     if posture:
         lines.append("")
         lines.append(f"<b>posture:</b> {_html.escape(posture.strip()[:120])}")
 
-    # ── Gov Confluence — brain-curated picks ─────────────────────────
-    gc = list(gov_confluence or [])
-    if gc:
-        lines.append("")
-        lines.append("🏛 <b>GOV CONFLUENCE</b>")
-        for item in gc[:5]:
-            lines.append(f"  · {_html.escape(str(item).strip()[:160])}")
+    # Market sections
+    _section("🌙", "OVERNIGHT", _bullets(overnight))
+    _section("📊", "PRE-MARKET", _bullets(premarket))
+    _section("⚡", "CATALYSTS", _bullets(catalysts))
+    _section("🛢", "COMMODITIES", _bullets(commodities))
+    _section("📅", "EARNINGS TODAY", _bullets(earnings_today))
+    _section("🏛", "MACRO TODAY", _bullets(macro_today))
 
-    # ── Insider alerts — brain-curated ───────────────────────────────
-    ia = list(insider_alert or [])
-    if ia:
-        lines.append("")
-        lines.append("👤 <b>INSIDER ALERT</b>")
-        for item in ia[:3]:
-            lines.append(f"  · {_html.escape(str(item).strip()[:160])}")
+    # Alerts
+    _section("⚠", "NEGATIVE NEWS", _bullets(negative_news))
+    _section("👁", "WATCH LIST", _bullets(watch))
+
+    gc = list(gov_confluence or []) if not isinstance(gov_confluence, str) else _bullets(gov_confluence)
+    _section("🏛", "GOV CONFLUENCE", gc, max_items=5)
+
+    ia = list(insider_alert or []) if not isinstance(insider_alert, str) else _bullets(insider_alert)
+    _section("👤", "INSIDER ALERT", ia, max_items=3)
 
     footer_bits = []
     if drive_url:

@@ -184,11 +184,19 @@ def _push_daily(payload: dict, logger: logging.Logger, no_drive: bool = False) -
             pwa_url=pwa_url,
             headline=payload.get("headline", ""),
             verdict=payload.get("verdict", ""),
-            bullets=payload.get("bullets", []),
-            posture=payload.get("posture", ""),
+            bullets=payload.get("bullets") or payload.get("key_takeaways", []),
+            posture=payload.get("posture") or payload.get("posture_change", ""),
             drive_url=drive_url,
             gov_confluence=payload.get("gov_confluence"),
             insider_alert=payload.get("insider_alert"),
+            overnight=payload.get("overnight") or payload.get("overnight_bullets", ""),
+            premarket=payload.get("premarket") or payload.get("premarket_bullets", ""),
+            catalysts=payload.get("catalysts") or payload.get("catalysts_bullets", ""),
+            commodities=payload.get("commodities") or payload.get("commodities_bullets", ""),
+            watch=payload.get("watch") or payload.get("watch_bullets", ""),
+            earnings_today=payload.get("earnings_today", ""),
+            macro_today=payload.get("macro_today", ""),
+            negative_news=payload.get("negative_news", ""),
         )
         logger.info("✓ Telegram: Daily Brief → Multi Day Swing")
     except Exception as e:
