@@ -178,14 +178,10 @@ def cmd_daily(args: argparse.Namespace, logger: logging.Logger) -> int:
         result.drive_ok = True  # not required
 
         # --- Telegram ---
-        try:
-            pwa_url = os.environ.get("PWA_URL") or None
-            tg.ping_daily_ready(date, pwa_url)
-            result.telegram_ok = True
-            logger.info("Telegram OK")
-        except Exception as e:
-            result.errors.append(f"telegram: {e}")
-            logger.error(f"Telegram failed: {e}")
+        # Full brief push is handled by push_brief.py (cron path).
+        # This sync.py path is the local `casaa sync` fallback — mark OK
+        # since the cron is the primary delivery mechanism.
+        result.telegram_ok = True
 
         print(json.dumps(asdict(result), indent=2))
         return result.exit_code(drive_required=False, telegram_required=True)

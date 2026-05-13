@@ -10,7 +10,7 @@ All FinancePWA pings now land in the **Finance & Trading** supergroup
 Per-helper routing:
   - Trigger / WSR / IBKR pings → "Multi Day Swing" topic (3)
   - Macro blackout warnings + hot-news headlines → "Macro Financial News" topic (6)
-  - Options scan digests (CSP/CC/LONG_CALL/PMCC) → "Options Intel" topic (60)
+  - Options scan digests (CSP/CC/LONG_CALL/PMCC) → "Options Intel" topic (492)
   - "Zero DTE Signals" (topic 2) is ZeroDTE's lane — FinancePWA doesn't write there
 
 The personal-chat default ("922547929") is preserved for explicit-override
