@@ -130,6 +130,34 @@ def gather_watchlist(logger: logging.Logger) -> list[str]:
     except Exception as e:
         logger.warning(f"gov_confluence_signals: {e}")
 
+    # Screen candidates — pull in VCP/CANSLIM breakout tickers
+    try:
+        ws_sc = ss.worksheet(S.ScreenCandidateRow.TAB_NAME)
+        sc_rows = ws_sc.get_all_values()
+        if len(sc_rows) > 1:
+            sc_hdr = sc_rows[0]
+            sc_cols = {h: i for i, h in enumerate(sc_hdr)}
+            seven_d2 = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+            sc_added = 0
+            for r in sc_rows[1:]:
+                sc_date = r[sc_cols.get("date", 0)] if sc_cols.get("date", 0) < len(r) else ""
+                if sc_date < seven_d2:
+                    continue
+                try:
+                    sc_score = float(r[sc_cols.get("score", 0)] if sc_cols.get("score", 0) < len(r) else 0)
+                except (TypeError, ValueError):
+                    sc_score = 0
+                if sc_score < 60:
+                    continue
+                tk = (r[sc_cols.get("ticker", 0)] if sc_cols.get("ticker", 0) < len(r) else "").strip().upper()
+                if tk and tk not in tickers:
+                    tickers.add(tk)
+                    sc_added += 1
+            if sc_added:
+                logger.info(f"  +{sc_added} tickers from screen_candidates (breakout triggers)")
+    except Exception as e:
+        logger.warning(f"screen_candidates: {e}")
+
     # Filter SGX-only tickers (yfinance needs .SI suffix and we don't write those to scan_results)
     SGX = {"C6L", "G3B", "D05", "O39", "U11", "Z74", "V03"}
     tickers = {t for t in tickers if t not in SGX and len(t) <= 5 and t.isalpha()}
@@ -285,13 +313,26 @@ def _long_call_quality(
     return score, reasons
 
 
-def scan_ticker(ticker: str, logger: logging.Logger, gov_info: dict | None = None) -> list[dict[str, Any]]:
+def scan_ticker(
+    ticker: str,
+    logger: logging.Logger,
+    gov_info: dict | None = None,
+    insider_info: dict | None = None,
+    screen_info: dict | None = None,
+) -> list[dict[str, Any]]:
     """Return CSP + CC + LONG_CALL candidates for a single ticker.
 
-    gov_info: optional dict from gov_confluence_signals with keys
-    {score, tier, strategy, contract_score, congress_score, insider_score,
-    analyst_score}. When present with bullish signals + sufficient quality,
-    triggers LONG_CALL scanning alongside CSP/CC.
+    LONG_CALL triggers (any one sufficient, quality-gated to >= 40):
+      1. gov_info: gov confluence score >= 30 + not TRIM
+      2. insider_info: cluster insider buying >= $500K in last 14 days
+      3. screen_info: VCP/CANSLIM breakout candidate with score >= 60
+
+    gov_info: dict from gov_confluence_signals {score, tier, strategy,
+        contract_score, congress_score, insider_score, analyst_score}
+    insider_info: dict {buy_value, buy_count, sell_value} — aggregated
+        insider transactions for this ticker over last 14 days
+    screen_info: dict {source, score, trigger_price, rationale} — from
+        screen_candidates if this ticker passed VCP/CANSLIM screen
     """
     import yfinance as yf
     try:
@@ -419,19 +460,57 @@ def scan_ticker(ticker: str, logger: logging.Logger, gov_info: dict | None = Non
         logger.debug(f"  {ticker}: CC error — {e}")
 
     # ── LONG_CALL — quality-gated directional plays ─────────────────
-    # NOT just "gov contract exists → buy call."  Quality scoring checks:
-    #   1. Contract materiality vs market cap (is it meaningful?)
-    #   2. Trend health: SMA50/SMA200 (don't buy calls into downtrends)
-    #   3. Multi-signal: congress cluster + insider + analyst confirming
-    # Minimum quality LC_MIN_QUALITY (40) to emit a candidate.
+    # Multiple triggers can fire LONG_CALL scanning (any one sufficient):
+    #   1. Gov confluence: score >= 30 + not TRIM → contract catalyst
+    #   2. Insider cluster buying: >= $500K net buying last 14d
+    #   3. Technical breakout: VCP/CANSLIM screen candidate score >= 60
+    # All paths still quality-gated to LC_MIN_QUALITY (40) before
+    # emitting a candidate — trend health, multi-signal, IV checked.
     gov_bullish = (
         gov_info is not None
         and gov_info.get("score", 0) >= 30
         and gov_info.get("strategy", "") != "TRIM"
     )
-    if gov_bullish:
+    insider_bullish = (
+        insider_info is not None
+        and float(insider_info.get("buy_value", 0)) >= 500_000
+        and float(insider_info.get("buy_value", 0)) > float(insider_info.get("sell_value", 0)) * 2
+    )
+    breakout_bullish = (
+        screen_info is not None
+        and float(screen_info.get("score", 0)) >= 60
+    )
+    lc_trigger = gov_bullish or insider_bullish or breakout_bullish
+
+    if lc_trigger:
+        # Build a synthetic gov_info for quality scoring when the trigger
+        # is insider or breakout (non-gov sources). The quality function
+        # uses gov sub-scores for multi-signal confirmation.
+        lc_gov = gov_info or {}
+        if not gov_bullish and insider_bullish:
+            # Insider-driven: inject insider score so quality function sees it
+            lc_gov = {
+                "score": 0, "contract_score": 0, "congress_score": 0,
+                "insider_score": min(100, float(insider_info.get("buy_value", 0)) / 10_000),
+                "analyst_score": 0, "tier": "", "strategy": "",
+            }
+            logger.info(f"  {ticker}: LONG_CALL trigger — insider cluster ${insider_info.get('buy_value', 0)/1e3:.0f}K buying")
+        elif not gov_bullish and breakout_bullish:
+            # Breakout-driven: inject trend score
+            lc_gov = {
+                "score": 0, "contract_score": 0, "congress_score": 0,
+                "insider_score": 0, "analyst_score": 0, "tier": "", "strategy": "",
+            }
+            logger.info(f"  {ticker}: LONG_CALL trigger — {screen_info.get('source', 'screen')} breakout (score={screen_info.get('score', 0)})")
         # Quality gate BEFORE option chain fetch (saves API calls)
-        lc_quality, lc_reasons = _long_call_quality(fi, price, gov_info, logger, ticker)
+        lc_quality, lc_reasons = _long_call_quality(fi, price, lc_gov, logger, ticker)
+
+        # Breakout bonus: VCP/CANSLIM candidates get a trend-confirmation
+        # boost since the screen already validated the setup.
+        if breakout_bullish:
+            breakout_bonus = min(20, float(screen_info.get("score", 0)) / 5)
+            lc_quality += breakout_bonus
+            lc_reasons.append(f"breakout bonus +{breakout_bonus:.0f} ({screen_info.get('source', 'screen')})")
         if lc_quality < LC_MIN_QUALITY:
             logger.info(
                 f"  {ticker}: LONG_CALL skipped (quality={lc_quality:.0f} < {LC_MIN_QUALITY}) — "
@@ -616,11 +695,79 @@ def main() -> int:
     except Exception as e:
         logger.warning(f"  gov confluence unavailable ({e}) — no catalyst tagging")
 
+    # Load insider transactions for LONG_CALL trigger (cluster buying)
+    insider_data: dict[str, dict] = {}
+    try:
+        import datetime as _dt2
+        ws_ins = ss.worksheet(S.InsiderTransactionRow.TAB_NAME)
+        ins_rows = ws_ins.get_all_values()
+        if len(ins_rows) > 1:
+            ins_hdr = ins_rows[0]
+            ins_cols = {h: i for i, h in enumerate(ins_hdr)}
+            fourteen_d = (_dt2.date.today() - _dt2.timedelta(days=14)).isoformat()
+            for r in ins_rows[1:]:
+                tx_date = r[ins_cols.get("transaction_date", 0)] if ins_cols.get("transaction_date", 0) < len(r) else ""
+                if tx_date < fourteen_d:
+                    continue
+                tk = (r[ins_cols.get("ticker", 0)] if ins_cols.get("ticker", 0) < len(r) else "").upper()
+                if not tk:
+                    continue
+                side = (r[ins_cols.get("side", 0)] if ins_cols.get("side", 0) < len(r) else "").lower()
+                try:
+                    val = abs(float(r[ins_cols.get("value_usd", 0)] if ins_cols.get("value_usd", 0) < len(r) else 0))
+                except (TypeError, ValueError):
+                    val = 0
+                entry = insider_data.setdefault(tk, {"buy_value": 0, "buy_count": 0, "sell_value": 0})
+                if side == "buy":
+                    entry["buy_value"] += val
+                    entry["buy_count"] += 1
+                elif side == "sell":
+                    entry["sell_value"] += val
+            ins_with_buys = sum(1 for v in insider_data.values() if v["buy_value"] >= 500_000)
+            logger.info(f"  loaded insider data for {len(insider_data)} tickers ({ins_with_buys} with cluster buying)")
+    except Exception as e:
+        logger.warning(f"  insider transactions unavailable ({e})")
+
+    # Load screen candidates for LONG_CALL trigger (VCP/CANSLIM breakouts)
+    screen_data: dict[str, dict] = {}
+    try:
+        ws_sc = ss.worksheet(S.ScreenCandidateRow.TAB_NAME)
+        sc_rows = ws_sc.get_all_values()
+        if len(sc_rows) > 1:
+            sc_hdr = sc_rows[0]
+            sc_cols = {h: i for i, h in enumerate(sc_hdr)}
+            seven_d2 = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+            for r in sc_rows[1:]:
+                sc_date = r[sc_cols.get("date", 0)] if sc_cols.get("date", 0) < len(r) else ""
+                if sc_date < seven_d2:
+                    continue
+                tk = (r[sc_cols.get("ticker", 0)] if sc_cols.get("ticker", 0) < len(r) else "").upper()
+                if not tk:
+                    continue
+                try:
+                    sc_score = float(r[sc_cols.get("score", 0)] if sc_cols.get("score", 0) < len(r) else 0)
+                except (TypeError, ValueError):
+                    sc_score = 0
+                prev = screen_data.get(tk)
+                if prev is None or sc_score > float(prev.get("score", 0)):
+                    screen_data[tk] = {
+                        "source": r[sc_cols.get("source", 0)] if sc_cols.get("source", 0) < len(r) else "",
+                        "score": sc_score,
+                        "trigger_price": r[sc_cols.get("trigger_price", 0)] if sc_cols.get("trigger_price", 0) < len(r) else "",
+                        "rationale": r[sc_cols.get("rationale", 0)] if sc_cols.get("rationale", 0) < len(r) else "",
+                    }
+            logger.info(f"  loaded {len(screen_data)} screen candidates for breakout triggers")
+    except Exception as e:
+        logger.warning(f"  screen candidates unavailable ({e})")
+
     all_candidates: list[dict] = []
     for ticker in watchlist:
         try:
             gov_info = gov_data.get(ticker) or None
-            cands = scan_ticker(ticker, logger, gov_info=gov_info)
+            ins_info = insider_data.get(ticker) or None
+            scr_info = screen_data.get(ticker) or None
+            cands = scan_ticker(ticker, logger, gov_info=gov_info,
+                                insider_info=ins_info, screen_info=scr_info)
             # Tag candidates with gov confluence catalyst flag + gate
             for c in cands:
                 if gov_info:
@@ -684,6 +831,19 @@ def main() -> int:
 
     sh.append_rows(client, S.ScanResultRow.TAB_NAME, rows_to_write)
     logger.info(f"✓ Wrote {len(rows_to_write)} rows to scan_results")
+
+    # ── Telegram → Options Intel topic ────────────────────────────────
+    try:
+        from src import telegram as tg
+        tg.ping_options_intel(
+            date=today_iso,
+            candidates=all_candidates,
+            pwa_url="https://xynkro.github.io/CasaaFinance/",
+        )
+        logger.info("✓ Options Intel digest sent to Telegram")
+    except Exception as e:
+        logger.warning(f"Telegram Options Intel ping failed: {e}")
+
     logger.info("=== daily-options-scan done ===")
     return 0
 

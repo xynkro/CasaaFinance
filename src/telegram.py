@@ -8,8 +8,9 @@ All FinancePWA pings now land in the **Finance & Trading** supergroup
 (@Tron_shaft_bot) is a member there.
 
 Per-helper routing:
-  - Trigger / portfolio / WSR / IBKR pings → "Multi Day Swing" topic (3)
+  - Trigger / WSR / IBKR pings → "Multi Day Swing" topic (3)
   - Macro blackout warnings + hot-news headlines → "Macro Financial News" topic (6)
+  - Options scan digests (CSP/CC/LONG_CALL/PMCC) → "Options Intel" topic (60)
   - "Zero DTE Signals" (topic 2) is ZeroDTE's lane — FinancePWA doesn't write there
 
 The personal-chat default ("922547929") is preserved for explicit-override
@@ -34,6 +35,7 @@ ParseMode = Literal["none", "MarkdownV2", "HTML"]
 FINANCE_CHAT_ID = os.environ.get("TELEGRAM_FINANCE_CHAT_ID", "-1003942004211")
 MULTI_DAY_SWING_TOPIC = int(os.environ.get("TELEGRAM_MULTI_DAY_SWING_TOPIC", "3"))
 MACRO_NEWS_TOPIC = int(os.environ.get("TELEGRAM_MACRO_NEWS_TOPIC", "6"))
+OPTIONS_INTEL_TOPIC = int(os.environ.get("TELEGRAM_OPTIONS_INTEL_TOPIC", "60"))
 
 # Insider Trading topic — created by Caspar manually in the Finance &
 # Trading supergroup. Topic ID discovered via getUpdates after first
@@ -601,5 +603,119 @@ def ping_insider_pulse(
         "\n".join(lines),
         parse_mode="HTML",
         message_thread_id=target_topic,
+        disable_web_page_preview=True,
+    )
+
+
+# ────────────────────────────────────────────────────────────────────
+# Options Intel topic — daily scan results + strategy alerts
+# ────────────────────────────────────────────────────────────────────
+
+def ping_options_intel(
+    date: str,
+    candidates: list[dict],
+    pwa_url: str | None = None,
+) -> dict:
+    """
+    Post the daily options scan digest to the Options Intel topic.
+
+    Groups candidates by strategy (CSP, CC, LONG_CALL, etc.) and
+    formats each with strike/expiry/premium/yield/quality info.
+
+    Args:
+        date: scan date "YYYY-MM-DD"
+        candidates: list of scan_results dicts with keys {ticker, strategy,
+            strike, expiry, dte, premium, annual_yield_pct, delta, iv,
+            composite_score, catalyst_flag, underlying_last, cash_required,
+            breakeven, hv30, ...}
+        pwa_url: optional PWA link for footer
+    """
+    if not candidates:
+        return {"skipped": "no candidates to post"}
+
+    import html as _html
+
+    # Group by strategy
+    by_strat: dict[str, list[dict]] = {}
+    for c in candidates:
+        s = c.get("strategy", "OTHER")
+        by_strat.setdefault(s, []).append(c)
+
+    # Strategy display config: (emoji, label, sort_key, max_show)
+    strat_config = {
+        "CSP":       ("💰", "CASH-SECURED PUTS",  "annual_yield_pct", 5),
+        "CC":        ("📞", "COVERED CALLS",       "annual_yield_pct", 5),
+        "LONG_CALL": ("🚀", "LONG CALLS",          "composite_score",  5),
+        "PMCC":      ("🔗", "POOR MAN'S CC",       "composite_score",  3),
+    }
+
+    lines = [f"<b>🔬 OPTIONS INTEL</b> · {_html.escape(date)}"]
+    lines.append(f"{len(candidates)} candidate{'s' if len(candidates) != 1 else ''} found")
+
+    for strat_key in ["CSP", "CC", "LONG_CALL", "PMCC"]:
+        items = by_strat.pop(strat_key, [])
+        if not items:
+            continue
+        emoji, label, sort_key, max_show = strat_config[strat_key]
+        items.sort(key=lambda c: float(c.get(sort_key, 0)), reverse=True)
+
+        lines.append("")
+        lines.append(f"{emoji} <b>{label}</b> ({len(items)})")
+
+        for c in items[:max_show]:
+            tk = _html.escape(str(c.get("ticker", "?")))
+            strike = float(c.get("strike", 0))
+            exp = str(c.get("expiry", ""))
+            # Format expiry from YYYYMMDD to MM/DD
+            if len(exp) == 8:
+                exp = f"{exp[4:6]}/{exp[6:]}"
+            dte = int(c.get("dte", 0))
+            prem = float(c.get("premium", 0))
+            price = float(c.get("underlying_last", 0))
+
+            if strat_key in ("CSP", "CC"):
+                yld = float(c.get("annual_yield_pct", 0))
+                delta = abs(float(c.get("delta", 0)))
+                iv = float(c.get("iv", 0))
+                lines.append(
+                    f"  <b>${tk}</b> ${strike:.0f} {exp} ({dte}d)"
+                    f" · <code>${prem:.2f}</code>"
+                    f" · {yld:.0f}% ann"
+                    f" · Δ{delta:.2f} · IV {iv:.0f}%"
+                )
+            else:
+                # LONG_CALL / PMCC — show quality score + catalyst
+                quality = float(c.get("composite_score", 0))
+                cash = float(c.get("cash_required", 0))
+                be = float(c.get("breakeven", 0))
+                catalyst = " ⚡" if c.get("catalyst_flag") else ""
+                lines.append(
+                    f"  <b>${tk}</b> ${strike:.0f}C {exp} ({dte}d)"
+                    f" · <code>${prem:.2f}</code>"
+                    f" · Q{quality:.0f}{catalyst}"
+                    f" · BE ${be:.0f} · ${cash:.0f} risk"
+                )
+
+        if len(items) > max_show:
+            lines.append(f"  <i>+{len(items) - max_show} more in PWA</i>")
+
+    # Catch any other strategies
+    for strat_key, items in by_strat.items():
+        if items:
+            lines.append("")
+            lines.append(f"📋 <b>{_html.escape(strat_key)}</b> ({len(items)})")
+            for c in items[:3]:
+                tk = _html.escape(str(c.get("ticker", "?")))
+                strike = float(c.get("strike", 0))
+                lines.append(f"  <b>${tk}</b> ${strike:.0f}")
+
+    if pwa_url:
+        lines.append("")
+        lines.append(f'📱 <a href="{_html.escape(pwa_url)}">Full scan in PWA</a>')
+
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=OPTIONS_INTEL_TOPIC,
         disable_web_page_preview=True,
     )
