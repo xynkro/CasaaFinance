@@ -47,3 +47,5 @@ jobs:
           if [ "${{ inputs.caspar_only }}" = "true" ]; then ARGS="$ARGS --caspar"; fi
           if [ "${{ inputs.sarah_only }}" = "true" ]; then ARGS="$ARGS --sarah"; fi
           python src/yahoo_grab.py $ARGS
+      - name: Refresh live_prices (was tv-prices workflow)
+        run: python scripts/tv_price_refresh.py
