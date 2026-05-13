@@ -613,6 +613,123 @@ def ping_insider_pulse(
 
 
 # ────────────────────────────────────────────────────────────────────
+# Insider Trading topic — instant alerts (new filings / contracts)
+# ────────────────────────────────────────────────────────────────────
+
+def ping_capitol_trades_new(
+    filings: list[dict],
+    pwa_url: str | None = None,
+) -> dict:
+    """
+    Instant alert when new Congressional trade filings are scraped.
+    Fires from fetch_congress_trades.py right after dedup — only truly
+    new filings hit Telegram.
+
+    Args:
+        filings: list of dicts with keys {politician_name, party, chamber,
+            ticker, issuer_name, transaction_type, amount_min, amount_max,
+            filing_date, transaction_date}
+        pwa_url: optional PWA link for footer
+    """
+    if not filings:
+        return {"skipped": "no new filings"}
+
+    target_topic = INSIDER_TRADING_TOPIC or MULTI_DAY_SWING_TOPIC
+    import html
+
+    lines = [f"🏛 <b>NEW CAPITOL TRADES</b> · {len(filings)} filing{'s' if len(filings) != 1 else ''}"]
+
+    for f in filings[:10]:
+        pol = html.escape(str(f.get("politician_name", "?"))[:25])
+        party = str(f.get("party", ""))[:1]
+        chamber = str(f.get("chamber", ""))[:5]
+        tk = html.escape(str(f.get("ticker", "?")))
+        issuer = html.escape(str(f.get("issuer_name", ""))[:30])
+        ttype = str(f.get("transaction_type", "?")).upper()
+        amax = float(f.get("amount_max", 0))
+        amin = float(f.get("amount_min", 0))
+        tx_date = str(f.get("transaction_date", ""))[:10]
+        arrow = "🟢" if "buy" in ttype.lower() or "purchase" in ttype.lower() else "🔴"
+        lines.append(
+            f"\n{arrow} <b>{pol}</b> ({party}-{chamber})"
+            f"\n   ${tk} ({issuer}) · {ttype}"
+            f"\n   <code>${amin/1e3:.0f}K – ${amax/1e3:.0f}K</code> · traded {tx_date}"
+        )
+
+    if len(filings) > 10:
+        lines.append(f"\n<i>+{len(filings) - 10} more</i>")
+
+    if pwa_url:
+        lines.append(f'\n📱 <a href="{html.escape(pwa_url)}">PWA</a>')
+
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=target_topic,
+        disable_web_page_preview=True,
+    )
+
+
+def ping_gov_contracts_new(
+    contracts: list[dict],
+    unmapped_count: int = 0,
+    pwa_url: str | None = None,
+) -> dict:
+    """
+    Instant alert when new government contract awards are fetched.
+    Fires from fetch_gov_contracts.py — only new (deduped) awards with
+    resolved tickers are shown (unmapped ones just get a count).
+
+    Args:
+        contracts: list of dicts with keys {ticker, recipient_name,
+            award_amount, agency, naics_description, action_date}
+        unmapped_count: how many new unmapped-but-large awards were flagged
+        pwa_url: optional PWA link for footer
+    """
+    if not contracts and unmapped_count == 0:
+        return {"skipped": "no new contracts"}
+
+    target_topic = INSIDER_TRADING_TOPIC or MULTI_DAY_SWING_TOPIC
+    import html
+
+    mapped = [c for c in contracts if c.get("ticker")]
+    total_dollars = sum(float(c.get("award_amount", 0)) for c in mapped)
+
+    lines = [
+        f"🏦 <b>NEW GOV CONTRACTS</b> · {len(contracts)} award{'s' if len(contracts) != 1 else ''}"
+        f" · <code>${total_dollars/1e6:.1f}M</code> mapped"
+    ]
+
+    for c in sorted(mapped, key=lambda x: float(x.get("award_amount", 0)), reverse=True)[:8]:
+        tk = html.escape(str(c.get("ticker", "?")))
+        recip = html.escape(str(c.get("recipient_name", ""))[:35])
+        amt = float(c.get("award_amount", 0))
+        agency = html.escape(str(c.get("agency", ""))[:25])
+        naics = html.escape(str(c.get("naics_description", ""))[:30])
+        lines.append(
+            f"\n  <b>${tk}</b> · <code>${amt/1e6:.1f}M</code>"
+            f"\n   {recip} · {agency}"
+            f"\n   {naics}"
+        )
+
+    if len(mapped) > 8:
+        lines.append(f"\n<i>+{len(mapped) - 8} more mapped</i>")
+
+    if unmapped_count:
+        lines.append(f"\n⚠ {unmapped_count} large unmapped recipient{'s' if unmapped_count != 1 else ''} flagged for review")
+
+    if pwa_url:
+        lines.append(f'\n📱 <a href="{html.escape(pwa_url)}">PWA</a>')
+
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=target_topic,
+        disable_web_page_preview=True,
+    )
+
+
+# ────────────────────────────────────────────────────────────────────
 # Options Intel topic — daily scan results + strategy alerts
 # ────────────────────────────────────────────────────────────────────
 

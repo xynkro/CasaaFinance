@@ -38,8 +38,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      OAUTH_TOKEN_JSON:    ${{ secrets.OAUTH_TOKEN_JSON }}
-      SHEET_ID:            ${{ secrets.SHEET_ID }}
+      OAUTH_TOKEN_JSON:               ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:                       ${{ secrets.SHEET_ID }}
+      TELEGRAM_BOT_TOKEN:             ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_INSIDER_TRADING_TOPIC: ${{ secrets.TELEGRAM_INSIDER_TRADING_TOPIC }}
     steps:
       - uses: actions/checkout@v4
 

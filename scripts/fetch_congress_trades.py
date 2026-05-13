@@ -30,8 +30,11 @@ from src.sync import load_env  # noqa: E402
 from src import sheets as sh   # noqa: E402
 from src import schema as S    # noqa: E402
 from src import capitoltrades as ct  # noqa: E402
+from src import telegram as tg       # noqa: E402
 
 log = logging.getLogger(__name__)
+
+PWA_URL = "https://xynkro.github.io/CasaaFinance/"
 
 # Default lookback: last 14 days. The screener only uses trades from the
 # last 60 days, so even on a fresh deployment 14d catches new filings;
@@ -150,6 +153,33 @@ def main() -> int:
 
     sh.append_rows(client, S.CongressTradeRow.TAB_NAME, [r.to_row() for r in new_rows])
     logger.info(f"  ✓ wrote {len(new_rows)} rows to {S.CongressTradeRow.TAB_NAME}")
+
+    # Instant Telegram push — only new filings, sorted by amount
+    push_data = sorted(
+        [
+            {
+                "politician_name": r.politician_name,
+                "party": r.party,
+                "chamber": r.chamber,
+                "ticker": r.ticker,
+                "issuer_name": r.issuer_name,
+                "transaction_type": r.transaction_type,
+                "amount_min": r.amount_min,
+                "amount_max": r.amount_max,
+                "filing_date": r.filing_date,
+                "transaction_date": r.transaction_date,
+            }
+            for r in new_rows if r.ticker
+        ],
+        key=lambda d: d["amount_max"],
+        reverse=True,
+    )
+    if push_data:
+        try:
+            tg.ping_capitol_trades_new(push_data, pwa_url=PWA_URL)
+            logger.info(f"  ✓ Telegram push: {len(push_data)} new filings")
+        except Exception as e:
+            logger.error(f"  ✗ Telegram push failed: {e}")
 
     return 0
 

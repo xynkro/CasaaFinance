@@ -30,8 +30,11 @@ from src import sheets as sh   # noqa: E402
 from src import schema as S    # noqa: E402
 from src import usaspending as us  # noqa: E402
 from src.recipient_ticker import normalize, resolve  # noqa: E402
+from src import telegram as tg  # noqa: E402
 
 log = logging.getLogger(__name__)
+
+PWA_URL = "https://xynkro.github.io/CasaaFinance/"
 
 UNMAPPED_FLAG_THRESHOLD = 5_000_000  # $5M+
 
@@ -222,6 +225,7 @@ def main() -> int:
     else:
         logger.info(f"  · all {len(rows)} awards already present — nothing new to write")
 
+    new_unmapped_count = 0
     if unmapped_rows:
         # Unmapped recipients are aggregated per-recipient per-run, not
         # per-award, so dedup by recipient_name (latest run wins for amounts).
@@ -238,9 +242,29 @@ def main() -> int:
             except ValueError:
                 pass
         new_unmapped = [u for u in unmapped_rows if u.recipient_name not in existing_unmapped]
+        new_unmapped_count = len(new_unmapped)
         if new_unmapped:
             sh.append_rows(client, S.GovUnmappedRecipientRow.TAB_NAME, [u.to_row() for u in new_unmapped])
             logger.info(f"  ✓ wrote {len(new_unmapped)} new unmapped rows for review")
+
+    # Instant Telegram push — only new awards
+    push_data = [
+        {
+            "ticker": r.ticker,
+            "recipient_name": r.recipient_name,
+            "award_amount": r.award_amount,
+            "agency": r.agency,
+            "naics_description": r.naics_description,
+            "action_date": r.action_date,
+        }
+        for r in new_rows
+    ]
+    if push_data or new_unmapped_count:
+        try:
+            tg.ping_gov_contracts_new(push_data, unmapped_count=new_unmapped_count, pwa_url=PWA_URL)
+            logger.info(f"  ✓ Telegram push: {len(push_data)} awards, {new_unmapped_count} unmapped flagged")
+        except Exception as e:
+            logger.error(f"  ✗ Telegram push failed: {e}")
 
     return 0
 
