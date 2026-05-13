@@ -1,14 +1,10 @@
-name: TV Prices — 5-min Live Refresh
+name: TV Prices — 5-min Market Hours
 
 on:
   schedule:
-    # Every 5 min. 288 runs/day × ~10s = ~48 min/day = ~24h/month.
-    # GH Actions free tier is 2000 min/month — well within budget.
-    # Off-hours runs are mostly idempotent (close prices don't change)
-    # but trivially cheap, and they ensure the freshness chip on the PWA
-    # never shows "X hours ago" just because the user opened the app
-    # outside US market hours.
-    - cron: "*/5 * * * *"
+    # Every 5 min during US market hours (Mon-Fri 09:30-16:00 ET = 13:30-20:00 UTC).
+    # ~78 runs/day (down from 288). Off-hours prices don't move.
+    - cron: "*/5 13-21 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

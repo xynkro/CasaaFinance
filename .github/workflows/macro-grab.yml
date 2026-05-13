@@ -1,9 +1,9 @@
-name: Macro Refresh — Hourly
+name: Macro Refresh — 4x Daily
 
 on:
   schedule:
-    # Hourly at :17 (off-minute, offset from yahoo-grab :07)
-    - cron: "17 * * * *"
+    # 4x daily — macro data moves slowly; covers Asia-open, EU-open, US-open, US-close
+    - cron: "17 0,6,14,22 * * *"
   workflow_dispatch:
     inputs:
       dry:

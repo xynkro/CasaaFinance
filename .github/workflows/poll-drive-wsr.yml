@@ -1,8 +1,9 @@
-name: Poll Drive WSR — Manual Upload Pickup (every 30 min)
+name: Poll Drive WSR — 3x Daily Pickup
 
 on:
   schedule:
-    - cron: "13,43 * * * *"   # :13 and :43 — off-minute, twice an hour
+    # 3x daily — WSR uploads are manual, no need for 48 runs/day
+    - cron: "0 6,12,18 * * *"
   workflow_dispatch:
     inputs:
       force_id:
