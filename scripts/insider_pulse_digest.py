@@ -185,14 +185,7 @@ def main() -> int:
     logger = _setup_logging()
     logger.info(f"insider_pulse_digest start (dry={args.dry})")
 
-    # Fallback: when Insider Trading topic isn't configured yet, route
-    # the digest to Multi Day Swing so it still reaches Telegram.
-    use_fallback = tg.INSIDER_TRADING_TOPIC is None
-    if use_fallback and not args.dry:
-        logger.info(
-            "TELEGRAM_INSIDER_TRADING_TOPIC not configured — "
-            "falling back to Multi Day Swing topic"
-        )
+    use_fallback = False
 
     load_env()
     client = sh.authenticate()

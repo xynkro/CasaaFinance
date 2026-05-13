@@ -37,15 +37,9 @@ MULTI_DAY_SWING_TOPIC = int(os.environ.get("TELEGRAM_MULTI_DAY_SWING_TOPIC", "3"
 MACRO_NEWS_TOPIC = int(os.environ.get("TELEGRAM_MACRO_NEWS_TOPIC", "6"))
 OPTIONS_INTEL_TOPIC = int(os.environ.get("TELEGRAM_OPTIONS_INTEL_TOPIC", "492"))
 
-# Insider Trading topic — created by Caspar manually in the Finance &
-# Trading supergroup. Topic ID discovered via getUpdates after first
-# message lands in the topic, then set as repo secret. Until configured,
-# `ping_insider_pulse` is a no-op (graceful skip — strategy still works,
-# digest just doesn't send).
-_insider_topic_raw = os.environ.get("TELEGRAM_INSIDER_TRADING_TOPIC", "").strip()
-INSIDER_TRADING_TOPIC: int | None = (
-    int(_insider_topic_raw) if _insider_topic_raw.isdigit() else None
-)
+# Insider Trading topic (510) in the Finance & Trading supergroup.
+# Overridable via secret if topic ID changes.
+INSIDER_TRADING_TOPIC: int = int(os.environ.get("TELEGRAM_INSIDER_TRADING_TOPIC", "510"))
 
 # Personal-chat fallback — not used by the production helpers below
 # but kept as a backstop for ad-hoc scripts that pre-date routing.
@@ -659,8 +653,10 @@ def ping_capitol_trades_new(
     if len(filings) > 10:
         lines.append(f"\n<i>+{len(filings) - 10} more</i>")
 
+    lines.append("")
+    lines.append('🔗 <a href="https://www.capitoltrades.com/trades">Verify on CapitolTrades</a>')
     if pwa_url:
-        lines.append(f'\n📱 <a href="{html.escape(pwa_url)}">PWA</a>')
+        lines.append(f'📱 <a href="{html.escape(pwa_url)}">PWA</a>')
 
     return send(
         "\n".join(lines),
@@ -718,8 +714,10 @@ def ping_gov_contracts_new(
     if unmapped_count:
         lines.append(f"\n⚠ {unmapped_count} large unmapped recipient{'s' if unmapped_count != 1 else ''} flagged for review")
 
+    lines.append("")
+    lines.append('🔗 <a href="https://www.usaspending.gov/search/?hash=all-awards">Verify on USAspending</a>')
     if pwa_url:
-        lines.append(f'\n📱 <a href="{html.escape(pwa_url)}">PWA</a>')
+        lines.append(f'📱 <a href="{html.escape(pwa_url)}">PWA</a>')
 
     return send(
         "\n".join(lines),
