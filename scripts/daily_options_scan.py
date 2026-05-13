@@ -232,6 +232,83 @@ def _option_mid(row) -> float:
     return float(row.get("lastPrice", 0) or 0)
 
 
+# ── Black-Scholes helpers ──────────────────────────────────────────
+# yfinance doesn't return greeks and its impliedVolatility is garbage
+# after hours (bid/ask=0 → can't solve). We compute delta and IV
+# ourselves from option mid price using standard BSM.
+
+_RISK_FREE = 0.043  # ~4.3% 10-yr yield as of mid-2026
+
+def _norm_cdf(x: float) -> float:
+    """Standard normal CDF via math.erfc — no scipy dependency."""
+    return 0.5 * math.erfc(-x / math.sqrt(2))
+
+def _norm_pdf(x: float) -> float:
+    return math.exp(-0.5 * x * x) / math.sqrt(2 * math.pi)
+
+def _bsm_price(S: float, K: float, T: float, sigma: float,
+               right: str = "P", r: float = _RISK_FREE) -> float:
+    """BSM European option price. right='P' or 'C'."""
+    if T <= 0 or sigma <= 0:
+        return max(0, (K - S) if right == "P" else (S - K))
+    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+    if right == "C":
+        return S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
+    else:
+        return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+
+def _bsm_delta(S: float, K: float, T: float, sigma: float,
+               right: str = "P", r: float = _RISK_FREE) -> float:
+    """BSM delta. Returns negative for puts, positive for calls."""
+    if T <= 0 or sigma <= 0:
+        if right == "C":
+            return 1.0 if S > K else 0.0
+        return -1.0 if S < K else 0.0
+    d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+    if right == "C":
+        return _norm_cdf(d1)
+    return _norm_cdf(d1) - 1.0
+
+def _implied_vol(price: float, S: float, K: float, T: float,
+                 right: str = "P", r: float = _RISK_FREE,
+                 tol: float = 1e-5, max_iter: int = 50) -> float:
+    """Newton-Raphson IV solver. Returns annualised vol (e.g. 0.35 = 35%).
+    Falls back to 0.0 if unsolvable."""
+    if price <= 0 or T <= 0 or S <= 0 or K <= 0:
+        return 0.0
+    # Intrinsic value check
+    intrinsic = max(0, (K - S) if right == "P" else (S - K))
+    if price <= intrinsic + tol:
+        return 0.001  # deep ITM, near-zero extrinsic
+    # Initial guess from Brenner-Subrahmanyam approximation
+    sigma = math.sqrt(2 * math.pi / T) * price / S
+    sigma = max(0.05, min(sigma, 5.0))
+    for _ in range(max_iter):
+        bp = _bsm_price(S, K, T, sigma, right, r)
+        d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+        vega = S * _norm_pdf(d1) * math.sqrt(T)
+        if vega < 1e-12:
+            break
+        sigma -= (bp - price) / vega
+        sigma = max(0.001, min(sigma, 10.0))
+        if abs(bp - price) < tol:
+            break
+    return sigma if 0.001 < sigma < 10.0 else 0.0
+
+def _compute_greeks(row, price: float, dte: int, right: str = "P") -> tuple[float, float]:
+    """Compute (delta, iv_pct) for an option row using BSM.
+    Returns (delta as -0.xx for puts / +0.xx for calls, iv as % e.g. 35.0)."""
+    mid = _option_mid(row)
+    K = float(row.get("strike", 0))
+    T = dte / 365.0
+    if mid <= 0 or K <= 0 or price <= 0 or T <= 0:
+        return (0.0, 0.0)
+    iv = _implied_vol(mid, price, K, T, right)
+    delta = _bsm_delta(price, K, T, iv, right)
+    return (round(delta, 4), round(iv * 100, 1))
+
+
 def _estimate_ivr(iv_pct: float, hv30_pct: float) -> float:
     """IV Rank proxy from IV/HV ratio. Returns 0-100.
 
@@ -245,20 +322,26 @@ def _estimate_ivr(iv_pct: float, hv30_pct: float) -> float:
     return max(0, min(100, 50 + (ratio - 1.0) * 50))
 
 
-def _atm_iv(puts_df, calls_df, price: float) -> float:
-    """ATM implied vol from near-the-money options. Returns % (e.g. 30.0)."""
+def _atm_iv(puts_df, calls_df, price: float, dte: int = 35) -> float:
+    """ATM implied vol from near-the-money options using BSM solver.
+    Returns % (e.g. 30.0). Ignores yfinance's broken impliedVolatility."""
     near = 0.05  # within 5% of price
+    T = dte / 365.0
     ivs: list[float] = []
-    for df in [puts_df, calls_df]:
-        if df.empty or "impliedVolatility" not in df.columns:
+    for df, right in [(puts_df, "P"), (calls_df, "C")]:
+        if df.empty:
             continue
         near_df = df[
             (df["strike"] >= price * (1 - near)) &
             (df["strike"] <= price * (1 + near))
         ]
-        iv_vals = near_df["impliedVolatility"].dropna()
-        if not iv_vals.empty:
-            ivs.extend(iv_vals.tolist())
+        for _, row in near_df.iterrows():
+            mid = _option_mid(row)
+            K = float(row.get("strike", 0))
+            if mid > 0 and K > 0 and T > 0:
+                iv = _implied_vol(mid, price, K, T, right)
+                if iv > 0.01:  # filter out unsolvable
+                    ivs.append(iv)
     if ivs:
         return float(sum(ivs) / len(ivs)) * 100
     return 0.0
@@ -466,6 +549,8 @@ def scan_ticker(
             mid = float(r["mid"])
             if mid > 0 and bid > 0 and ask > 0:
                 spread_pct = (ask - bid) / mid * 100
+            csp_delta, csp_iv = _compute_greeks(r, price, dte, "P")
+            csp_ivr = _estimate_ivr(csp_iv, hv30)
             out.append({
                 "ticker": ticker,
                 "strategy": "CSP",
@@ -473,15 +558,15 @@ def scan_ticker(
                 "strike": float(r["strike"]),
                 "expiry": expiry_iso,
                 "dte": dte,
-                "delta": float(r.get("delta", 0) or 0),
+                "delta": csp_delta,
                 "premium": round(mid, 2),
                 "bid": round(bid, 2),
                 "ask": round(ask, 2),
                 "annual_yield_pct": round(float(r["ann_yield"]), 2),
                 "cash_required": round(float(r["strike"]) * 100, 2),
                 "breakeven": round(float(r["strike"]) - mid, 2),
-                "iv": round(float(r.get("impliedVolatility", 0) or 0) * 100, 1),
-                "iv_rank": 0.0,  # yfinance doesn't expose IV rank — leave for IBKR scan
+                "iv": csp_iv,
+                "iv_rank": round(csp_ivr, 1),
                 "spread_pct": round(spread_pct, 2),
                 "underlying_last": round(price, 2),
                 "technical_score": 0.0,
@@ -514,6 +599,8 @@ def scan_ticker(
             spread_pct = 0.0
             if mid > 0 and bid > 0 and ask > 0:
                 spread_pct = (ask - bid) / mid * 100
+            cc_delta, cc_iv = _compute_greeks(r, price, dte, "C")
+            cc_ivr = _estimate_ivr(cc_iv, hv30)
             out.append({
                 "ticker": ticker,
                 "strategy": "CC",
@@ -521,15 +608,15 @@ def scan_ticker(
                 "strike": float(r["strike"]),
                 "expiry": expiry_iso,
                 "dte": dte,
-                "delta": float(r.get("delta", 0) or 0),
+                "delta": cc_delta,
                 "premium": round(mid, 2),
                 "bid": round(bid, 2),
                 "ask": round(ask, 2),
                 "annual_yield_pct": round(float(r["ann_yield"]), 2),
                 "cash_required": round(price * 100, 2),
                 "breakeven": round(price - mid, 2),
-                "iv": round(float(r.get("impliedVolatility", 0) or 0) * 100, 1),
-                "iv_rank": 0.0,
+                "iv": cc_iv,
+                "iv_rank": round(cc_ivr, 1),
                 "spread_pct": round(spread_pct, 2),
                 "underlying_last": round(price, 2),
                 "technical_score": 0.0,
@@ -666,6 +753,8 @@ def scan_ticker(
                     except Exception:
                         pass
 
+                    lc_delta, lc_iv = _compute_greeks(r, price, lc_dte, "C")
+                    lc_ivr = _estimate_ivr(lc_iv, hv30)
                     out.append({
                         "ticker": ticker,
                         "strategy": "LONG_CALL",
@@ -673,15 +762,15 @@ def scan_ticker(
                         "strike": float(r["strike"]),
                         "expiry": lc_expiry_iso,
                         "dte": lc_dte,
-                        "delta": float(r.get("delta", 0) or 0),
+                        "delta": lc_delta,
                         "premium": round(mid, 2),
                         "bid": round(bid, 2),
                         "ask": round(ask, 2),
                         "annual_yield_pct": 0.0,  # N/A for directional
                         "cash_required": round(mid * 100, 2),  # premium × 100
                         "breakeven": round(float(r["strike"]) + mid, 2),
-                        "iv": round(float(r.get("impliedVolatility", 0) or 0) * 100, 1),
-                        "iv_rank": 0.0,
+                        "iv": lc_iv,
+                        "iv_rank": round(lc_ivr, 1),
                         "spread_pct": round(spread_pct, 2),
                         "underlying_last": round(price, 2),
                         "technical_score": round(trend_score, 1),
@@ -715,7 +804,7 @@ def scan_ticker(
             ic_puts = ic_puts[(ic_puts["openInterest"] >= IC_MIN_OI) & (ic_puts["mid"] >= MIN_MID)]
             ic_calls = ic_calls[(ic_calls["openInterest"] >= IC_MIN_OI) & (ic_calls["mid"] >= MIN_MID)]
 
-            atm_iv_ic = _atm_iv(ic_puts, ic_calls, price)
+            atm_iv_ic = _atm_iv(ic_puts, ic_calls, price, ic_dte)
             est_ivr_ic = _estimate_ivr(atm_iv_ic, hv30)
 
             if est_ivr_ic >= IC_MIN_IVR and not ic_puts.empty and not ic_calls.empty:
@@ -818,7 +907,7 @@ def scan_ticker(
             cs_puts["mid"] = cs_puts.apply(_option_mid, axis=1)
             cs_puts = cs_puts[(cs_puts["openInterest"] >= CS_MIN_OI) & (cs_puts["mid"] >= MIN_MID)]
 
-            atm_iv_cs = _atm_iv(cs_puts, cs_calls_for_iv, price)
+            atm_iv_cs = _atm_iv(cs_puts, cs_calls_for_iv, price, cs_dte)
             est_ivr_cs = _estimate_ivr(atm_iv_cs, hv30)
 
             if est_ivr_cs >= CS_MIN_IVR and not cs_puts.empty:
@@ -852,11 +941,12 @@ def scan_ticker(
                             if pcs_score >= CS_MIN_QUALITY:
                                 lp_s = float(long_put["strike"])
                                 notes = f"SP:{sp_strike:.0f}/LP:{lp_s:.0f} W:${actual_width:.0f}"
+                                pcs_delta, _ = _compute_greeks(short_put, price, cs_dte, "P")
                                 out.append({
                                     "ticker": ticker, "strategy": "PCS", "right": "P",
                                     "strike": sp_strike, "expiry": cs_expiry_iso,
                                     "dte": cs_dte,
-                                    "delta": float(short_put.get("delta", 0) or 0),
+                                    "delta": pcs_delta,
                                     "premium": round(net_credit, 2),
                                     "bid": 0.0, "ask": 0.0,
                                     "annual_yield_pct": round(ann_yield, 2),
@@ -896,7 +986,7 @@ def scan_ticker(
             ccs_calls["mid"] = ccs_calls.apply(_option_mid, axis=1)
             ccs_calls = ccs_calls[(ccs_calls["openInterest"] >= CS_MIN_OI) & (ccs_calls["mid"] >= MIN_MID)]
 
-            atm_iv_ccs = _atm_iv(ccs_puts_for_iv, ccs_calls, price)
+            atm_iv_ccs = _atm_iv(ccs_puts_for_iv, ccs_calls, price, ccs_dte)
             est_ivr_ccs = _estimate_ivr(atm_iv_ccs, hv30)
 
             if est_ivr_ccs >= CS_MIN_IVR and not ccs_calls.empty:
@@ -930,11 +1020,12 @@ def scan_ticker(
                             if ccs_score >= CS_MIN_QUALITY:
                                 lc_s = float(long_call["strike"])
                                 notes = f"SC:{sc_strike:.0f}/LC:{lc_s:.0f} W:${actual_width:.0f}"
+                                ccs_delta, _ = _compute_greeks(short_call, price, ccs_dte, "C")
                                 out.append({
                                     "ticker": ticker, "strategy": "CCS", "right": "C",
                                     "strike": sc_strike, "expiry": ccs_expiry_iso,
                                     "dte": ccs_dte,
-                                    "delta": float(short_call.get("delta", 0) or 0),
+                                    "delta": ccs_delta,
                                     "premium": round(net_credit, 2),
                                     "bid": 0.0, "ask": 0.0,
                                     "annual_yield_pct": round(ann_yield, 2),
