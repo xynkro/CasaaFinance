@@ -216,7 +216,61 @@ def compute_defense_alerts(
                 "delta_info": f"+{capture:.0f}% captured",
             })
 
-    # ========= 6. DTE milestones =========
+    # ========= 6. Loss limit (2× credit received) =========
+    if is_short:
+        credit = _safe_float(today_option.get("credit", 0))
+        current_last = _safe_float(today_option.get("last", 0))
+        if credit > 0 and current_last >= credit * 2:
+            alerts.append({
+                "severity": CRITICAL,
+                "title": f"{today_pos}: loss limit breached",
+                "description": f"Option price ${current_last:.2f} ≥ 2× credit ${credit:.2f} — mechanical stop",
+                "action": "CLOSE NOW — loss exceeds 2× credit received. Tastytrade mechanical exit.",
+                "delta_info": f"2× credit stop",
+            })
+        elif credit > 0 and current_last >= credit * 1.5:
+            alerts.append({
+                "severity": HIGH,
+                "title": f"{today_pos}: approaching loss limit",
+                "description": f"Option price ${current_last:.2f} is 1.5× credit ${credit:.2f}",
+                "action": "Monitor closely. 2× credit mechanical stop at ${:.2f}.".format(credit * 2),
+                "delta_info": f"1.5× credit",
+            })
+
+    # ========= 7. 21 DTE management rule (Tastytrade) =========
+    if is_short and dte <= 21 and dte > 7:
+        # Check if profitable — if so, close; if not, roll
+        credit = _safe_float(today_option.get("credit", 0))
+        current_last = _safe_float(today_option.get("last", 0))
+        capture_pct = ((credit - current_last) / credit * 100) if credit > 0 else 0
+
+        if capture_pct >= 50:
+            alerts.append({
+                "severity": HIGH,
+                "title": f"{today_pos}: 21 DTE + profitable",
+                "description": f"{dte} DTE, {capture_pct:.0f}% profit captured — close per Tastytrade 21 DTE rule",
+                "action": "CLOSE — 50%+ captured at 21 DTE. Redeploy capital to next cycle.",
+                "delta_info": f"{dte}d DTE, {capture_pct:.0f}% captured",
+            })
+        elif capture_pct >= 0:
+            alerts.append({
+                "severity": MEDIUM,
+                "title": f"{today_pos}: 21 DTE management window",
+                "description": f"{dte} DTE, {capture_pct:.0f}% captured — entering management zone",
+                "action": "OTM: consider closing to free capital. ATM/ITM: roll out to next cycle.",
+                "delta_info": f"{dte}d DTE, {capture_pct:.0f}% captured",
+            })
+        else:
+            # Underwater at 21 DTE
+            alerts.append({
+                "severity": HIGH,
+                "title": f"{today_pos}: 21 DTE underwater",
+                "description": f"{dte} DTE, underwater ({capture_pct:.0f}%). Roll or close to limit loss.",
+                "action": f"ROLL {'out-and-down' if wheel_leg == 'CSP' else 'out-and-up' if wheel_leg == 'CC' else 'out'} to next cycle. Do not hold through expiry underwater.",
+                "delta_info": f"{dte}d DTE, {capture_pct:.0f}%",
+            })
+
+    # ========= 8. DTE milestones (7d, 3d, 1d) =========
     if is_short:
         if dte == 7:
             alerts.append({
@@ -243,7 +297,7 @@ def compute_defense_alerts(
                 "delta_info": f"{dte}d DTE",
             })
 
-    # ========= 7. Stop conditions on underlying =========
+    # ========= 9. Stop conditions on underlying =========
     if exit_plan:
         exit_status = exit_plan.get("status", "")
         if exit_status == "STOP_TRIGGERED":
@@ -255,7 +309,7 @@ def compute_defense_alerts(
                 "delta_info": "stock stop triggered",
             })
 
-    # ========= 8. Confidence already high (persistent) =========
+    # ========= 10. Confidence already high (persistent) =========
     if confidence >= 60 and (not yesterday_option or _safe_int(yesterday_option.get("confidence_pct", 0)) >= 60):
         # Only surface if not already covered by spike
         if not any(a["title"].startswith(f"{today_pos}: confidence") for a in alerts):
@@ -267,7 +321,35 @@ def compute_defense_alerts(
                 "delta_info": f"{confidence}% conf",
             })
 
+    # ========= 11. VIX Regime alert (market-wide IV context) =========
+    vix_val = _safe_float(today_indicator.get("_vix", 0))
+    if is_short and vix_val > 0:
+        if vix_val >= 35:
+            alerts.append({
+                "severity": CRITICAL,
+                "title": f"{today_pos}: VIX crisis regime ({vix_val:.1f})",
+                "description": (
+                    f"VIX at {vix_val:.1f} — crisis level. Market-wide IV elevated, "
+                    f"all short premium at heightened risk."
+                ),
+                "action": "CLOSE all short premium or tighten to breakeven stops. Buy protection (puts).",
+                "delta_info": f"VIX {vix_val:.1f} crisis",
+            })
+        elif vix_val >= 25:
+            alerts.append({
+                "severity": HIGH,
+                "title": f"{today_pos}: VIX elevated ({vix_val:.1f})",
+                "description": (
+                    f"VIX at {vix_val:.1f} — elevated regime. Short premium risk increased."
+                ),
+                "action": "Review all positions. Close marginal trades; hold only high-conviction + profitable.",
+                "delta_info": f"VIX {vix_val:.1f} elevated",
+            })
+
     return alerts
+
+
+MAX_ALERTS_PER_POSITION = 4  # 11 alert types now (added VIX regime)
 
 
 def build_defense_brief(
@@ -276,10 +358,15 @@ def build_defense_brief(
     today_indicators: dict[str, dict],                    # keyed by ticker
     yesterday_indicators_by_ticker: dict[str, dict],
     exit_plans_by_key: dict[str, dict],                   # keyed by "account|ticker"
+    vix: float = 0.0,
 ) -> list[dict[str, Any]]:
     """
     Build the complete defense brief across all open options. Returns a flat
-    list of alerts sorted by severity.
+    list of alerts sorted by severity, consolidated to avoid alert fatigue.
+
+    Per-position consolidation: keep the top N alerts by severity for each
+    position. If more exist, the Nth alert's description notes how many
+    additional alerts were suppressed so nothing is silently lost.
     """
     all_alerts: list[dict[str, Any]] = []
 
@@ -291,7 +378,8 @@ def build_defense_brief(
         key = f"{account}|{ticker}|{right}|{strike:.2f}"
 
         yest_opt = yesterday_options_by_key.get(key)
-        today_ind = today_indicators.get(ticker, {})
+        today_ind = dict(today_indicators.get(ticker, {}))
+        today_ind["_vix"] = vix  # inject VIX for regime alert
         yest_ind = yesterday_indicators_by_ticker.get(ticker)
         exit_plan = exit_plans_by_key.get(f"{account}|{ticker}")
 
@@ -303,8 +391,16 @@ def build_defense_brief(
             a["ticker"] = ticker
             a["strike"] = strike
             a["right"] = right
-            all_alerts.append(a)
 
-    # Sort by severity
+        alerts.sort(key=lambda a: _severity_order(a["severity"]))
+
+        if len(alerts) > MAX_ALERTS_PER_POSITION:
+            suppressed = len(alerts) - MAX_ALERTS_PER_POSITION
+            kept = alerts[:MAX_ALERTS_PER_POSITION]
+            kept[-1]["description"] += f" (+{suppressed} more alert{'s' if suppressed > 1 else ''})"
+            alerts = kept
+
+        all_alerts.extend(alerts)
+
     all_alerts.sort(key=lambda a: _severity_order(a["severity"]))
     return all_alerts

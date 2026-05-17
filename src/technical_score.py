@@ -154,11 +154,10 @@ def _sig_fib_support(close: float, support: float, resistance: float) -> float:
 STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
     "BUY": {
         "rsi":            -2,   # overbought BAD for fresh entry
-        "stoch":          -2,
         "macd":           +3,   # bullish momentum GOOD
         "macd_cross":     +4,
         "bb_pct_b":       -2,   # price at upper band = stretched, bad entry
-        "bb_squeeze":     +2,   # pending breakout = opportunity
+        "bb_squeeze":     +1,   # pending breakout (reduced: Fang et al. — declining post-2001)
         "wvf":            +5,   # market bottom = best entry
         "trend":          +5,   # uptrend critical for buying
         "momentum":       +3,
@@ -171,11 +170,10 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         # Cash-secured put seller: wants oversold + support holding + bullish reversal
         # so the put expires worthless
         "rsi":            -4,   # oversold helps (negative RSI signal = bullish)
-        "stoch":          -3,
         "macd":           +3,   # bullish momentum keeps price up
         "macd_cross":     +4,
         "bb_pct_b":       -3,   # near lower band, bounce expected
-        "bb_squeeze":     +1,
+        "bb_squeeze":     +1,   # (reduced: declining effectiveness post-2001)
         "wvf":            +6,   # best CSP timing
         "trend":          +3,   # uptrend favors CSP
         "momentum":       +2,
@@ -188,11 +186,10 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         # Covered call seller: wants overbought + resistance + bearish reversal
         # so the call expires worthless
         "rsi":            +4,   # overbought helps (call expiry OTM)
-        "stoch":          +3,
         "macd":           -2,   # bearish momentum helps the CC
         "macd_cross":     -3,
         "bb_pct_b":       +3,   # near upper band = pullback likely
-        "bb_squeeze":     +1,
+        "bb_squeeze":     +1,   # (reduced: declining effectiveness post-2001)
         "wvf":            -3,   # market bottom = wrong time for CC
         "trend":          +1,   # slight uptrend OK (IV persists); strong uptrend risky
         "momentum":       -2,
@@ -203,11 +200,10 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
     },
     "LONG_CALL": {
         "rsi":            -2,
-        "stoch":          -2,
         "macd":           +4,
         "macd_cross":     +5,
         "bb_pct_b":       -1,
-        "bb_squeeze":     +3,   # squeeze breakout = leveraged long call upside
+        "bb_squeeze":     +1,   # squeeze breakout (reduced: Fang et al. BB study — declining post-2001)
         "wvf":            +4,
         "trend":          +4,
         "momentum":       +3,
@@ -218,11 +214,10 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
     },
     "LONG_PUT": {
         "rsi":            +3,
-        "stoch":          +3,
         "macd":           -4,
         "macd_cross":     -5,
         "bb_pct_b":       +2,
-        "bb_squeeze":     +2,
+        "bb_squeeze":     +1,   # (reduced: declining effectiveness post-2001)
         "wvf":            -3,
         "trend":          -4,
         "momentum":       -3,
@@ -238,7 +233,6 @@ def compute_signals(ind: dict[str, Any]) -> dict[str, float]:
     """Extract normalized signals from indicator dict."""
     return {
         "rsi":          _sig_rsi(ind.get("rsi_14", 50.0)),
-        "stoch":        _sig_stoch(ind.get("stoch_k", 50.0), ind.get("stoch_d", 50.0)),
         "macd":         _sig_macd(ind.get("macd_hist", 0.0), ind.get("close", 1.0)),
         "macd_cross":   _sig_macd_cross(ind.get("macd_cross", "none")),
         "bb_pct_b":     _sig_bb_pct_b(ind.get("bb_pct_b", 0.5)),
@@ -331,7 +325,7 @@ def top_signal_reasons(ind: dict[str, Any], strategy: str, limit: int = 3) -> li
     contributions.sort(key=lambda x: abs(x[1]), reverse=True)
 
     friendly = {
-        "rsi": "RSI", "stoch": "Stoch",
+        "rsi": "RSI",
         "macd": "MACD", "macd_cross": "MACD cross",
         "bb_pct_b": "BB position", "bb_squeeze": "BB squeeze",
         "wvf": "WVF bottom", "trend": "Trend",

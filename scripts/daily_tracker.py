@@ -858,7 +858,7 @@ def main():
 
     # Exit plans — per-position stop/target/recommendation
     print("Computing exit plans...")
-    from src.exit_plan import compute_stock_exit_plan, compute_option_exit_plan
+    from src.exit_plan import compute_stock_exit_plan, compute_option_exit_plan, compute_spread_exit_plan
     exit_rows = []
 
     for acct_key in ("caspar", "sarah"):
@@ -893,8 +893,123 @@ def main():
                 reasoning=plan["reasoning"],
             ))
 
-        # Option exit plans
-        for o in acct.get("options", []):
+        # ── Credit spread detection ──────────────────────────────────
+        # IBKR stores multi-leg spreads as individual option legs. Detect
+        # pairs: same ticker + expiry + right, one short (-1) + one long (+1),
+        # different strikes. PCS = both puts, CCS = both calls.
+        #
+        # Spreads get routed to compute_spread_exit_plan() with dynamic
+        # trailing stops. Unpaired legs use the single-leg exit plan.
+        raw_options = acct.get("options", [])
+        spread_consumed: set[int] = set()  # indices of options paired into spreads
+
+        for i, o_short in enumerate(raw_options):
+            if i in spread_consumed:
+                continue
+            qty_s = float(o_short.get("qty", 0))
+            if qty_s >= 0:
+                continue  # not short
+            sym_s = o_short.get("symbol", "")
+            right_s = o_short.get("right", "")
+            expiry_s = o_short.get("expiry", "")
+            strike_s = float(o_short.get("strike", 0))
+
+            # Look for a matching long leg
+            for j, o_long in enumerate(raw_options):
+                if j in spread_consumed or j == i:
+                    continue
+                qty_l = float(o_long.get("qty", 0))
+                if qty_l <= 0:
+                    continue  # not long
+                if (o_long.get("symbol", "") == sym_s
+                    and o_long.get("right", "") == right_s
+                    and o_long.get("expiry", "") == expiry_s
+                    and abs(qty_l) == abs(qty_s)):
+                    # Found a spread pair
+                    strike_l = float(o_long.get("strike", 0))
+                    if abs(strike_s - strike_l) < 0.01:
+                        continue  # same strike = not a spread
+
+                    spread_consumed.add(i)
+                    spread_consumed.add(j)
+
+                    # Determine strategy: PCS (puts) or CCS (calls)
+                    if right_s == "P":
+                        spread_strategy = "PCS"
+                        # PCS: short put at higher strike, long put at lower
+                        short_strike = max(strike_s, strike_l)
+                        long_strike = min(strike_s, strike_l)
+                    else:
+                        spread_strategy = "CCS"
+                        # CCS: short call at lower strike, long call at higher
+                        short_strike = min(strike_s, strike_l)
+                        long_strike = max(strike_s, strike_l)
+
+                    width = abs(short_strike - long_strike)
+
+                    # Net credit: short leg credit - long leg debit
+                    mult_s = int(o_short.get("multiplier", 100))
+                    mult_l = int(o_long.get("multiplier", 100))
+                    credit_s = abs(float(o_short.get("avg_cost_credit", 0))) / (mult_s or 100)
+                    credit_l = abs(float(o_long.get("avg_cost_credit", 0))) / (mult_l or 100)
+                    net_credit = credit_s - credit_l
+                    if net_credit <= 0:
+                        net_credit = width * 0.30  # fallback estimate
+
+                    # Current spread value: cost to buy back
+                    last_s = abs(float(o_short.get("last", 0)))
+                    last_l = abs(float(o_long.get("last", 0)))
+                    current_spread_value = last_s - last_l
+                    if current_spread_value < 0:
+                        current_spread_value = 0.01  # spread at near-zero (profitable)
+
+                    dte = calc_dte(expiry_s)
+                    underlying = prices.get(sym_s, 0.0)
+                    ind = indicators.get(sym_s, {})
+
+                    spread_dict = {
+                        "ticker": sym_s,
+                        "strategy": spread_strategy,
+                        "net_credit": net_credit,
+                        "current_spread_value": current_spread_value,
+                        "dte": dte,
+                        "short_strike": short_strike,
+                        "long_strike": long_strike,
+                        "underlying_last": underlying,
+                        "width": width,
+                    }
+                    try:
+                        plan = compute_spread_exit_plan(spread_dict, ind)
+                    except Exception as e:
+                        print(f"  spread exit plan failed for {sym_s} {spread_strategy}: {e}")
+                        break
+
+                    pos_type = f"SPREAD_{spread_strategy}"
+                    exit_rows.append(S.ExitPlanRow(
+                        date=today, account=acct_key, ticker=sym_s,
+                        position_type=pos_type, category="spread",
+                        is_blue_chip=False,
+                        entry=net_credit, current=current_spread_value,
+                        qty=qty_s,
+                        upl_pct=0.0,
+                        stop_loss=plan["stop_value"], stop_key=plan["stop_phase"],
+                        target_1=plan["target_close_at"], target_2=0.0,
+                        time_stop_days=0, days_held=0,
+                        profit_capture_pct=plan["profit_capture_pct"],
+                        target_close_at=plan["target_close_at"],
+                        status=plan["status"],
+                        recommendation=plan["recommendation"],
+                        reasoning=plan["reasoning"],
+                    ))
+                    print(f"  {acct_key}: {sym_s} {spread_strategy} "
+                          f"${short_strike:.0f}/{long_strike:.0f}{right_s} "
+                          f"exp {expiry_s} → [{plan['status']}] {plan['recommendation']}")
+                    break  # paired this short leg
+
+        # Option exit plans — single-leg (skip legs already consumed by spreads)
+        for idx, o in enumerate(raw_options):
+            if idx in spread_consumed:
+                continue
             sym = o.get("symbol", "")
             ind = indicators.get(sym, {})
             # Build option dict with derived fields
@@ -955,17 +1070,43 @@ def main():
         "caspar": float(grab.get("accounts", {}).get("caspar", {}).get("summary", {}).get("total_cash", 0)),
         "sarah": float(grab.get("accounts", {}).get("sarah", {}).get("summary", {}).get("total_cash_sgd", 0)),
     }
+    # Count current short options per account for capacity guard
+    short_counts: dict[str, int] = {"caspar": 0, "sarah": 0}
+    for opt in option_rows:
+        if opt.qty < 0:
+            acct_name = opt.account.lower() if hasattr(opt, "account") else "caspar"
+            short_counts[acct_name] = short_counts.get(acct_name, 0) + 1
+    vix_val = macro.get("vix", 0) or 0
     try:
         scan_results = scan_watchlist(
             list(indicator_tickers), indicators, technical_scores,
             SGX_TICKERS, available_cash, today,
+            current_short_count_by_account=short_counts,
+            vix=float(vix_val),
         )
     except Exception as e:
         print(f"  scanner error: {e}")
         scan_results = []
 
+    # Log VIX regime + IV rank gate + post-earnings info
+    from src.option_scanner import classify_vix_regime
+    vix_regime = classify_vix_regime(float(vix_val))
+    print(f"  VIX regime: {vix_regime} (VIX={vix_val})")
+
     scan_rows = []
     for r in scan_results:
+        # Surface Kelly sizing + capacity + IV gate + VIX + earnings into notes
+        notes_parts = []
+        if r.get("sizing_note"):
+            notes_parts.append(r["sizing_note"])
+        if r.get("kelly_max_cash") and r["kelly_max_cash"] > 0:
+            notes_parts.append(f"½Kelly max ${r['kelly_max_cash']:.0f}")
+        if r.get("iv_gate_note"):
+            notes_parts.append(r["iv_gate_note"])
+        if r.get("vix_note"):
+            notes_parts.append(r["vix_note"])
+        if r.get("earnings_note"):
+            notes_parts.append(r["earnings_note"])
         scan_rows.append(S.ScanResultRow(
             date=r["date"], ticker=r["ticker"], strategy=r["strategy"],
             right=r["right"], strike=r["strike"], expiry=r["expiry"],
@@ -978,6 +1119,7 @@ def main():
             technical_score=r["technical_score"],
             composite_score=r["composite_score"],
             catalyst_flag=r["catalyst_flag"],
+            notes=" | ".join(notes_parts) if notes_parts else "",
         ))
     results["scan_results"] = scan_rows
     # Show top 5 of each strategy
@@ -1087,6 +1229,7 @@ def main():
             today_opt_dicts, yest_opt_by_key,
             today_ind_for_defense, yest_ind_by_ticker,
             exit_by_key,
+            vix=float(vix_val),
         )
     except Exception as e:
         print(f"  defense brief error: {e}")
@@ -1115,6 +1258,46 @@ def main():
             print(f"    [{a['severity']}] {a['title']}: {a['description']}")
     else:
         print(f"  {len(defense_alerts)} alerts (all INFO/MEDIUM)")
+
+    # Push defense + exit alerts to Telegram
+    try:
+        from src import telegram as tg
+
+        defense_dicts = [
+            {
+                "severity": a.get("severity"),
+                "title": a.get("title"),
+                "description": a.get("description"),
+                "action": a.get("action"),
+                "ticker": a.get("ticker"),
+                "account": a.get("account"),
+            }
+            for a in defense_alerts
+        ]
+        exit_dicts = [
+            {
+                "account": r.account,
+                "ticker": r.ticker,
+                "position_type": r.position_type,
+                "status": r.status,
+                "recommendation": r.recommendation,
+                "profit_capture_pct": r.profit_capture_pct,
+                "reasoning": r.reasoning,
+            }
+            for r in exit_rows
+        ]
+        tg_result = tg.ping_options_defense(
+            date=today,
+            defense_alerts=defense_dicts,
+            exit_alerts=exit_dicts,
+            pwa_url="https://xynkro.github.io/CasaaFinance/",
+        )
+        if tg_result.get("skipped"):
+            print(f"  Telegram defense: skipped ({tg_result['skipped']})")
+        else:
+            print("  ✓ Options defense alerts sent to Telegram")
+    except Exception as e:
+        print(f"  Telegram defense push failed: {e}")
 
     # Wheel continuation — next-leg suggestions for each open option
     print("Computing wheel continuation...")
@@ -1150,9 +1333,11 @@ def main():
             "adj_cost_basis": opt.adj_cost_basis,
             "credit": opt.credit,
         }
+        acct_cash = available_cash.get(opt.account.lower(), 0)
         try:
             next_leg = compute_next_leg(
                 option_dict, ind, scores, SGX_TICKERS, stock_positions, technical_scores,
+                available_cash=acct_cash,
             )
         except Exception as e:
             print(f"  next-leg compute failed for {sym}: {e}")

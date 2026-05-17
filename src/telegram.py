@@ -920,3 +920,116 @@ def ping_options_intel(
         message_thread_id=OPTIONS_INTEL_TOPIC,
         disable_web_page_preview=True,
     )
+
+
+def ping_options_defense(
+    date: str,
+    defense_alerts: list[dict] | None = None,
+    exit_alerts: list[dict] | None = None,
+    pwa_url: str | None = None,
+) -> dict:
+    """
+    Push defense brief alerts + actionable exit plan alerts to Options Intel.
+
+    Only surfaces alerts that require action — CRITICAL/HIGH defense alerts
+    and exit plans with status != HEALTHY/HOLD. Keeps the Telegram push
+    tight; full detail lives in the sheet/PWA.
+
+    Args:
+        date: ISO YYYY-MM-DD
+        defense_alerts: list of dicts from build_defense_brief() with keys
+            {severity, title, description, action, ticker, account, ...}
+            — only CRITICAL and HIGH are pushed
+        exit_alerts: list of dicts with keys {account, ticker, position_type,
+            status, recommendation, profit_capture_pct, reasoning}
+            — only non-HEALTHY/HOLD statuses are pushed
+        pwa_url: optional PWA link for footer
+    """
+    import html as _html
+
+    defense = list(defense_alerts or [])
+    exits = list(exit_alerts or [])
+
+    # Filter to actionable alerts only
+    critical_high = [a for a in defense if a.get("severity") in ("CRITICAL", "HIGH")]
+    actionable_exits = [
+        e for e in exits
+        if e.get("status") not in ("HEALTHY", "HOLD", "LET_EXPIRE", "")
+    ]
+
+    if not critical_high and not actionable_exits:
+        return {"skipped": "no actionable defense/exit alerts"}
+
+    lines = [f"<b>🛡 OPTIONS DEFENSE</b> · {_html.escape(date)}"]
+
+    # ── Defense alerts (CRITICAL/HIGH only) ──────────────────────────
+    if critical_high:
+        lines.append("")
+        for a in critical_high[:8]:
+            sev = a.get("severity", "HIGH")
+            emoji = "🔴" if sev == "CRITICAL" else "🟠"
+            title = _html.escape(str(a.get("title", ""))[:80])
+            desc = _html.escape(str(a.get("description", ""))[:120])
+            action = _html.escape(str(a.get("action", ""))[:100])
+            lines.append(f"{emoji} <b>[{sev}]</b> {title}")
+            if desc:
+                lines.append(f"  {desc}")
+            if action:
+                lines.append(f"  → {action}")
+
+    # ── Exit plan alerts (actionable only) ────────────────────────────
+    if actionable_exits:
+        lines.append("")
+        lines.append("<b>📋 EXIT ALERTS</b>")
+
+        # Status → emoji mapping
+        status_emoji = {
+            "STOP_TRIGGERED": "🔴",
+            "PROFIT_TARGET_HIT": "🟢",
+            "MECHANICAL_CLOSE": "⏰",
+            "ROLL_OR_CLOSE": "🔄",
+            "ROLL_OR_ASSIGN": "🔄",
+            "BREACH_WARNING": "⚠",
+            "CATALYST_WARNING": "⚡",
+            "WARNING": "🟡",
+            "BAG": "💼",
+            "TIME_STOP": "⏳",
+            "T1_HIT": "🎯",
+            "T2_HIT": "🎯",
+            "EXPIRED": "📅",
+        }
+
+        for e in actionable_exits[:10]:
+            acct = str(e.get("account", ""))[:6]
+            tk = _html.escape(str(e.get("ticker", "?")))
+            pos = str(e.get("position_type", ""))
+            status = str(e.get("status", ""))
+            emoji = status_emoji.get(status, "📋")
+            rec = _html.escape(str(e.get("recommendation", ""))[:140])
+            profit = float(e.get("profit_capture_pct", 0))
+
+            # Compact position type label
+            type_label = pos.replace("OPTION_", "").replace("SPREAD_", "📊 ")
+
+            line = f"{emoji} <b>${tk}</b> {type_label}"
+            if acct:
+                line += f" · {acct}"
+            if profit != 0:
+                line += f" · {profit:+.0f}%"
+            lines.append(line)
+            if rec:
+                lines.append(f"  {rec}")
+
+        if len(actionable_exits) > 10:
+            lines.append(f"  <i>+{len(actionable_exits) - 10} more in PWA</i>")
+
+    if pwa_url:
+        lines.append("")
+        lines.append(f'📱 <a href="{_html.escape(pwa_url)}">Full detail in PWA</a>')
+
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=OPTIONS_INTEL_TOPIC,
+        disable_web_page_preview=True,
+    )

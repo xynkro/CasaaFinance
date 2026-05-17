@@ -104,7 +104,7 @@ CATEGORY_RULES: dict[str, dict[str, Any]] = {
     },
     "speculative": {
         "max_drawdown": 0.15,            # hard -15% stop
-        "atr_stop_mult": 2.0,            # 2x ATR below current — tracking stop
+        "atr_stop_mult": 3.0,            # 3x ATR Chandelier exit (Le Beau: PF 1.61 at 3×, beats 2×)
         "time_stop_days": 45,            # reassess if stagnant 45d
         "sma_warning": "sma_50",
         "profit_trim_at_t1": True,       # trim at resistance
@@ -308,14 +308,14 @@ def compute_option_exit_plan(
     status = "HEALTHY"
     parts = []
 
-    if profit_capture >= 0.5:
-        status = "PROFIT_TARGET_HIT"
-        recommendation = f"CLOSE — {profit_capture * 100:.0f}% profit captured. Redeploy capital."
-        parts.append("50% target achieved")
-    elif profit_capture >= 0.75:
+    if profit_capture >= 0.75:
         status = "PROFIT_TARGET_HIT"
         recommendation = f"CLOSE IMMEDIATELY — {profit_capture * 100:.0f}% captured. Free capital for next trade."
         parts.append("Excellent result — free up buying power")
+    elif profit_capture >= 0.5:
+        status = "PROFIT_TARGET_HIT"
+        recommendation = f"CLOSE — {profit_capture * 100:.0f}% profit captured. Redeploy capital."
+        parts.append("50% target achieved")
     elif moneyness == "ITM" and dte <= 7:
         status = "ROLL_OR_ASSIGN"
         recommendation = f"ROLL or ACCEPT assignment — ITM with {dte}d DTE"
@@ -344,4 +344,227 @@ def compute_option_exit_plan(
         "reasoning": " · ".join(parts),
         "profit_capture_pct": round(profit_capture * 100, 1),
         "target_close_at": round(target_close_at, 4),
+    }
+
+
+# ---------- Credit Spread Exit Management ----------
+# Dynamic stop-loss trailing for defined-risk verticals (PCS/CCS/IC).
+#
+# 3-phase stop system:
+#   Phase INITIAL  (profit < 25%): stop at loss = 1× credit (spread cost doubles)
+#   Phase TRAILING_BE (25-50%):    stop at breakeven (cost = credit)
+#   Phase TAKE_PROFIT (≥ 50%):     close, or trail to lock 25% min profit
+#
+# Mechanical rules:
+#   - 21 DTE close (gamma acceleration — Tastytrade backtest: 45 DTE entry +
+#     21 DTE exit beats hold-to-expiry by 15% risk-adjusted)
+#   - 50% profit target (buy back at half of credit)
+#   - 75%+ profit: close immediately
+#   - Short strike tested (price within 2%): flag ROLL_OR_CLOSE
+#   - Earnings inside DTE: CATALYST_WARNING
+# ----------
+
+SPREAD_PROFIT_TARGET = 0.50         # close at 50% of max profit
+SPREAD_PROFIT_IMMEDIATE = 0.75      # close immediately at 75%
+SPREAD_MECHANICAL_DTE = 21          # gamma-risk close threshold
+SPREAD_STOP_INITIAL_MULT = 2.0     # initial stop: spread cost = 2× credit (loss = 1× credit)
+SPREAD_STOP_BE_THRESHOLD = 0.25    # trail to breakeven after 25% profit
+SPREAD_STOP_LOCK_PCT = 0.25        # lock 25% profit when in take-profit phase
+SPREAD_SHORT_TESTED_PCT = 0.02     # flag roll when price within 2% of short strike
+
+
+def compute_spread_exit_plan(
+    spread: dict[str, Any],
+    indicators: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Compute exit plan for a credit spread position (PCS, CCS, or IC).
+
+    Unlike single-leg CSP/CC, credit spreads have defined max loss (width - credit)
+    and benefit from dynamic stop-loss trailing that ratchets tighter as profit grows.
+
+    spread dict keys:
+        ticker, strategy (PCS/CCS/IC), net_credit (per-share credit received),
+        current_spread_value (per-share cost to buy back), dte,
+        short_strike, long_strike, underlying_last, width (optional, computed if absent)
+
+    Returns dict with: status, recommendation, reasoning, profit_capture_pct,
+        target_close_at, stop_value, stop_phase, width, max_loss_per_share,
+        net_credit, current_value
+    """
+    ticker = spread.get("ticker", "")
+    strategy = spread.get("strategy", "PCS")
+    net_credit = float(spread.get("net_credit", 0))
+    current_value = float(spread.get("current_spread_value", 0))
+    dte = int(spread.get("dte", 0))
+    short_strike = float(spread.get("short_strike", 0))
+    long_strike = float(spread.get("long_strike", 0))
+    underlying = float(spread.get("underlying_last", 0))
+
+    # Width: distance between strikes (always positive)
+    width = float(spread.get("width", 0))
+    if width <= 0 and short_strike > 0 and long_strike > 0:
+        width = abs(short_strike - long_strike)
+    max_loss = max(0, width - net_credit) if width > 0 else net_credit
+
+    if net_credit <= 0:
+        return {
+            "ticker": ticker, "strategy": strategy,
+            "status": "HOLD",
+            "recommendation": "No exit plan — missing credit data",
+            "reasoning": "",
+            "profit_capture_pct": 0.0,
+            "target_close_at": 0.0,
+            "stop_value": 0.0,
+            "stop_phase": "UNKNOWN",
+            "width": width,
+            "max_loss_per_share": max_loss,
+            "net_credit": net_credit,
+            "current_value": current_value,
+        }
+
+    # ── Profit tracking ──────────────────────────────────────────────
+    # profit = credit received - cost to buy back (positive = winning)
+    pnl_per_share = net_credit - current_value
+    profit_pct = pnl_per_share / net_credit if net_credit > 0 else 0
+
+    # ── Dynamic stop levels (per-share spread cost thresholds) ────────
+    # stop_value = spread cost at which we close for a loss / to protect gains
+    if profit_pct >= SPREAD_PROFIT_TARGET:
+        # Phase 3: take profit — trail to lock at least 25% of credit
+        stop_value = net_credit * (1 - SPREAD_STOP_LOCK_PCT)
+        phase = "TAKE_PROFIT"
+    elif profit_pct >= SPREAD_STOP_BE_THRESHOLD:
+        # Phase 2: trailing breakeven — close if spread cost rises back to credit
+        stop_value = net_credit
+        phase = "TRAILING_BE"
+    else:
+        # Phase 1: initial — stop at 2× credit (loss = 1× credit = max you could make)
+        stop_value = net_credit * SPREAD_STOP_INITIAL_MULT
+        phase = "INITIAL"
+
+    # Target close value: buy back spread at 50% of original credit
+    target_close_value = net_credit * (1 - SPREAD_PROFIT_TARGET)
+
+    # ── Status determination ──────────────────────────────────────────
+    status = "HEALTHY"
+    recommendation = ""
+    parts: list[str] = []
+
+    # Check distance from short strike (for roll/close trigger)
+    short_tested = False
+    if underlying > 0 and short_strike > 0:
+        dist_to_short_pct = abs(underlying - short_strike) / short_strike
+        # Directional check: for PCS the danger is price dropping TO short put,
+        # for CCS the danger is price rising TO short call
+        if strategy in ("PCS",):
+            price_approaching = underlying <= short_strike * (1 + SPREAD_SHORT_TESTED_PCT)
+        elif strategy in ("CCS",):
+            price_approaching = underlying >= short_strike * (1 - SPREAD_SHORT_TESTED_PCT)
+        else:
+            # IC: either side could be tested
+            price_approaching = dist_to_short_pct <= SPREAD_SHORT_TESTED_PCT
+        short_tested = price_approaching and dist_to_short_pct <= SPREAD_SHORT_TESTED_PCT
+
+    # Priority cascade (highest severity first)
+    if profit_pct >= SPREAD_PROFIT_IMMEDIATE:
+        status = "PROFIT_TARGET_HIT"
+        recommendation = (
+            f"CLOSE NOW — {profit_pct * 100:.0f}% profit captured "
+            f"(credit ${net_credit:.2f}, buyback ${current_value:.2f}). "
+            f"Redeploy capital."
+        )
+        parts.append("Excellent result — free buying power immediately")
+
+    elif profit_pct >= SPREAD_PROFIT_TARGET:
+        status = "PROFIT_TARGET_HIT"
+        recommendation = (
+            f"CLOSE — {profit_pct * 100:.0f}% profit target hit. "
+            f"Buy back at ${current_value:.2f} (credit was ${net_credit:.2f})."
+        )
+        parts.append("50% target achieved — standard close")
+
+    elif dte <= SPREAD_MECHANICAL_DTE and dte > 0:
+        status = "MECHANICAL_CLOSE"
+        pnl_label = f"{profit_pct * 100:+.0f}%" if profit_pct != 0 else "flat"
+        recommendation = (
+            f"CLOSE — {dte}d DTE (21 DTE mechanical close). "
+            f"Gamma risk accelerates. P&L: {pnl_label}."
+        )
+        parts.append(f"21 DTE mechanical close ({dte}d remaining)")
+
+    elif dte <= 0:
+        status = "EXPIRED"
+        recommendation = f"EXPIRED — review outcome. P&L: {profit_pct * 100:+.0f}%."
+        parts.append("Position expired")
+
+    elif short_tested and profit_pct < 0:
+        status = "ROLL_OR_CLOSE"
+        recommendation = (
+            f"ROLL OR CLOSE — short ${short_strike:.0f} strike tested "
+            f"(underlying ${underlying:.2f}). "
+            f"P&L: {profit_pct * 100:+.0f}%. "
+            f"Consider rolling out in time for net credit."
+        )
+        parts.append("Short strike tested — roll for credit or cut loss")
+
+    elif current_value >= stop_value and phase == "INITIAL":
+        loss_per_share = current_value - net_credit
+        status = "STOP_TRIGGERED"
+        recommendation = (
+            f"CLOSE LOSS — spread cost ${current_value:.2f} breached "
+            f"${stop_value:.2f} stop (1× credit loss). "
+            f"Loss: ${loss_per_share:.2f}/share."
+        )
+        parts.append("Dynamic stop triggered (loss = credit received)")
+
+    elif current_value >= stop_value and phase == "TRAILING_BE":
+        status = "STOP_TRIGGERED"
+        recommendation = (
+            f"CLOSE — spread cost ${current_value:.2f} breached breakeven stop "
+            f"${stop_value:.2f}. Protect remaining capital."
+        )
+        parts.append("Trailing breakeven stop triggered")
+
+    elif profit_pct < -0.30:
+        status = "WARNING"
+        recommendation = (
+            f"WARNING — losing {abs(profit_pct) * 100:.0f}% "
+            f"(cost ${current_value:.2f} vs credit ${net_credit:.2f}). "
+            f"Stop at ${stop_value:.2f}. Monitor closely."
+        )
+        parts.append("Underwater but stop not yet hit")
+
+    else:
+        recommendation = (
+            f"HOLD — {profit_pct * 100:+.0f}% captured. "
+            f"Target close at ${target_close_value:.2f}. "
+            f"Stop: ${stop_value:.2f} ({phase})."
+        )
+
+    # ── Catalyst overlay ──────────────────────────────────────────────
+    if indicators.get("catalyst_flag") and status in ("HEALTHY", "HOLD"):
+        earnings_days = int(indicators.get("earnings_days_away", -1))
+        if 0 <= earnings_days <= dte:
+            status = "CATALYST_WARNING"
+            recommendation = (
+                f"EARNINGS in {earnings_days}d (inside DTE) — "
+                f"consider closing before event. P&L: {profit_pct * 100:+.0f}%."
+            )
+            parts.append("Earnings within DTE — binary risk")
+
+    return {
+        "ticker": ticker,
+        "strategy": strategy,
+        "status": status,
+        "recommendation": recommendation,
+        "reasoning": " · ".join(parts) if parts else f"{strategy} spread — monitoring",
+        "profit_capture_pct": round(profit_pct * 100, 1),
+        "target_close_at": round(target_close_value, 4),
+        "stop_value": round(stop_value, 4),
+        "stop_phase": phase,
+        "width": round(width, 2),
+        "max_loss_per_share": round(max_loss, 4),
+        "net_credit": round(net_credit, 4),
+        "current_value": round(current_value, 4),
     }

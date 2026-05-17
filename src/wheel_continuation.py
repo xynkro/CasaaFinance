@@ -175,6 +175,7 @@ def compute_next_leg(
     sgx_tickers: set[str],
     stock_positions: list[dict[str, Any]],
     all_scores: dict[str, dict[str, float]],  # all tickers' scores for ranking
+    available_cash: float = 0.0,
 ) -> dict[str, Any]:
     """
     Produce a next-leg recommendation for an open option.
@@ -251,14 +252,54 @@ def compute_next_leg(
 
         result["next_action"] = "LET_RUN"
         result["next_strategy"] = current_strategy
+
+        # --- Covered Strangle: if CC is healthy, suggest simultaneous CSP ---
+        # When you hold 100 shares + sold CC, selling a CSP on the same ticker
+        # creates a "covered strangle" — 2× premium income. The CSP is cash-secured
+        # by available buying power, and if assigned you'd accumulate more shares
+        # (lowering cost basis further).
+        strangle_note = ""
+        strangle_csp: Optional[dict] = None
+        if current_strategy == "CC" and confidence_pct < 30 and not catalyst_flag:
+            # Check if account has buying power for a CSP
+            csp_cash_needed = underlying * 100  # rough: 100 shares at current price
+            if available_cash >= csp_cash_needed * 1.2:  # 20% margin of safety
+                # Find a CSP candidate at 25-30 delta
+                yahoo_sym = _fmt_yahoo_ticker(ticker, sgx_tickers)
+                expiries = _find_monthly_expiries(yahoo_sym, TARGET_DTE_MIN, TARGET_DTE_MAX)
+                if expiries:
+                    target_dte_mid = (TARGET_DTE_MIN + TARGET_DTE_MAX) // 2
+                    best_exp = min(expiries, key=lambda e: abs((datetime.strptime(e, "%Y-%m-%d").date() - date.today()).days - target_dte_mid))
+                    best_dte = (datetime.strptime(best_exp, "%Y-%m-%d").date() - date.today()).days
+                    strangle_csp = _find_best_strike(
+                        yahoo_sym, best_exp, "P", 0.25,
+                        underlying, sigma_annual, best_dte,
+                    )
+                    if strangle_csp:
+                        strangle_note = (
+                            f" COVERED STRANGLE: also sell CSP ${strangle_csp['strike']:.2f}P "
+                            f"exp {strangle_csp['expiry']} (~{strangle_csp['delta_mag']:.2f}Δ, "
+                            f"${strangle_csp['premium']:.2f}/share, "
+                            f"{strangle_csp['annual_yield_pct']:.0f}% ann.) for 2× premium."
+                        )
+
         result["recommendation"] = (
             f"Let ride. At expiry, scan next ~{target_delta:.2f}Δ {right} "
-            f"on {ticker}."
+            f"on {ticker}.{strangle_note}"
         )
         result["reasoning"] = (
             f"Confidence {confidence_pct}%, {dte}d DTE, {moneyness}. "
             f"{'Catalyst detected — lower delta target.' if catalyst_flag else 'No warnings.'}"
+            f"{' Covered strangle eligible — cash available.' if strangle_csp else ''}"
         )
+        # Surface strangle details in result for downstream consumption
+        if strangle_csp:
+            result["strangle_csp_strike"] = strangle_csp["strike"]
+            result["strangle_csp_premium"] = strangle_csp["premium"]
+            result["strangle_csp_expiry"] = strangle_csp["expiry"]
+            result["strangle_csp_delta"] = strangle_csp["delta"]
+            result["strangle_csp_yield"] = strangle_csp["annual_yield_pct"]
+
         result["confidence"] = 90 - confidence_pct  # high confidence in "let run" if assignment low
         return result
 
@@ -364,20 +405,32 @@ def compute_next_leg(
         if current_strategy == "CSP":
             # About to be assigned stock — plan first CC above adjusted basis
             post_adj_basis = strike - float(option.get("credit", 0))
+            existing_qty = float(stock_holdings.get(ticker, {}).get("qty", 0))
+
             result["next_action"] = "PLAN_POST_ASSIGNMENT"
             result["next_strategy"] = "CC"
             result["next_right"] = "C"
             # Target CC strike slightly above post-adj basis
             target_cc_strike = post_adj_basis * 1.03  # 3% above basis as starting point
             result["next_strike"] = round(target_cc_strike, 2)
-            result["recommendation"] = (
-                f"Likely assigned at ${strike:.2f}. Post-adj basis ~${post_adj_basis:.2f}. "
-                f"Plan first CC at or above ~${target_cc_strike:.2f}."
-            )
+
+            if existing_qty >= 100:
+                result["recommendation"] = (
+                    f"⚠ DOUBLE-UP: you already hold {existing_qty:.0f}sh of {ticker}. "
+                    f"Assignment adds 100 more at ${strike:.2f} (basis ~${post_adj_basis:.2f}). "
+                    f"Consider closing CSP to avoid over-concentration."
+                )
+                result["confidence"] = 40
+            else:
+                result["recommendation"] = (
+                    f"Likely assigned at ${strike:.2f}. Post-adj basis ~${post_adj_basis:.2f}. "
+                    f"Plan first CC at or above ~${target_cc_strike:.2f}."
+                )
+                result["confidence"] = 75
+
             result["reasoning"] = (
                 f"Confidence {confidence_pct}%, {moneyness}. Wheel rotates from CSP → CC."
             )
-            result["confidence"] = 75
             return result
 
         if current_strategy == "CC":

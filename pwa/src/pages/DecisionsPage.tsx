@@ -797,6 +797,72 @@ function statusSortKey(status: string | undefined): number {
   return STATUS_SORT_RANK[(status ?? "").toLowerCase()] ?? 4;
 }
 
+type AccountTab = "caspar" | "sarah";
+type SubTab = "all" | "options" | "stocks";
+
+function AccountTabBar({ active, onChange, counts }: {
+  active: AccountTab;
+  onChange: (tab: AccountTab) => void;
+  counts: { caspar: number; sarah: number };
+}) {
+  const tabs: { key: AccountTab; label: string }[] = [
+    { key: "caspar", label: "Caspar" },
+    { key: "sarah", label: "Sarah" },
+  ];
+  return (
+    <div className="flex gap-1.5 p-1 rounded-xl bg-white/[0.03] border border-white/5">
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[length:var(--t-xs)] font-semibold transition-all ${
+            active === t.key
+              ? "bg-white/[0.08] text-slate-100 shadow-sm"
+              : "text-slate-500 hover:text-slate-400"
+          }`}
+        >
+          {t.label}
+          <span className={`tabular-nums text-[length:var(--t-2xs)] ${
+            active === t.key ? "text-slate-400" : "text-slate-600"
+          }`}>
+            {counts[t.key]}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SubTabBar({ active, onChange, counts }: {
+  active: SubTab;
+  onChange: (tab: SubTab) => void;
+  counts: { all: number; options: number; stocks: number };
+}) {
+  const tabs: { key: SubTab; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "options", label: "Options" },
+    { key: "stocks", label: "Stocks" },
+  ];
+  return (
+    <div className="flex gap-1">
+      {tabs.map((t) => (
+        <button
+          key={t.key}
+          onClick={() => onChange(t.key)}
+          className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-[length:var(--t-2xs)] font-semibold transition-all ${
+            active === t.key
+              ? "bg-indigo-500/15 text-indigo-300 border border-indigo-500/25"
+              : "bg-white/[0.03] text-slate-500 border border-white/5 hover:text-slate-400"
+          }`}
+        >
+          {t.label}
+          <span className="tabular-nums">{counts[t.key]}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function DecisionsPage({
   decisions,
   technicalScores,
@@ -837,12 +903,12 @@ export function DecisionsPage({
   livePrices?: Map<string, LivePriceRow>;
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
+  const [accountTab, setAccountTab] = useState<AccountTab>("caspar");
+  const [subTab, setSubTab] = useState<SubTab>("all");
+
   const techByTicker = new Map<string, TechnicalScoreRow>();
   for (const t of technicalScores ?? []) techByTicker.set(t.ticker, t);
 
-  // Build per-ticker upcoming-earnings lookup (next 30 days only). Uses
-  // the closest-future earnings row per ticker so multi-quarter rows
-  // don't fight each other.
   const earningsByTicker = new Map<string, EarningsRow>();
   if (earnings && earnings.length) {
     const today = new Date().toISOString().slice(0, 10);
@@ -854,8 +920,6 @@ export function DecisionsPage({
     }
   }
 
-  // Resolve live price once per row. Priority: live_prices (5-min) →
-  // positions (15-min) → technical_scores (daily close).
   const priceFor = (ticker: string) =>
     lookupCurrentPrice(
       ticker,
@@ -865,35 +929,42 @@ export function DecisionsPage({
       livePrices ?? new Map(),
     );
 
-  // TV consensus lookup — case-insensitive on ticker.
   const tvFor = (ticker: string): TvConsensus | undefined => {
     if (!tvSignals || !ticker) return undefined;
     return tvSignals.get(ticker.toUpperCase());
   };
 
-  // If we have no WSR decisions, still show BuyRecommendationsCard if we have scores
   const showBuyRecs = (technicalScores?.length ?? 0) > 0;
 
-  // Split decisions by strategy family
-  const activeOptions = decisions
+  // Split by account
+  const isAccount = (d: DecisionRow, acc: AccountTab) => {
+    const a = (d.account ?? "").toLowerCase();
+    if (acc === "caspar") return a === "caspar" || a === "watchlist" || a === "";
+    return a === "sarah";
+  };
+
+  const casparDecisions = decisions.filter((d) => isAccount(d, "caspar"));
+  const sarahDecisions = decisions.filter((d) => isAccount(d, "sarah"));
+  const activeDecisions = accountTab === "caspar" ? casparDecisions : sarahDecisions;
+
+  // Split by strategy type within current account
+  const optionsInAccount = activeDecisions
     .filter((d) => OPTIONS_STRATEGIES.includes(d.strategy ?? ""))
     .sort((a, b) => statusSortKey(a.status) - statusSortKey(b.status));
 
-  const shareDecisions = decisions
-    .filter((d) => SHARE_STRATEGIES.includes(d.strategy ?? ""))
+  const stocksInAccount = activeDecisions
+    .filter((d) => !OPTIONS_STRATEGIES.includes(d.strategy ?? ""))
     .sort((a, b) => statusSortKey(a.status) - statusSortKey(b.status));
 
-  // Catch-all bucket for any unrecognised strategies — append to share section.
-  const unrecognised = decisions.filter(
-    (d) => !OPTIONS_STRATEGIES.includes(d.strategy ?? "") && !SHARE_STRATEGIES.includes(d.strategy ?? ""),
-  );
-  const shareDecisionsAll = [...shareDecisions, ...unrecognised].sort(
-    (a, b) => statusSortKey(a.status) - statusSortKey(b.status),
-  );
+  // What to render based on sub-tab
+  const visibleDecisions =
+    subTab === "options" ? optionsInAccount :
+    subTab === "stocks" ? stocksInAccount :
+    [...optionsInAccount, ...stocksInAccount];
 
-  // Count by status for the summary pills (whole page).
+  // Status counts for summary pills (filtered view)
   const counts: Record<string, number> = {};
-  for (const d of decisions) {
+  for (const d of visibleDecisions) {
     const s = d.status?.toLowerCase() || "unknown";
     counts[s] = (counts[s] || 0) + 1;
   }
@@ -901,12 +972,25 @@ export function DecisionsPage({
   let fadeIdx = 1;
   const nextFade = () => `fade-up fade-up-${Math.min(fadeIdx++, 4)}`;
 
+  const renderCard = (d: DecisionRow, i: number, prefix: string) => (
+    <div key={`${prefix}-${d.ticker}-${d.date}-${i}`}>
+      <DecisionCard
+        decision={d}
+        onTap={() => setSelected(d)}
+        currentPrice={priceFor(d.ticker)}
+        tvConsensus={tvFor(d.ticker)}
+        earnings={earningsByTicker.get((d.ticker || "").toUpperCase())}
+        analyst={analystByTicker?.get((d.ticker || "").toUpperCase())}
+        news={newsByTicker?.get((d.ticker || "").toUpperCase())}
+        insider={insiderByTicker?.get((d.ticker || "").toUpperCase())}
+        exposurePosture={exposurePosture}
+      />
+    </div>
+  );
+
   return (
     <>
       <div className="px-4 pb-4 flex flex-col gap-4">
-        {/* Exposure Budget — top-of-page strip. Always visible across
-            all status filters; renders graceful fallback if posture
-            sheet is empty (cron hasn't run yet). */}
         <div className={nextFade()}>
           <ExposureBudgetCard
             posture={exposurePosture ?? null}
@@ -915,7 +999,28 @@ export function DecisionsPage({
           />
         </div>
 
-        {/* Action Queue — only renders when non-empty */}
+        {/* Account tabs: Caspar / Sarah */}
+        <div className={nextFade()}>
+          <AccountTabBar
+            active={accountTab}
+            onChange={(t) => { setAccountTab(t); setSubTab("all"); }}
+            counts={{ caspar: casparDecisions.length, sarah: sarahDecisions.length }}
+          />
+        </div>
+
+        {/* Sub-tabs: All / Options / Stocks */}
+        <div className="flex items-center justify-between">
+          <SubTabBar
+            active={subTab}
+            onChange={setSubTab}
+            counts={{
+              all: activeDecisions.length,
+              options: optionsInAccount.length,
+              stocks: stocksInAccount.length,
+            }}
+          />
+        </div>
+
         <div className={nextFade()}>
           <ActionQueueCard
             optionsDefense={optionsDefense ?? []}
@@ -926,7 +1031,6 @@ export function DecisionsPage({
           />
         </div>
 
-        {/* Buy recommendations from daily technical scan */}
         {showBuyRecs && (
           <div className={nextFade()}>
             <BuyRecommendationsCard
@@ -936,9 +1040,6 @@ export function DecisionsPage({
           </div>
         )}
 
-        {/* Fresh Ideas — weekly vcp + canslim screener output. Renders the
-            "no candidates yet" empty-state if the cron hasn't run; otherwise
-            shows top 8 per source. */}
         <div className={nextFade()}>
           <FreshIdeasCard
             candidates={screenCandidates ?? []}
@@ -947,7 +1048,7 @@ export function DecisionsPage({
           />
         </div>
 
-        {decisions.length > 0 ? (
+        {visibleDecisions.length > 0 ? (
           <>
             {/* Summary pills */}
             <div className="flex gap-2 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
@@ -965,52 +1066,36 @@ export function DecisionsPage({
               })}
             </div>
 
-            {/* Active Options section */}
-            {activeOptions.length > 0 && (
-              <div className="flex flex-col gap-2.5">
-                <SectionHeader label="Active Options" count={activeOptions.length} />
-                {activeOptions.map((d, i) => (
-                  <div key={`opt-${d.ticker}-${d.date}-${i}`}>
-                    <DecisionCard
-                      decision={d}
-                      onTap={() => setSelected(d)}
-                      currentPrice={priceFor(d.ticker)}
-                      tvConsensus={tvFor(d.ticker)}
-                      earnings={earningsByTicker.get((d.ticker || "").toUpperCase())}
-                      analyst={analystByTicker?.get((d.ticker || "").toUpperCase())}
-                      news={newsByTicker?.get((d.ticker || "").toUpperCase())}
-                      insider={insiderByTicker?.get((d.ticker || "").toUpperCase())}
-                      exposurePosture={exposurePosture}
-                    />
+            {subTab === "all" ? (
+              <>
+                {optionsInAccount.length > 0 && (
+                  <div className="flex flex-col gap-2.5">
+                    <SectionHeader label="Options" count={optionsInAccount.length} />
+                    {optionsInAccount.map((d, i) => renderCard(d, i, "opt"))}
                   </div>
-                ))}
-              </div>
-            )}
-
-            {/* Share Decisions section */}
-            {shareDecisionsAll.length > 0 && (
-              <div className="flex flex-col gap-2.5">
-                <SectionHeader label="Share Decisions" count={shareDecisionsAll.length} />
-                {shareDecisionsAll.map((d, i) => (
-                  <div key={`share-${d.ticker}-${d.date}-${i}`}>
-                    <DecisionCard
-                      decision={d}
-                      onTap={() => setSelected(d)}
-                      currentPrice={priceFor(d.ticker)}
-                      tvConsensus={tvFor(d.ticker)}
-                      earnings={earningsByTicker.get((d.ticker || "").toUpperCase())}
-                      analyst={analystByTicker?.get((d.ticker || "").toUpperCase())}
-                      news={newsByTicker?.get((d.ticker || "").toUpperCase())}
-                      insider={insiderByTicker?.get((d.ticker || "").toUpperCase())}
-                      exposurePosture={exposurePosture}
-                    />
+                )}
+                {stocksInAccount.length > 0 && (
+                  <div className="flex flex-col gap-2.5">
+                    <SectionHeader label="Stocks" count={stocksInAccount.length} />
+                    {stocksInAccount.map((d, i) => renderCard(d, i, "stk"))}
                   </div>
-                ))}
+                )}
+              </>
+            ) : (
+              <div className="flex flex-col gap-2.5">
+                {visibleDecisions.map((d, i) => renderCard(d, i, subTab))}
               </div>
             )}
           </>
-        ) : !showBuyRecs && (
-          <EmptyState />
+        ) : (
+          <Card>
+            <div className="flex flex-col items-center gap-2 py-4">
+              <Target size={18} className="text-slate-600" />
+              <p className="text-[length:var(--t-xs)] text-slate-500">
+                No {subTab === "all" ? "" : subTab + " "}decisions for {accountTab === "caspar" ? "Caspar" : "Sarah"}
+              </p>
+            </div>
+          </Card>
         )}
       </div>
 

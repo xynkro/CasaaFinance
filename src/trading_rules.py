@@ -231,10 +231,10 @@ CATALYST_BLACKOUTS = {
 # A queue entry only fires when ALL of these align — prevents FOMO chasing.
 ENTRY_GATING = {
     "max_pct_above_entry_to_buy":  3.0,  # If >3% above stated entry → wait/skip
-    "rsi_max_for_buy":             65,   # Not stretched
-    "min_volume_ratio_to_avg":     0.7,  # Not on no-volume drift
+    # RSI + volume gates removed — the brain already filtered for quality,
+    # and these were blocking clean entries on momentum moves.
     "require_above_sma50":         False,# Sometimes you ENTER on SMA50 reclaim
-    "skip_if_macd_bear_cross_24h": True, # Wait for confirmation
+    "skip_if_macd_bear_cross_24h": False,# Disabled — brain handles timing
 }
 
 

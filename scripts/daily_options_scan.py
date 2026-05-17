@@ -195,15 +195,113 @@ def gather_watchlist(logger: logging.Logger) -> list[str]:
 
 
 def _hv30(yt) -> float:
+    """Legacy wrapper — use _technical_context() instead for new code."""
+    ctx = _technical_context(yt)
+    return ctx.get("hv30", 0.0)
+
+
+# ── Support/Resistance Entry Timing ──────────────────────────────────
+# Credit spreads are more profitable when entered at key technical levels:
+#   PCS (bullish): price near support → bounce expected → put decay accelerates
+#   CCS (bearish): price near resistance → rejection expected → call decay accelerates
+# RSI confirmation layers on top: oversold + support = higher-conviction PCS.
+#
+# Support = 20-day rolling low (simple but effective for swing-range levels)
+# Resistance = 20-day rolling high
+# RSI-14 = standard Wilder calculation
+
+SR_BONUS_NEAR_LEVEL = 15       # score bonus when price is within 3% of S/R
+SR_BONUS_RSI_CONFIRM = 10      # additional bonus when RSI confirms
+SR_PROXIMITY_PCT = 0.03        # "near" = within 3%
+SR_RSI_OVERSOLD = 35           # PCS confirmation threshold
+SR_RSI_OVERBOUGHT = 65         # CCS confirmation threshold
+SR_IC_DUAL_BONUS = 8           # IC bonus when both sides have S/R context
+
+
+def _technical_context(yt) -> dict:
+    """
+    Compute HV30, RSI-14, and 20d support/resistance from 60d daily data.
+
+    Single yfinance fetch serves both the existing HV30 requirement and the
+    new support/resistance entry timing. Returns dict with:
+      hv30 (float %): 30-day historical volatility annualised
+      rsi_14 (float): RSI-14, 0-100
+      support (float): 20-day rolling low (price floor)
+      resistance (float): 20-day rolling high (price ceiling)
+    """
     try:
         hist = yt.history(period="60d", interval="1d", auto_adjust=True)
         if hist.empty or len(hist) < 20:
-            return 0.0
+            return {"hv30": 0.0, "rsi_14": 50.0, "support": 0.0, "resistance": 0.0}
+
         closes = hist["Close"].dropna()
+        if len(closes) < 20:
+            return {"hv30": 0.0, "rsi_14": 50.0, "support": 0.0, "resistance": 0.0}
+
+        # HV30 — same as legacy _hv30()
         log_rets = closes.pct_change().dropna().apply(lambda x: math.log(1 + x))
-        return float(log_rets.std() * math.sqrt(252) * 100)
+        hv30 = float(log_rets.std() * math.sqrt(252) * 100) if len(log_rets) > 5 else 0.0
+
+        # RSI-14 (Wilder smoothing)
+        delta = closes.diff()
+        gain = delta.where(delta > 0, 0.0)
+        loss = (-delta.where(delta < 0, 0.0))
+        avg_gain = gain.rolling(14, min_periods=14).mean()
+        avg_loss = loss.rolling(14, min_periods=14).mean()
+        # Avoid division by zero
+        rs = avg_gain / avg_loss.replace(0, 1e-10)
+        rsi_series = 100 - (100 / (1 + rs))
+        rsi_14 = float(rsi_series.iloc[-1]) if len(rsi_series) >= 14 else 50.0
+        if math.isnan(rsi_14):
+            rsi_14 = 50.0
+
+        # Support / Resistance — 20-day rolling low/high
+        recent_20 = closes.iloc[-20:]
+        support = float(recent_20.min())
+        resistance = float(recent_20.max())
+
+        return {
+            "hv30": round(hv30, 1),
+            "rsi_14": round(rsi_14, 1),
+            "support": round(support, 2),
+            "resistance": round(resistance, 2),
+        }
     except Exception:
-        return 0.0
+        return {"hv30": 0.0, "rsi_14": 50.0, "support": 0.0, "resistance": 0.0}
+
+
+def _sr_bonus_pcs(price: float, ctx: dict) -> tuple[float, str]:
+    """Score bonus for PCS when price is near support (bullish bounce expected)."""
+    bonus = 0.0
+    notes_parts: list[str] = []
+    support = ctx.get("support", 0)
+    rsi = ctx.get("rsi_14", 50)
+    if support > 0 and price > 0:
+        dist = (price - support) / price
+        if 0 < dist <= SR_PROXIMITY_PCT:
+            bonus += SR_BONUS_NEAR_LEVEL
+            notes_parts.append(f"near support ${support:.0f} ({dist * 100:.1f}%)")
+    if rsi < SR_RSI_OVERSOLD:
+        bonus += SR_BONUS_RSI_CONFIRM
+        notes_parts.append(f"RSI {rsi:.0f} oversold")
+    return bonus, " · ".join(notes_parts)
+
+
+def _sr_bonus_ccs(price: float, ctx: dict) -> tuple[float, str]:
+    """Score bonus for CCS when price is near resistance (bearish rejection expected)."""
+    bonus = 0.0
+    notes_parts: list[str] = []
+    resistance = ctx.get("resistance", 0)
+    rsi = ctx.get("rsi_14", 50)
+    if resistance > 0 and price > 0:
+        dist = (resistance - price) / price
+        if 0 < dist <= SR_PROXIMITY_PCT:
+            bonus += SR_BONUS_NEAR_LEVEL
+            notes_parts.append(f"near resistance ${resistance:.0f} ({dist * 100:.1f}%)")
+    if rsi > SR_RSI_OVERBOUGHT:
+        bonus += SR_BONUS_RSI_CONFIRM
+        notes_parts.append(f"RSI {rsi:.0f} overbought")
+    return bonus, " · ".join(notes_parts)
 
 
 def _best_expiry(expiries: tuple[str, ...], dte_range: tuple[int, int] = (15, 50), target: int = TARGET_DTE) -> str | None:
@@ -525,7 +623,8 @@ def scan_ticker(
     except Exception:
         return []
 
-    hv30 = _hv30(yt)
+    tech_ctx = _technical_context(yt)
+    hv30 = tech_ctx["hv30"]
     out: list[dict[str, Any]] = []
 
     # ── CSP ────────────────────────────────────────────────────────────────
@@ -856,6 +955,15 @@ def scan_ticker(
                             ann_yield = (net_credit / max_risk) * (365 / ic_dte) * 100 if max_risk > 0 else 0
                             ic_score = min(100, credit_ratio * 120 + min(est_ivr_ic, 100) * 0.25 + (10 if ann_yield >= 25 else 0))
 
+                            # IC S/R bonus: check both put-side (near support)
+                            # and call-side (near resistance) context
+                            ic_sr_bonus_put, ic_sr_note_put = _sr_bonus_pcs(price, tech_ctx)
+                            ic_sr_bonus_call, ic_sr_note_call = _sr_bonus_ccs(price, tech_ctx)
+                            if ic_sr_bonus_put > 0 and ic_sr_bonus_call > 0:
+                                ic_score += SR_IC_DUAL_BONUS  # both sides have S/R context
+                            elif ic_sr_bonus_put > 0 or ic_sr_bonus_call > 0:
+                                ic_score += max(ic_sr_bonus_put, ic_sr_bonus_call) * 0.4  # partial credit
+
                             if ic_score >= IC_MIN_QUALITY:
                                 lp_s = float(long_put["strike"])
                                 lc_s = float(long_call["strike"])
@@ -864,6 +972,9 @@ def scan_ticker(
                                     f"/SC:{sc_strike:.0f}/LC:{lc_s:.0f}"
                                     f" W:${actual_width:.0f}"
                                 )
+                                ic_sr_parts = [n for n in [ic_sr_note_put, ic_sr_note_call] if n]
+                                if ic_sr_parts:
+                                    notes += f" [{' | '.join(ic_sr_parts)}]"
                                 out.append({
                                     "ticker": ticker, "strategy": "IC", "right": "",
                                     "strike": sp_strike, "expiry": ic_expiry_iso,
@@ -938,9 +1049,15 @@ def scan_ticker(
                             ann_yield = (net_credit / max_risk) * (365 / cs_dte) * 100 if max_risk > 0 else 0
                             pcs_score = min(100, credit_ratio * 100 + min(est_ivr_cs, 100) * 0.2 + (15 if ann_yield >= 20 else 0))
 
+                            # Support/resistance entry timing bonus
+                            sr_bonus, sr_note = _sr_bonus_pcs(price, tech_ctx)
+                            pcs_score += sr_bonus
+
                             if pcs_score >= CS_MIN_QUALITY:
                                 lp_s = float(long_put["strike"])
                                 notes = f"SP:{sp_strike:.0f}/LP:{lp_s:.0f} W:${actual_width:.0f}"
+                                if sr_note:
+                                    notes += f" [{sr_note}]"
                                 pcs_delta, _ = _compute_greeks(short_put, price, cs_dte, "P")
                                 out.append({
                                     "ticker": ticker, "strategy": "PCS", "right": "P",
@@ -1017,9 +1134,15 @@ def scan_ticker(
                             ann_yield = (net_credit / max_risk) * (365 / ccs_dte) * 100 if max_risk > 0 else 0
                             ccs_score = min(100, credit_ratio * 100 + min(est_ivr_ccs, 100) * 0.2 + (15 if ann_yield >= 20 else 0))
 
+                            # Support/resistance entry timing bonus
+                            sr_bonus, sr_note = _sr_bonus_ccs(price, tech_ctx)
+                            ccs_score += sr_bonus
+
                             if ccs_score >= CS_MIN_QUALITY:
                                 lc_s = float(long_call["strike"])
                                 notes = f"SC:{sc_strike:.0f}/LC:{lc_s:.0f} W:${actual_width:.0f}"
+                                if sr_note:
+                                    notes += f" [{sr_note}]"
                                 ccs_delta, _ = _compute_greeks(short_call, price, ccs_dte, "C")
                                 out.append({
                                     "ticker": ticker, "strategy": "CCS", "right": "C",

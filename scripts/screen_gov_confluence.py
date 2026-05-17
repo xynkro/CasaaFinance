@@ -7,8 +7,8 @@ into a per-ticker confluence score and writes:
   2. decision_queue — appended rows for Tier A / B picks with strategy
      (BUY_DIP / LONG_CALL / PMCC) populated
 
-Score formula (per design doc §3):
-  score = 0.40 * contract_score + 0.30 * congress_score + 0.30 * insider_score
+Score formula (literature-backed weights):
+  score = 0.40 * contract + 0.30 * insider + 0.15 * congress + 0.15 * analyst
 
 Action recommendation rules (rules-based; brain may override in daily-brief):
   Score 70-79 + Tier A     → BUY_DIP (cash buy, 1% NLV)
@@ -42,6 +42,22 @@ from src import schema as S    # noqa: E402
 
 log = logging.getLogger(__name__)
 
+_ttm_revenue_cache: dict[str, float | None] = {}
+
+
+def _fetch_ttm_revenue(ticker: str) -> float | None:
+    """Fetch trailing-twelve-month revenue via yfinance. Returns None on failure."""
+    if ticker in _ttm_revenue_cache:
+        return _ttm_revenue_cache[ticker]
+    try:
+        import yfinance as yf
+        info = yf.Ticker(ticker).info
+        rev = info.get("totalRevenue") or info.get("revenue")
+        _ttm_revenue_cache[ticker] = float(rev) if rev else None
+    except Exception:
+        _ttm_revenue_cache[ticker] = None
+    return _ttm_revenue_cache[ticker]
+
 # Lookback windows (per design doc §3)
 CONTRACT_LOOKBACK_DAYS = 30
 CONGRESS_LOOKBACK_DAYS = 60
@@ -59,14 +75,15 @@ TIER_B_MIN_SCORE = 80
 TIER_A_MIN_IMPACT_PCT = 0.01  # 1% TTM rev
 TIER_B_MIN_IMPACT_PCT = 0.05  # 5% TTM rev
 
-# Weights (sum to 1.00). Re-balanced from 40/30/30 to 35/25/25/15
-# to add analyst consensus as the 4th vector. Inspired by QuiverQuant's
-# Analyst Buys strategy (78% win rate, Sharpe 0.92 over 3y) showing
-# weighted analyst signal adds real alpha when combined with cluster/
-# insider data. Source: https://www.quiverquant.com/strategies/s/Analyst%20Buys/
-W_CONTRACT = 0.35
-W_CONGRESS = 0.25
-W_INSIDER  = 0.25
+# Weights (sum to 1.00). Literature-backed rebalance:
+#   Contracts ↑40%: Oxford RAPS (2023) — GD firms earn 50 bps/month alpha, Sharpe 0.91
+#   Insider   ↑30%: Kang/Kim/Wang (2018) — cluster buys earn 3.8% in 21 days
+#   Congress  ↓15%: Post-STOCK Act alpha dropped to 0.9%/yr (ScienceDirect 2024);
+#                   only leadership trades retain edge (Wei & Zhou NBER 2025)
+#   Analyst    15%: QuiverQuant 78% win rate — useful as confluence booster
+W_CONTRACT = 0.40
+W_CONGRESS = 0.15
+W_INSIDER  = 0.30
 W_ANALYST  = 0.15
 
 # NAICS codes that get a small sector bonus (+5) — top federal-spending sectors
@@ -416,6 +433,107 @@ def _read_analyst_consensus(client) -> dict[str, dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Sector Gov Momentum — aggregate awards by NAICS 2-digit sector
+# ─────────────────────────────────────────────────────────────────────────────
+
+# NAICS 2-digit sector names for human-readable output
+NAICS_SECTOR_NAMES: dict[str, str] = {
+    "11": "Agriculture", "21": "Mining", "22": "Utilities",
+    "23": "Construction", "31": "Manufacturing", "32": "Manufacturing",
+    "33": "Manufacturing", "42": "Wholesale", "44": "Retail", "45": "Retail",
+    "48": "Transport", "49": "Transport", "51": "Information",
+    "52": "Finance", "53": "Real Estate", "54": "Professional/Scientific",
+    "55": "Management", "56": "Admin/Waste", "61": "Education",
+    "62": "Healthcare", "71": "Arts/Recreation", "72": "Accommodation/Food",
+    "81": "Other Services", "92": "Public Admin",
+}
+
+# Sector momentum thresholds
+SECTOR_MOMENTUM_RATIO = 1.5   # 30d rolling > 1.5× 90d average = hot sector
+SECTOR_MOMENTUM_BONUS = 8     # score bonus for tickers in a hot sector
+
+
+def _compute_sector_momentum(
+    contracts_by_ticker: dict[str, list[dict]],
+    today: date,
+) -> dict[str, dict]:
+    """
+    Aggregate contract awards by NAICS 2-digit sector code.
+    Compare 30-day rolling total vs 90-day rolling average.
+    Returns {naics_2digit: {total_30d, avg_90d, ratio, is_hot, sector_name}}.
+
+    A "hot" sector has 30d rolling > 1.5× the 90d daily average (scaled to 30d).
+    This captures surges in federal spending that historically predict sector outperformance.
+    """
+    from collections import defaultdict
+
+    # Flatten all contracts with date and NAICS
+    all_contracts: list[dict] = []
+    for ticker_contracts in contracts_by_ticker.values():
+        for c in ticker_contracts:
+            naics = (c.get("naics_code") or "").strip()
+            if len(naics) < 2:
+                continue
+            all_contracts.append({
+                "naics_2": naics[:2],
+                "date": c.get("action_date", ""),
+                "amount": c.get("award_amount", 0),
+            })
+
+    if not all_contracts:
+        return {}
+
+    cutoff_30d = (today - timedelta(days=30)).isoformat()
+    cutoff_90d = (today - timedelta(days=90)).isoformat()
+
+    # Aggregate by NAICS 2-digit
+    sector_30d: dict[str, float] = defaultdict(float)
+    sector_90d: dict[str, float] = defaultdict(float)
+
+    for c in all_contracts:
+        d = c["date"][:10] if c["date"] else ""
+        naics_2 = c["naics_2"]
+        amt = float(c["amount"])
+        if d >= cutoff_30d:
+            sector_30d[naics_2] += amt
+        if d >= cutoff_90d:
+            sector_90d[naics_2] += amt
+
+    # Compute ratios
+    result: dict[str, dict] = {}
+    all_sectors = set(sector_30d) | set(sector_90d)
+    for s in all_sectors:
+        total_30d = sector_30d.get(s, 0)
+        total_90d = sector_90d.get(s, 0)
+        # Average daily spend over 90d, scaled to 30d for comparison
+        avg_90d_daily = total_90d / 90 if total_90d > 0 else 0
+        avg_90d_30d_equiv = avg_90d_daily * 30
+
+        ratio = (total_30d / avg_90d_30d_equiv) if avg_90d_30d_equiv > 0 else 0
+        is_hot = ratio >= SECTOR_MOMENTUM_RATIO and total_30d > 1_000_000  # min $1M to avoid noise
+
+        result[s] = {
+            "total_30d": total_30d,
+            "avg_90d_30d_equiv": avg_90d_30d_equiv,
+            "ratio": round(ratio, 2),
+            "is_hot": is_hot,
+            "sector_name": NAICS_SECTOR_NAMES.get(s, f"NAICS {s}"),
+        }
+
+    return result
+
+
+def _ticker_naics_sectors(contracts: list[dict]) -> set[str]:
+    """Return set of NAICS 2-digit sectors for a ticker's contracts."""
+    sectors: set[str] = set()
+    for c in contracts:
+        naics = (c.get("naics_code") or "").strip()
+        if len(naics) >= 2:
+            sectors.add(naics[:2])
+    return sectors
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Scoring
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -708,13 +826,25 @@ def _build_thesis(
 # Output writers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_signal_rows(stats: dict[str, TickerStats], today_iso: str) -> list[S.GovConfluenceSignalRow]:
-    """Compute scores + materialise GovConfluenceSignalRow for all qualifying tickers."""
+def _build_signal_rows(
+    stats: dict[str, TickerStats],
+    today_iso: str,
+    sector_momentum: dict[str, dict] | None = None,
+    contracts_by_ticker: dict[str, list[dict]] | None = None,
+) -> list[S.GovConfluenceSignalRow]:
+    """Compute scores + materialise GovConfluenceSignalRow for all qualifying tickers.
+
+    Includes sector momentum bonus: tickers in "hot" NAICS sectors
+    (30d spend > 1.5× 90d average) get a +8 score boost.
+    """
     out: list[S.GovConfluenceSignalRow] = []
     now_iso = S.now_sgt_iso()
+    sector_momentum = sector_momentum or {}
+    contracts_by_ticker = contracts_by_ticker or {}
+
     for ticker, ts in stats.items():
-        # TTM revenue not wired in v1 — fall back to absolute-amount scoring
-        contract_score, impact_pct = _score_contract(ts, ttm_revenue=None)
+        ttm_rev = _fetch_ttm_revenue(ticker)
+        contract_score, impact_pct = _score_contract(ts, ttm_revenue=ttm_rev)
         congress_score = _score_congress(ts)
         insider_score = _score_insider(ts)
         analyst_score = _score_analyst(ts)
@@ -724,10 +854,26 @@ def _build_signal_rows(stats: dict[str, TickerStats], today_iso: str) -> list[S.
             + W_INSIDER  * insider_score
             + W_ANALYST  * analyst_score
         )
+
+        # Sector momentum bonus: if this ticker's contracts are in a "hot" sector
+        ticker_sectors = _ticker_naics_sectors(contracts_by_ticker.get(ticker, []))
+        hot_sectors = [
+            sector_momentum[s]["sector_name"]
+            for s in ticker_sectors
+            if s in sector_momentum and sector_momentum[s]["is_hot"]
+        ]
+        if hot_sectors:
+            score += SECTOR_MOMENTUM_BONUS
+
         if score < MIN_SCORE_TO_PERSIST:
             continue
         tier = _classify_tier(score, impact_pct, ts.has_multi_year)
         strategy = _recommend_strategy(score, tier)
+        # Build thesis with sector momentum note
+        thesis = _build_thesis(ts, contract_score, congress_score, insider_score, analyst_score)
+        if hot_sectors:
+            thesis += f" Sector momentum: {', '.join(hot_sectors)} spending surging (30d > 1.5× 90d avg)."
+
         out.append(S.GovConfluenceSignalRow(
             date=today_iso,
             ticker=ticker,
@@ -739,7 +885,7 @@ def _build_signal_rows(stats: dict[str, TickerStats], today_iso: str) -> list[S.
             tier=tier,
             recommended_strategy=strategy,
             recommended_action=_build_action_text(ts, score, strategy),
-            thesis_oneliner=_build_thesis(ts, contract_score, congress_score, insider_score, analyst_score),
+            thesis_oneliner=thesis,
             contributing_contracts=json.dumps([c["award_id"] for c in ts.contracts[:20]]),
             contributing_congress_trades=json.dumps([c["filing_id"] for c in ts.congress_buys[:20]]),
             contributing_insider_buys=json.dumps([b["id"] for b in ts.insider_buys[:20]]),
@@ -993,7 +1139,19 @@ def main() -> int:
     stats = _build_stats(contracts, congress, insider, analyst, today)
     logger.info(f"Computed stats for {len(stats)} unique tickers")
 
-    signals = _build_signal_rows(stats, today_iso)
+    # Sector momentum: aggregate awards by NAICS 2-digit sector
+    sector_mom = _compute_sector_momentum(contracts, today)
+    hot = {s: v for s, v in sector_mom.items() if v["is_hot"]}
+    if hot:
+        logger.info(f"Sector momentum: {len(hot)} hot sectors:")
+        for s, v in sorted(hot.items(), key=lambda x: x[1]["ratio"], reverse=True):
+            logger.info(f"  NAICS {s} ({v['sector_name']}): "
+                        f"30d ${v['total_30d']/1e6:.1f}M vs 90d-equiv ${v['avg_90d_30d_equiv']/1e6:.1f}M "
+                        f"({v['ratio']:.1f}×)")
+    else:
+        logger.info("Sector momentum: no hot sectors detected")
+
+    signals = _build_signal_rows(stats, today_iso, sector_momentum=sector_mom, contracts_by_ticker=contracts)
     logger.info(f"  · {len(signals)} signals scored >= {MIN_SCORE_TO_PERSIST}")
 
     if signals:
