@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 
 const OPTIONS_STRATEGIES = ["CSP", "CC", "PMCC", "LONG_CALL", "LONG_PUT"];
+// @ts-expect-error reserved for future strategy filter
 const SHARE_STRATEGIES = ["BUY_DIP", "TRIM", ""];
 
 function fmtMoney(v: string | number | undefined): string {
@@ -756,6 +757,7 @@ function DecisionCard({
   );
 }
 
+// @ts-expect-error reserved for future empty state rendering
 function EmptyState() {
   return (
     <Card>

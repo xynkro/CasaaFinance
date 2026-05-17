@@ -2077,3 +2077,55 @@ class AlpacaPositionRow:
     def to_row(self) -> List[str]:
         return [self.date, self.ticker, self.qty, self.avg_cost, self.last,
                 self.mkt_val, self.upl, self.upl_pct, self.side]
+
+
+@dataclass
+class HarvestScanRow:
+    """Premium Harvest scanner output — one row per candidate per day.
+
+    Each row carries entry/maintenance/exit signal blocks as JSON strings
+    so the PWA and Telegram can render full lifecycle plans.
+    """
+    TAB_NAME = "harvest_scan"
+    HEADERS = [
+        "date", "ticker", "strategy", "strike", "expiry", "dte",
+        "credit", "annual_yield_pct", "iv_rank", "conviction",
+        "underlying_last", "cash_required", "breakeven",
+        "sr_context", "macro_regime", "vix",
+        "entry_signals", "maintenance_signals", "exit_signals",
+        "notes",
+    ]
+
+    date: str
+    ticker: str
+    strategy: str           # HARVEST_CSP | HARVEST_STRANGLE
+    strike: float
+    expiry: str             # YYYYMMDD
+    dte: int
+    credit: float
+    annual_yield_pct: float
+    iv_rank: float
+    conviction: int         # 0-100
+    underlying_last: float
+    cash_required: float
+    breakeven: float
+    sr_context: str         # "near support $98 (7%) · RSI 42"
+    macro_regime: str       # STANDARD | CAUTION | HALTED
+    vix: float
+    entry_signals: str      # JSON dict
+    maintenance_signals: str  # JSON dict
+    exit_signals: str       # JSON dict
+    notes: str              # e.g. "call_strike=140" for strangles
+
+    def to_row(self) -> List[str]:
+        return [
+            self.date, self.ticker, self.strategy,
+            _num(self.strike, 2), self.expiry, str(self.dte),
+            _num(self.credit, 2), _num(self.annual_yield_pct, 1),
+            _num(self.iv_rank, 1), str(self.conviction),
+            _num(self.underlying_last, 2), _num(self.cash_required, 2),
+            _num(self.breakeven, 2),
+            self.sr_context, self.macro_regime, _num(self.vix, 1),
+            self.entry_signals, self.maintenance_signals, self.exit_signals,
+            self.notes,
+        ]
