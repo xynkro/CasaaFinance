@@ -703,6 +703,65 @@ def _score_analyst(ts: TickerStats) -> float:
     return base
 
 
+def _compute_investment_score(ticker: str, confluence_score: float) -> float:
+    """Composite investment score: 40% confluence + 30% fundamental + 30% technical.
+
+    Fundamental: revenue growth, profit margin, debt/equity via yfinance.
+    Technical: RSI health, SMA trend, 3-month momentum via yfinance history.
+    """
+    import yfinance as yf
+
+    # Confluence component (40%)
+    conf_component = min(confluence_score, 100.0) * 0.4
+
+    # Fundamental component (30%)
+    fund_score = 50.0  # neutral default
+    try:
+        info = yf.Ticker(ticker).info
+        rev_growth = info.get("revenueGrowth") or 0
+        profit_margin = info.get("profitMargins") or 0
+        de = info.get("debtToEquity") or 0
+
+        rg_pts = min(max(rev_growth * 100, -20), 40)  # -20 to +40
+        pm_pts = min(max(profit_margin * 100, 0), 30)  # 0 to +30
+        de_pts = max(30 - de / 5, 0) if de > 0 else 20  # lower debt = higher score
+
+        fund_score = max(0, min(100, 30 + rg_pts + pm_pts + de_pts))
+    except Exception:
+        pass
+    fund_component = fund_score * 0.3
+
+    # Technical component (30%)
+    tech_score = 50.0
+    try:
+        hist = yf.Ticker(ticker).history(period="3mo")
+        if len(hist) >= 20:
+            close = hist["Close"]
+            price = float(close.iloc[-1])
+            sma20 = float(close.rolling(20).mean().iloc[-1])
+            sma50 = float(close.rolling(50).mean().iloc[-1]) if len(hist) >= 50 else sma20
+
+            # RSI-14
+            delta = close.diff()
+            gain = delta.where(delta > 0, 0.0).rolling(14).mean()
+            loss = (-delta.where(delta < 0, 0.0)).rolling(14).mean()
+            rs = gain.iloc[-1] / loss.iloc[-1] if loss.iloc[-1] > 0 else 100
+            rsi = 100 - (100 / (1 + rs))
+
+            # Score components
+            trend_pts = 30 if price > sma50 else (15 if price > sma20 else 0)
+            rsi_pts = 30 if 40 <= rsi <= 65 else (15 if 30 <= rsi <= 75 else 0)
+            mom_3m = (price / float(close.iloc[0]) - 1) * 100
+            mom_pts = min(max(mom_3m, -20), 40)
+
+            tech_score = max(0, min(100, trend_pts + rsi_pts + mom_pts))
+    except Exception:
+        pass
+    tech_component = tech_score * 0.3
+
+    return round(conf_component + fund_component + tech_component, 1)
+
+
 def _classify_tier(score: float, impact_pct: float, has_multi_year: bool) -> str:
     """A | B | "" per design doc §3."""
     if score >= TIER_B_MIN_SCORE and has_multi_year and impact_pct >= TIER_B_MIN_IMPACT_PCT:
@@ -874,6 +933,8 @@ def _build_signal_rows(
         if hot_sectors:
             thesis += f" Sector momentum: {', '.join(hot_sectors)} spending surging (30d > 1.5× 90d avg)."
 
+        inv_score = _compute_investment_score(ticker, score)
+
         out.append(S.GovConfluenceSignalRow(
             date=today_iso,
             ticker=ticker,
@@ -890,6 +951,7 @@ def _build_signal_rows(
             contributing_congress_trades=json.dumps([c["filing_id"] for c in ts.congress_buys[:20]]),
             contributing_insider_buys=json.dumps([b["id"] for b in ts.insider_buys[:20]]),
             updated_at=now_iso,
+            investment_score=inv_score,
         ))
     out.sort(key=lambda r: r.confluence_score, reverse=True)
     return out

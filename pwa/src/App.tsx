@@ -121,6 +121,7 @@ function Dashboard() {
         return (
           <HarvestPage
             harvestScan={data?.harvestScan ?? []}
+            options={data?.options ?? []}
             loading={loading && !data}
           />
         );

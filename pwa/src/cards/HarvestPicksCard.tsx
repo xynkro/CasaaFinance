@@ -16,8 +16,6 @@ function PickRow({ row }: { row: HarvestScanRow }) {
   const yld = Number(row.annual_yield_pct) || 0;
   const dte = Number(row.dte) || 0;
   const strike = Number(row.strike) || 0;
-  const isStrangle = row.strategy === "HARVEST_STRANGLE";
-
   let maint: Record<string, unknown> = {};
   let exitS: Record<string, unknown> = {};
   try { maint = JSON.parse(row.maintenance_signals || "{}"); } catch { /* */ }
@@ -34,7 +32,7 @@ function PickRow({ row }: { row: HarvestScanRow }) {
           {conv}
         </span>
         <span className="text-[length:var(--t-xs)] text-slate-400 ml-auto">
-          {isStrangle ? `$${strike.toFixed(0)}P/${row.notes?.replace("call_strike=", "$")}C` : `$${strike.toFixed(0)}P`}
+          ${strike.toFixed(0)}P
         </span>
         <span className="text-[length:var(--t-xs)] text-emerald-400 font-mono">${credit.toFixed(2)}</span>
         {expanded ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
@@ -54,9 +52,6 @@ function PickRow({ row }: { row: HarvestScanRow }) {
           <div className="text-slate-400">
             <span className="font-semibold">Exit:</span> stop 2x (${Number(exitS.max_loss_value || 0).toFixed(2)}) · {Number(exitS.mechanical_close_dte) || 14} DTE mech close
           </div>
-          {isStrangle && (
-            <div className="text-amber-400/80">Strangle: close untested side if one tested</div>
-          )}
         </div>
       )}
     </div>
@@ -79,8 +74,6 @@ export function HarvestPicksCard({ picks }: { picks: HarvestScanRow[] }) {
   }
 
   const sorted = [...picks].sort((a, b) => Number(b.conviction) - Number(a.conviction));
-  const csps = sorted.filter((p) => p.strategy === "HARVEST_CSP");
-  const strangles = sorted.filter((p) => p.strategy === "HARVEST_STRANGLE");
 
   return (
     <Card>
@@ -89,15 +82,7 @@ export function HarvestPicksCard({ picks }: { picks: HarvestScanRow[] }) {
           <Wheat size={14} className="text-amber-400" />
           <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Harvest Picks</h2>
         </div>
-        <div className="flex items-center gap-2 text-[length:var(--t-2xs)]">
-          {csps.length > 0 && <span className="text-emerald-400 tabular-nums">{csps.length} CSP</span>}
-          {strangles.length > 0 && (
-            <>
-              <span className="text-slate-600">·</span>
-              <span className="text-amber-400 tabular-nums">{strangles.length} strangle</span>
-            </>
-          )}
-        </div>
+        <span className="text-emerald-400 text-[length:var(--t-2xs)] tabular-nums">{sorted.length} CSP</span>
       </div>
       <div>
         {sorted.map((p, i) => <PickRow key={`${p.ticker}-${i}`} row={p} />)}

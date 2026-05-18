@@ -2003,6 +2003,7 @@ class GovConfluenceSignalRow:
         "contributing_congress_trades",
         "contributing_insider_buys",
         "updated_at",
+        "investment_score",
     ]
 
     date: str
@@ -2011,7 +2012,7 @@ class GovConfluenceSignalRow:
     contract_score: float
     congress_score: float
     insider_score: float
-    analyst_score: float = 0.0  # Added Tweak #4 — backward-compat default
+    analyst_score: float = 0.0
     tier: str = ""  # "A" | "B" | ""
     recommended_strategy: str = ""  # "BUY_DIP" | "LONG_CALL" | "PMCC" | ""
     recommended_action: str = ""
@@ -2020,6 +2021,7 @@ class GovConfluenceSignalRow:
     contributing_congress_trades: str = ""  # JSON array of filing_ids
     contributing_insider_buys: str = ""  # JSON array of insider tx ids
     updated_at: str = ""
+    investment_score: float = 0.0  # composite: 40% confluence + 30% fundamental + 30% technical
 
     def to_row(self) -> List[str]:
         return [
@@ -2037,6 +2039,7 @@ class GovConfluenceSignalRow:
             self.contributing_congress_trades,
             self.contributing_insider_buys,
             self.updated_at,
+            _num(self.investment_score, 1),
         ]
 
 

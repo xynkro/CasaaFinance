@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { GovConfluenceRow } from "../data";
 import { Card } from "./Card";
-import { Landmark, ChevronDown, ChevronUp } from "lucide-react";
+import { Landmark, ChevronDown, ChevronUp, TrendingUp } from "lucide-react";
 
 function fmtScore(v: string | number): number {
   const n = Number(v);
@@ -33,9 +33,23 @@ function ScoreBar({ value, max = 100 }: { value: number; max?: number }) {
   );
 }
 
+function InvestBadge({ value }: { value: number }) {
+  if (!value) return null;
+  const color = value >= 60 ? "text-emerald-400 bg-emerald-500/15 border-emerald-500/30"
+    : value >= 40 ? "text-amber-400 bg-amber-500/15 border-amber-500/30"
+    : "text-slate-400 bg-slate-500/15 border-slate-500/30";
+  return (
+    <span className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-bold border ${color}`}>
+      <TrendingUp size={10} />
+      {value}
+    </span>
+  );
+}
+
 function SignalRow({ row }: { row: GovConfluenceRow }) {
   const [expanded, setExpanded] = useState(false);
   const score = fmtScore(row.confluence_score);
+  const invScore = fmtScore(row.investment_score ?? 0);
   const contract = fmtScore(row.contract_score);
   const congress = fmtScore(row.congress_score);
   const insider = fmtScore(row.insider_score);
@@ -51,6 +65,7 @@ function SignalRow({ row }: { row: GovConfluenceRow }) {
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[length:var(--t-sm)] font-bold text-white">{row.ticker}</span>
           <TierBadge tier={row.tier} />
+          <InvestBadge value={invScore} />
           {row.recommended_strategy && (
             <span className="text-[length:var(--t-2xs)] font-semibold text-indigo-300 uppercase">
               {row.recommended_strategy}
@@ -75,7 +90,7 @@ function SignalRow({ row }: { row: GovConfluenceRow }) {
 
       {expanded && (
         <div className="pt-2 border-t border-white/5 space-y-1.5">
-          <div className="grid grid-cols-4 gap-1.5 text-[length:var(--t-2xs)]">
+          <div className="grid grid-cols-5 gap-1.5 text-[length:var(--t-2xs)]">
             <div>
               <div className="text-slate-600">Contract</div>
               <div className="tabular-nums text-slate-300 font-semibold">{contract}</div>
@@ -91,6 +106,12 @@ function SignalRow({ row }: { row: GovConfluenceRow }) {
             <div>
               <div className="text-slate-600">Analyst</div>
               <div className="tabular-nums text-slate-300 font-semibold">{analyst}</div>
+            </div>
+            <div>
+              <div className="text-slate-600">Invest</div>
+              <div className={`tabular-nums font-semibold ${
+                invScore >= 60 ? "text-emerald-400" : invScore >= 40 ? "text-amber-400" : "text-slate-400"
+              }`}>{invScore}</div>
             </div>
           </div>
           {row.recommended_action && (

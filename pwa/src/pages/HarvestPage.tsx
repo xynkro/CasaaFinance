@@ -1,5 +1,8 @@
-import type { HarvestScanRow } from "../data";
+import type { HarvestScanRow, OptionRow } from "../data";
 import { HarvestPicksCard } from "../cards/HarvestPicksCard";
+import { ActiveHarvestCard, matchHarvestPositions } from "../cards/ActiveHarvestCard";
+import { Card } from "../cards/Card";
+import { BarChart3 } from "lucide-react";
 
 function MacroBanner({ picks }: { picks: HarvestScanRow[] }) {
   const regime = picks[0]?.macro_regime || "STANDARD";
@@ -22,26 +25,79 @@ function MacroBanner({ picks }: { picks: HarvestScanRow[] }) {
   );
 }
 
+function HarvestStatsCard({ options }: { options: OptionRow[] }) {
+  const cspPositions = options.filter(
+    (o) => o.right === "P" && Number(o.qty) < 0,
+  );
+  if (!cspPositions.length) return null;
+
+  const totalCredit = cspPositions.reduce((s, o) => s + Math.abs(Number(o.credit) || 0) * 100, 0);
+  const totalUpl = cspPositions.reduce((s, o) => s + (Number(o.upl) || 0), 0);
+  const winning = cspPositions.filter((o) => (Number(o.upl) || 0) > 0).length;
+  const winRate = cspPositions.length > 0 ? (winning / cspPositions.length) * 100 : 0;
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-3">
+        <BarChart3 size={14} className="text-indigo-400" />
+        <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Harvest Stats</h2>
+      </div>
+      <div className="grid grid-cols-4 gap-2 text-center">
+        <div>
+          <div className="text-[length:var(--t-2xs)] text-slate-600">Open CSPs</div>
+          <div className="text-[length:var(--t-sm)] font-bold text-white tabular-nums">{cspPositions.length}</div>
+        </div>
+        <div>
+          <div className="text-[length:var(--t-2xs)] text-slate-600">Credit</div>
+          <div className="text-[length:var(--t-sm)] font-bold text-emerald-400 tabular-nums">${totalCredit.toFixed(0)}</div>
+        </div>
+        <div>
+          <div className="text-[length:var(--t-2xs)] text-slate-600">P&L</div>
+          <div className={`text-[length:var(--t-sm)] font-bold tabular-nums ${totalUpl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+            {totalUpl >= 0 ? "+" : ""}${totalUpl.toFixed(0)}
+          </div>
+        </div>
+        <div>
+          <div className="text-[length:var(--t-2xs)] text-slate-600">Win Rate</div>
+          <div className="text-[length:var(--t-sm)] font-bold text-white tabular-nums">{winRate.toFixed(0)}%</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export function HarvestPage({
   harvestScan,
+  options,
   loading,
 }: {
   harvestScan: HarvestScanRow[];
+  options: OptionRow[];
   loading: boolean;
 }) {
-  if (loading && !harvestScan.length) {
+  if (loading && !harvestScan.length && !options.length) {
     return <div className="px-4 py-8 text-center text-slate-500 text-[length:var(--t-sm)]">Loading…</div>;
   }
 
-  // Filter out HALTED placeholder rows
   const picks = harvestScan.filter((r) => r.strategy !== "HALTED");
+  const activeHarvests = matchHarvestPositions(options, harvestScan);
 
   return (
     <div className="flex flex-col px-4 pb-4">
       <div className="fade-up fade-up-1 mt-3">
         <MacroBanner picks={harvestScan} />
       </div>
-      <div className="fade-up fade-up-2 mt-1">
+      {activeHarvests.length > 0 && (
+        <div className="fade-up fade-up-2 mt-1">
+          <ActiveHarvestCard harvests={activeHarvests} />
+        </div>
+      )}
+      {activeHarvests.length > 0 && (
+        <div className="fade-up fade-up-3 mt-3">
+          <HarvestStatsCard options={options} />
+        </div>
+      )}
+      <div className={`fade-up ${activeHarvests.length > 0 ? "fade-up-4" : "fade-up-2"} mt-3`}>
         <HarvestPicksCard picks={picks} />
       </div>
     </div>

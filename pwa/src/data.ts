@@ -68,7 +68,7 @@ const GIDS: Record<string, string> = {
   congress_trades: "870416250",
   snapshot_alpaca: "2094087184",
   positions_alpaca: "1331088115",
-  harvest_scan: "0",  // placeholder — update after first scan run creates the tab
+  harvest_scan: "1619087431",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -775,6 +775,7 @@ export interface GovConfluenceRow {
   contributing_congress_trades: string;
   contributing_insider_buys: string;
   updated_at: string;
+  investment_score?: string;
 }
 
 export interface AlpacaSnapshotRow {
