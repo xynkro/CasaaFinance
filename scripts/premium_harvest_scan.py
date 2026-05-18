@@ -35,7 +35,9 @@ sys.path.insert(0, str(ROOT))
 # ─── Harvest parameters ─────────────────────────────────────────────────────
 TARGET_DTE     = 35          # ideal DTE
 DTE_RANGE      = (25, 45)    # acceptable range
-CSP_OTM_RANGE  = (0.10, 0.18)  # 10-18% OTM (conservative — never assigned)
+CSP_OTM_FLOOR  = 0.10          # minimum 10% OTM regardless of vol
+CSP_OTM_CEIL   = 0.40          # maximum OTM distance (avoid zero-premium)
+CSP_VOL_SIGMA  = 1.0           # target ≥ 1σ OTM (vol-adjusted)
 MIN_OI         = 50          # minimum open interest
 MIN_MID        = 0.08        # minimum mid-price
 MIN_CSP_YIELD  = 14.0        # annualised yield floor
@@ -345,10 +347,20 @@ def scan_chain(ticker: str, ctx: dict, conviction: int, macro: dict, logger) -> 
             axis=1,
         )
         puts = puts[puts["mid"] >= MIN_MID]
-        # Strike 10-18% OTM (below current price)
+        # Vol-adjusted OTM range: ≥ 1σ move below spot, clamped to [10%, 25%].
+        # At 30% vol / 35 DTE this ≈ 9.3% → floor kicks in at 10%.
+        # At 99% vol / 35 DTE this ≈ 30.7% → ceiling caps at 25%.
+        # This prevents high-vol names (APLD, MSTR) from getting too-close strikes.
+        _vol = hv30 / 100 if hv30 > 0 else 0.30  # fallback 30% vol
+        _sigma_otm = CSP_VOL_SIGMA * _vol * math.sqrt(dte / 365)
+        _otm_min = max(CSP_OTM_FLOOR, _sigma_otm)
+        _otm_max = min(CSP_OTM_CEIL, _sigma_otm * 1.5)
+        # Ensure min < max (can happen when vol is very low)
+        if _otm_max <= _otm_min:
+            _otm_max = _otm_min + 0.05
         puts = puts[
-            (puts["strike"] >= price * (1 - CSP_OTM_RANGE[1]))
-            & (puts["strike"] <= price * (1 - CSP_OTM_RANGE[0]))
+            (puts["strike"] >= price * (1 - _otm_max))
+            & (puts["strike"] <= price * (1 - _otm_min))
         ]
         puts = puts.copy()
         puts["ann_yield"] = puts["mid"] / puts["strike"] * (365 / dte) * 100

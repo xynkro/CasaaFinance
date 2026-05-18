@@ -4,27 +4,22 @@ import type {
   PositionRow,
   TechnicalScoreRow,
   WheelNextLegRow,
-  ScanResultRow,
-  OptionRecommendationRow,
   ExitPlanRow,
   OptionsDefenseRow,
 } from "../data";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
-import { ScanCard } from "../cards/ScanCard";
 import { StickyTabs } from "../components/StickyTabs";
-import { Shield, Briefcase, Telescope } from "lucide-react";
+import { Shield, Briefcase } from "lucide-react";
 
-type Subtab = "defense" | "book" | "scan";
+type Subtab = "defense" | "book";
 const LAST_KEY = "casaa_options_subtab";
 
 export function OptionsPage({
   options,
   technicalScores,
   wheelNextLeg,
-  scanResults,
-  optionRecommendations,
   exitPlans,
   optionsDefense,
   casparPositions,
@@ -34,8 +29,6 @@ export function OptionsPage({
   options: OptionRow[];
   technicalScores: TechnicalScoreRow[];
   wheelNextLeg: WheelNextLegRow[];
-  scanResults: ScanResultRow[];
-  optionRecommendations: OptionRecommendationRow[];
   exitPlans: ExitPlanRow[];
   optionsDefense: OptionsDefenseRow[];
   casparPositions: PositionRow[];
@@ -45,7 +38,7 @@ export function OptionsPage({
   const [sub, setSub] = useState<Subtab>(() => {
     try {
       const saved = localStorage.getItem(LAST_KEY) as Subtab | null;
-      if (saved === "defense" || saved === "book" || saved === "scan") return saved;
+      if (saved === "defense" || saved === "book") return saved;
     } catch {
       // ignore
     }
@@ -65,7 +58,6 @@ export function OptionsPage({
     (d) => d.severity === "CRITICAL" || d.severity === "HIGH",
   ).length;
   const openPositions = options.length;
-  const scanCount = scanResults.length;
 
   return (
     <div className="flex flex-col px-4 pb-4">
@@ -76,7 +68,6 @@ export function OptionsPage({
         tabs={[
           { key: "defense", label: "Defense", icon: Shield,    badge: urgentDefense },
           { key: "book",    label: "Book",    icon: Briefcase, badge: openPositions },
-          { key: "scan",    label: "Scan",    icon: Telescope, badge: scanCount },
         ]}
       />
 
@@ -102,12 +93,6 @@ export function OptionsPage({
             <WheelContinuationCard rows={wheelNextLeg} />
           </div>
         </>
-      )}
-
-      {sub === "scan" && (
-        <div className="fade-up fade-up-1 mt-3">
-          <ScanCard candidates={scanResults} broadCandidates={optionRecommendations} />
-        </div>
       )}
     </div>
   );

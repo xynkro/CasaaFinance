@@ -109,8 +109,6 @@ function Dashboard() {
             options={data?.options ?? []}
             technicalScores={data?.technicalScores ?? []}
             wheelNextLeg={data?.wheelNextLeg ?? []}
-            scanResults={data?.scanResults ?? []}
-            optionRecommendations={data?.optionRecommendations ?? []}
             exitPlans={data?.exitPlans ?? []}
             optionsDefense={data?.optionsDefense ?? []}
             casparPositions={data?.casparPositions ?? []}
