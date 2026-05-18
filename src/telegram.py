@@ -1059,58 +1059,41 @@ def ping_harvest_scan(
     lines.append(f"Macro: {regime_emoji} {regime} (VIX {vix:.0f} · {spx_status})")
     lines.append(f"{len(candidates)} candidate{'s' if len(candidates) != 1 else ''}")
 
-    # Group by strategy
-    csps = [c for c in candidates if c.get("strategy") == "HARVEST_CSP"]
-    strangles = [c for c in candidates if c.get("strategy") == "HARVEST_STRANGLE"]
+    lines.append("")
+    lines.append(f"💰 <b>HARVEST_CSP</b> ({len(candidates)})")
 
-    for group, label, emoji in [
-        (csps, "HARVEST_CSP", "💰"),
-        (strangles, "HARVEST_STRANGLE", "🔀"),
-    ]:
-        if not group:
-            continue
-        lines.append("")
-        lines.append(f"{emoji} <b>{label}</b> ({len(group)})")
+    for c in candidates[:8]:
+        tk = _html.escape(str(c.get("ticker", "?")))
+        strike = float(c.get("strike", 0))
+        exp = str(c.get("expiry", ""))
+        if len(exp) == 8:
+            exp = f"{exp[4:6]}/{exp[6:]}"
+        dte = int(c.get("dte", 0))
+        credit = float(c.get("credit", 0))
+        yld = float(c.get("annual_yield_pct", 0))
+        ivr = float(c.get("iv_rank", 0))
+        conv = int(c.get("conviction", 0))
 
-        for c in group[:8]:
-            tk = _html.escape(str(c.get("ticker", "?")))
-            strike = float(c.get("strike", 0))
-            exp = str(c.get("expiry", ""))
-            if len(exp) == 8:
-                exp = f"{exp[4:6]}/{exp[6:]}"
-            dte = int(c.get("dte", 0))
-            credit = float(c.get("credit", 0))
-            yld = float(c.get("annual_yield_pct", 0))
-            ivr = float(c.get("iv_rank", 0))
-            conv = int(c.get("conviction", 0))
+        lines.append(
+            f"  <b>${tk}</b> ${strike:.0f}P {exp} ({dte}d)"
+            f" · <code>${credit:.2f}</code> cr · {yld:.0f}% ann · IVR≈{ivr:.0f} · Conv {conv}"
+        )
 
-            if c.get("strategy") == "HARVEST_STRANGLE":
-                call_strike = c.get("notes", "").replace("call_strike=", "")
-                lines.append(
-                    f"  <b>${tk}</b> ${strike:.0f}P/{call_strike}C {exp} ({dte}d)"
-                    f" · <code>${credit:.2f}</code> cr · {yld:.0f}% ann · Conv {conv}"
-                )
-            else:
-                lines.append(
-                    f"  <b>${tk}</b> ${strike:.0f}P {exp} ({dte}d)"
-                    f" · <code>${credit:.2f}</code> cr · {yld:.0f}% ann · IVR≈{ivr:.0f} · Conv {conv}"
-                )
-
-            # Maintenance + exit one-liner
-            try:
-                maint = _json.loads(c.get("maintenance_signals", "{}"))
-                exit_s = _json.loads(c.get("exit_signals", "{}"))
-                maint_parts = []
-                if maint.get("profit_target_pct"):
-                    maint_parts.append(f"{maint['profit_target_pct']}% profit")
-                if maint.get("time_stop_dte"):
-                    maint_parts.append(f"{maint['time_stop_dte']}DTE roll")
-                if exit_s.get("max_loss_value"):
-                    maint_parts.append(f"stop 2×(${exit_s['max_loss_value']:.2f})")
-                if maint_parts:
-                    lines.append(f"    📋 {' · '.join(maint_parts)}")
-            except Exception:
-                pass
+        # Maintenance + exit one-liner
+        try:
+            maint = _json.loads(c.get("maintenance_signals", "{}"))
+            exit_s = _json.loads(c.get("exit_signals", "{}"))
+            maint_parts = []
+            if maint.get("profit_target_pct"):
+                maint_parts.append(f"{maint['profit_target_pct']}% profit")
+            if maint.get("time_stop_dte"):
+                maint_parts.append(f"{maint['time_stop_dte']}DTE roll")
+            if exit_s.get("max_loss_value"):
+                maint_parts.append(f"stop 2×(${exit_s['max_loss_value']:.2f})")
+            if maint_parts:
+                lines.append(f"    📋 {' · '.join(maint_parts)}")
+        except Exception:
+            pass
 
     if pwa_url:
         lines.append("")

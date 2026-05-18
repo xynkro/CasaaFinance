@@ -2098,7 +2098,7 @@ class HarvestScanRow:
 
     date: str
     ticker: str
-    strategy: str           # HARVEST_CSP | HARVEST_STRANGLE
+    strategy: str           # HARVEST_CSP
     strike: float
     expiry: str             # YYYYMMDD
     dte: int

@@ -9,6 +9,7 @@ const MGMT_RULES: Record<string, { entry: string; manage: string; exit: string }
   CC:        { entry: "35 DTE · 10-20Δ · yield ≥10%",       manage: "Close at 50% profit · let ride if far OTM",              exit: "50% profit OR assignment → wheel into CSP" },
   PCS:       { entry: "42 DTE · 25Δ · credit ≥⅓ width",     manage: "Close at 50% profit · roll if short tested",             exit: "50% profit OR 21 DTE mech close · stop 2× credit" },
   CCS:       { entry: "42 DTE · 25Δ · credit ≥⅓ width",     manage: "Close at 50% profit · roll if short tested",             exit: "50% profit OR 21 DTE mech close · stop 2× credit" },
+  SHORT_STRANGLE: { entry: "35 DTE · CSP 20-30Δ + CC 10-20Δ",  manage: "Close untested if tested · 50% combined profit", exit: "50% profit OR max loss 2× credit per side" },
   IC:        { entry: "45 DTE · 20Δ shorts · cr/w ≥30%",    manage: "Close at 50% profit · roll untested if one side tested", exit: "50% profit OR 21 DTE mech close · stop 2× credit" },
   LONG_CALL: { entry: "45 DTE · 50Δ ATM · quality ≥40",     manage: "Trail stop at 50% max gain · re-eval at 21 DTE",        exit: "Take profit 50-100% gain · stop at 50% loss" },
   PMCC:      { entry: "LEAPS 70Δ ITM 9+mo · short 25Δ OTM", manage: "Roll short at 50% or 21 DTE · extrinsic rule",          exit: "Close if LEAPS <6mo · stop if LEAPS breached" },
@@ -235,6 +236,7 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
   const conf = Number(cand.thesis_confidence);
   const isCall = cand.right === "C";
   const isPut = cand.right === "P";
+  const isStrangle = cand.strategy === "SHORT_STRANGLE";
   const hasRight = isCall || isPut;
 
   // Confidence is 0-1, scale to 0-100 for the gauge
@@ -249,14 +251,16 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
       {/* Top row: ticker + strategy + strike + confidence ring */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          {hasRight && (isCall ? (
+          {isStrangle ? (
+            <Radar size={11} className="text-orange-400 shrink-0" />
+          ) : hasRight && (isCall ? (
             <TrendingDown size={11} className="text-amber-400 shrink-0" />
           ) : (
             <TrendingUp size={11} className="text-emerald-400 shrink-0" />
           ))}
           <span className="text-[length:var(--t-sm)] font-bold text-white">{cand.ticker}</span>
-          <span className="text-[length:var(--t-2xs)] font-semibold uppercase tracking-wide text-indigo-300">
-            {cand.strategy}
+          <span className={`text-[length:var(--t-2xs)] font-semibold uppercase tracking-wide ${isStrangle ? "text-orange-300" : "text-indigo-300"}`}>
+            {isStrangle ? "Strangle" : cand.strategy}
           </span>
           {hasRight && !isNaN(strike) && (
             <span className="text-[length:var(--t-2xs)] font-semibold text-slate-500">
@@ -272,10 +276,10 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
 
       {/* Key metrics */}
       <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
-        <span>Δ <span className="text-slate-300 tabular-nums">{isNaN(delta) ? "—" : delta.toFixed(2)}</span></span>
-        <span>Prem <span className="text-slate-300 tabular-nums">{isNaN(prem) ? "—" : fmtPrice(prem)}</span></span>
+        {!isStrangle && <span>Δ <span className="text-slate-300 tabular-nums">{isNaN(delta) ? "—" : delta.toFixed(2)}</span></span>}
+        <span>{isStrangle ? "Credit" : "Prem"} <span className="text-slate-300 tabular-nums">{isNaN(prem) ? "—" : fmtPrice(prem)}</span></span>
         <span>Yield <span className="text-emerald-400 tabular-nums font-semibold">{isNaN(yld) ? "—" : `${yld.toFixed(0)}%`}</span></span>
-        <span>Cash <span className="text-slate-300 tabular-nums">{isNaN(cash) ? "—" : fmtPrice(cash)}</span></span>
+        <span>{isStrangle ? "Collateral" : "Cash"} <span className="text-slate-300 tabular-nums">{isNaN(cash) ? "—" : fmtPrice(cash)}</span></span>
       </div>
 
       {expanded && (
@@ -314,7 +318,7 @@ function BroadCandidateItem({ cand }: { cand: OptionRecommendationRow }) {
 }
 
 type Source = "my-tickers" | "broad";
-type StratTab = "CSP" | "CC" | "PCS" | "CCS" | "IC" | "LONG_CALL" | "PMCC";
+type StratTab = "CSP" | "CC" | "SHORT_STRANGLE" | "PCS" | "CCS" | "IC" | "LONG_CALL" | "PMCC";
 
 export function ScanCard({
   candidates,
@@ -348,14 +352,16 @@ export function ScanCard({
   };
   const broadCsp = broad.filter((c) => c.strategy === "CSP").sort(broadSort).slice(0, 12);
   const broadCc = broad.filter((c) => c.strategy === "CC").sort(broadSort).slice(0, 12);
+  const broadStrangle = broad.filter((c) => c.strategy === "SHORT_STRANGLE").sort(broadSort).slice(0, 12);
   const broadLc = broad.filter((c) => c.strategy === "LONG_CALL").sort(broadSort).slice(0, 12);
 
+  const strangleList = candidates.filter((c) => c.strategy === "SHORT_STRANGLE").sort(sortByComposite).slice(0, 8);
   const myLists: Record<StratTab, ScanResultRow[]> = {
-    CSP: cspList, CC: ccList, PCS: pcsList, CCS: ccsList,
+    CSP: cspList, CC: ccList, SHORT_STRANGLE: strangleList, PCS: pcsList, CCS: ccsList,
     IC: icList, LONG_CALL: lcList, PMCC: pmccList,
   };
   const broadLists: Record<string, OptionRecommendationRow[]> = {
-    CSP: broadCsp, CC: broadCc, LONG_CALL: broadLc,
+    CSP: broadCsp, CC: broadCc, SHORT_STRANGLE: broadStrangle, LONG_CALL: broadLc,
   };
   const myActive = myLists[tab] ?? [];
   const broadActive = broadLists[tab] ?? [];
@@ -376,6 +382,7 @@ export function ScanCard({
           {([
             { key: "CSP"  as StratTab, label: "CSP",  active: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" },
             { key: "CC"   as StratTab, label: "CC",   active: "bg-amber-500/20 text-amber-400 border-amber-500/30" },
+            { key: "SHORT_STRANGLE" as StratTab, label: "Strangle", active: "bg-orange-500/20 text-orange-400 border-orange-500/30" },
             { key: "PCS"  as StratTab, label: "PCS",  active: "bg-cyan-500/20 text-cyan-400 border-cyan-500/30" },
             { key: "CCS"  as StratTab, label: "CCS",  active: "bg-rose-500/20 text-rose-400 border-rose-500/30" },
             { key: "IC"   as StratTab, label: "IC",   active: "bg-sky-500/20 text-sky-400 border-sky-500/30" },

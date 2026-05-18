@@ -36,11 +36,9 @@ sys.path.insert(0, str(ROOT))
 TARGET_DTE     = 35          # ideal DTE
 DTE_RANGE      = (25, 45)    # acceptable range
 CSP_OTM_RANGE  = (0.10, 0.18)  # 10-18% OTM (conservative — never assigned)
-CC_OTM_RANGE   = (0.05, 0.15)  # 5-15% OTM for call side of strangles
 MIN_OI         = 50          # minimum open interest
 MIN_MID        = 0.08        # minimum mid-price
 MIN_CSP_YIELD  = 14.0        # annualised yield floor
-MIN_CC_YIELD   = 10.0        # CC yield floor (for strangle detection)
 MAX_PICKS      = 25          # max picks per day
 TG_PICKS       = 8           # max picks sent to Telegram
 
@@ -431,60 +429,9 @@ def scan_chain(ticker: str, ctx: dict, conviction: int, macro: dict, logger) -> 
     except Exception as e:
         logger.debug(f"  {ticker}: CSP chain error — {e}")
 
-    # ── CC scan (for strangle detection) ──────────────────────────────────────
-    try:
-        calls = chain.calls.copy()
-        calls = calls[calls["openInterest"] >= MIN_OI]
-        calls["mid"] = calls.apply(
-            lambda r: (r["bid"] + r["ask"]) / 2
-            if (r.get("bid", 0) or 0) > 0 or (r.get("ask", 0) or 0) > 0
-            else (r.get("lastPrice", 0) or 0),
-            axis=1,
-        )
-        calls = calls[calls["mid"] >= MIN_MID]
-        # CC strike 5-15% OTM (above current price)
-        calls = calls[
-            (calls["strike"] >= price * (1 + CC_OTM_RANGE[0]))
-            & (calls["strike"] <= price * (1 + CC_OTM_RANGE[1]))
-        ]
-        calls = calls.copy()
-        calls["ann_yield"] = calls["mid"] / price * (365 / dte) * 100
-        calls = calls[calls["ann_yield"] >= MIN_CC_YIELD]
-        calls = calls.sort_values("ann_yield", ascending=False)
-
-        if not calls.empty and candidates:
-            # Both CSP + CC → merge into HARVEST_STRANGLE
-            cr = calls.iloc[0]
-            call_mid = float(cr["mid"])
-            call_strike = float(cr["strike"])
-            csp_rec = candidates[0]
-            combined_credit = csp_rec["credit"] + round(call_mid, 2)
-
-            # Overwrite the CSP candidate as a strangle
-            csp_rec["strategy"] = "HARVEST_STRANGLE"
-            csp_rec["credit"] = round(combined_credit, 2)
-            csp_rec["annual_yield_pct"] = round(
-                combined_credit / csp_rec["strike"] * (365 / dte) * 100, 1
-            )
-            csp_rec["notes"] = f"call_strike={call_strike:.2f}"
-
-            # Update signal blocks with strangle info
-            entry = json.loads(csp_rec["entry_signals"])
-            entry["strategy"] = "HARVEST_STRANGLE"
-            entry["credit"] = round(combined_credit, 2)
-            entry["call_strike"] = call_strike
-            csp_rec["entry_signals"] = json.dumps(entry)
-
-            maint = json.loads(csp_rec["maintenance_signals"])
-            maint["strangle_untested_close"] = True
-            csp_rec["maintenance_signals"] = json.dumps(maint)
-
-            exit_s = json.loads(csp_rec["exit_signals"])
-            exit_s["max_loss_value"] = round(combined_credit * 2, 2)
-            csp_rec["exit_signals"] = json.dumps(exit_s)
-
-    except Exception as e:
-        logger.debug(f"  {ticker}: CC chain error — {e}")
+    # CC scan removed — selling naked calls on stocks you don't own is
+    # undefined-risk. CSP-only is the harvest strategy. If both sides are
+    # wanted, use an iron condor (defined risk) instead.
 
     return candidates
 

@@ -278,23 +278,7 @@ def screen_ticker(ticker: str, hv30: float, logger: logging.Logger) -> list[dict
     except Exception as e:
         logger.debug(f"  {ticker}: CC screen error — {e}")
 
-    # ── Merge CSP+CC → SHORT_STRANGLE if both found ────────────────────
-    if len(recs) == 2 and recs[0]["strategy"] == "CSP" and recs[1]["strategy"] == "CC":
-        put_rec, call_rec = recs[0], recs[1]
-        combined_credit = put_rec["premium_per_share"] + call_rec["premium_per_share"]
-        merged = {
-            **put_rec,
-            "strategy": "SHORT_STRANGLE",
-            "right": "P+C",
-            "premium_per_share": round(combined_credit, 2),
-            "annual_yield_pct": round(
-                combined_credit / put_rec["strike"] * (365 / put_rec["dte"]) * 100, 1
-            ),
-        }
-        recs = [merged]
-        labels = [f"STRANGLE {merged['annual_yield_pct']:.1f}%/yr (P${put_rec['strike']:.0f}+C${call_rec['strike']:.0f})"]
-        logger.info(f"  ✓ {ticker:8} @ ${price:7.2f}  IV={merged['iv_rank']:.0f}%  HV30={hv30:.0f}%  → {', '.join(labels)}")
-    elif recs:
+    if recs:
         labels = [f"{r['strategy']} {r['annual_yield_pct']:.1f}%/yr" for r in recs]
         logger.info(f"  ✓ {ticker:8} @ ${price:7.2f}  IV={recs[0]['iv_rank']:.0f}%  HV30={hv30:.0f}%  → {', '.join(labels)}")
     else:
