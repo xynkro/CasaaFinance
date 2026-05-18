@@ -6,14 +6,16 @@ import type {
   WheelNextLegRow,
   ExitPlanRow,
   OptionsDefenseRow,
+  HarvestScanRow,
 } from "../data";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
+import { HarvestContent } from "./HarvestPage";
 import { StickyTabs } from "../components/StickyTabs";
-import { Shield, Briefcase } from "lucide-react";
+import { Shield, Briefcase, Wheat } from "lucide-react";
 
-type Subtab = "defense" | "book";
+type Subtab = "defense" | "book" | "harvest";
 const LAST_KEY = "casaa_options_subtab";
 
 export function OptionsPage({
@@ -24,6 +26,7 @@ export function OptionsPage({
   optionsDefense,
   casparPositions,
   sarahPositions,
+  harvestScan,
   loading,
 }: {
   options: OptionRow[];
@@ -33,12 +36,13 @@ export function OptionsPage({
   optionsDefense: OptionsDefenseRow[];
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
+  harvestScan: HarvestScanRow[];
   loading: boolean;
 }) {
   const [sub, setSub] = useState<Subtab>(() => {
     try {
       const saved = localStorage.getItem(LAST_KEY) as Subtab | null;
-      if (saved === "defense" || saved === "book") return saved;
+      if (saved === "defense" || saved === "book" || saved === "harvest") return saved;
     } catch {
       // ignore
     }
@@ -58,6 +62,7 @@ export function OptionsPage({
     (d) => d.severity === "CRITICAL" || d.severity === "HIGH",
   ).length;
   const openPositions = options.length;
+  const harvestCount = harvestScan.filter((r) => r.strategy !== "HALTED").length;
 
   return (
     <div className="flex flex-col px-4 pb-4">
@@ -68,6 +73,7 @@ export function OptionsPage({
         tabs={[
           { key: "defense", label: "Defense", icon: Shield,    badge: urgentDefense },
           { key: "book",    label: "Book",    icon: Briefcase, badge: openPositions },
+          { key: "harvest", label: "Harvest", icon: Wheat,     badge: harvestCount },
         ]}
       />
 
@@ -93,6 +99,10 @@ export function OptionsPage({
             <WheelContinuationCard rows={wheelNextLeg} />
           </div>
         </>
+      )}
+
+      {sub === "harvest" && (
+        <HarvestContent harvestScan={harvestScan} options={options} loading={loading} />
       )}
     </div>
   );

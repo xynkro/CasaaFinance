@@ -3,6 +3,15 @@ import type { HarvestScanRow } from "../data";
 import { Card } from "./Card";
 import { Wheat, ChevronDown, ChevronUp } from "lucide-react";
 
+const SHORT_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function fmtExpiry(s: string | undefined): string {
+  if (!s) return "—";
+  const [y, m, d] = s.split("-").map(Number);
+  if (!y || !m || !d) return s;
+  return `${SHORT_MONTHS[m - 1]} ${d}`;
+}
+
 function convColor(c: number) {
   if (c >= 75) return "text-emerald-400 bg-emerald-500/15 border-emerald-500/30";
   if (c >= 50) return "text-amber-400 bg-amber-500/15 border-amber-500/30";
@@ -32,7 +41,7 @@ function PickRow({ row }: { row: HarvestScanRow }) {
           {conv}
         </span>
         <span className="text-[length:var(--t-xs)] text-slate-400 ml-auto">
-          ${strike.toFixed(0)}P
+          ${strike.toFixed(0)}P · {fmtExpiry(row.expiry)}
         </span>
         <span className="text-[length:var(--t-xs)] text-emerald-400 font-mono">${credit.toFixed(2)}</span>
         {expanded ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}

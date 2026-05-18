@@ -66,7 +66,8 @@ function HarvestStatsCard({ options }: { options: OptionRow[] }) {
   );
 }
 
-export function HarvestPage({
+/** Inner content without outer wrapper — used as Options subtab. */
+export function HarvestContent({
   harvestScan,
   options,
   loading,
@@ -76,14 +77,14 @@ export function HarvestPage({
   loading: boolean;
 }) {
   if (loading && !harvestScan.length && !options.length) {
-    return <div className="px-4 py-8 text-center text-slate-500 text-[length:var(--t-sm)]">Loading…</div>;
+    return <div className="py-8 text-center text-slate-500 text-[length:var(--t-sm)]">Loading…</div>;
   }
 
   const picks = harvestScan.filter((r) => r.strategy !== "HALTED");
   const activeHarvests = matchHarvestPositions(options, harvestScan);
 
   return (
-    <div className="flex flex-col px-4 pb-4">
+    <>
       <div className="fade-up fade-up-1 mt-3">
         <MacroBanner picks={harvestScan} />
       </div>
@@ -100,6 +101,6 @@ export function HarvestPage({
       <div className={`fade-up ${activeHarvests.length > 0 ? "fade-up-4" : "fade-up-2"} mt-3`}>
         <HarvestPicksCard picks={picks} />
       </div>
-    </div>
+    </>
   );
 }

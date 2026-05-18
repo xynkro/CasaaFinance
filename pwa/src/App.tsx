@@ -9,7 +9,6 @@ import { PullToRefresh } from "./components/PullToRefresh";
 import { HomePage } from "./pages/HomePage";
 import { PortfolioPage } from "./pages/PortfolioPage";
 import { OptionsPage } from "./pages/OptionsPage";
-import { HarvestPage } from "./pages/HarvestPage";
 import { ScannerPage } from "./pages/ScannerPage";
 import { InsiderPage } from "./pages/InsiderPage";
 import { DecisionsPage } from "./pages/DecisionsPage";
@@ -19,8 +18,8 @@ import { StockDetail } from "./components/StockDetail";
 import { TickerLookupSheet } from "./components/TickerLookupSheet";
 import { RefreshCw, Search } from "lucide-react";
 
-const TAB_TITLES = ["Home", "Portfolio", "Options", "Harvest", "Scanner", "Insider", "Decisions", "Review", "Settings"];
-const SETTINGS_TAB = 8;
+const TAB_TITLES = ["Home", "Portfolio", "Options", "Scanner", "Insider", "Decisions", "Review", "Settings"];
+const SETTINGS_TAB = 7;
 
 function Dashboard() {
   const { settings, update: updateSettings } = useSettings();
@@ -113,20 +112,13 @@ function Dashboard() {
             optionsDefense={data?.optionsDefense ?? []}
             casparPositions={data?.casparPositions ?? []}
             sarahPositions={data?.sarahPositions ?? []}
+            harvestScan={data?.harvestScan ?? []}
             loading={loading && !data}
           />
         );
       case 3:
-        return (
-          <HarvestPage
-            harvestScan={data?.harvestScan ?? []}
-            options={data?.options ?? []}
-            loading={loading && !data}
-          />
-        );
-      case 4:
         return <ScannerPage ivSurfaceScan={data?.ivSurfaceScan ?? []} loading={loading && !data} />;
-      case 5:
+      case 4:
         return (
           <InsiderPage
             govConfluence={data?.govConfluence ?? []}
@@ -135,7 +127,7 @@ function Dashboard() {
             loading={loading && !data}
           />
         );
-      case 6:
+      case 5:
         return (
           <DecisionsPage
             decisions={data?.decisions ?? []}
@@ -158,7 +150,7 @@ function Dashboard() {
             livePrices={data?.livePrices ?? new Map()}
           />
         );
-      case 7:
+      case 6:
         return (
           <ReviewPage
             decisionsAll={data?.decisionsAll ?? []}
@@ -171,7 +163,7 @@ function Dashboard() {
             livePrices={data?.livePrices ?? new Map()}
           />
         );
-      case 8:
+      case 7:
         return (
           <SettingsPage
             settings={settings}

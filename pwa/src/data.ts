@@ -16,8 +16,6 @@ const GIDS: Record<string, string> = {
   options: "326503132",
   technical_scores: "657341624",
   wheel_next_leg: "805863395",
-  scan_results: "1133435061",
-  option_recommendations: "129728101",
   exit_plans: "515412556",
   options_defense: "1717646002",
   wsr_summary: "607663282",
@@ -259,51 +257,6 @@ export interface ExitPlanRow {
   status: string;              // HEALTHY/WARNING/STOP_TRIGGERED/T1_HIT/T2_HIT/BAG/TIME_STOP/PROFIT_TARGET_HIT/ROLL_OR_ASSIGN/LET_EXPIRE/BREACH_WARNING/CATALYST_WARNING
   recommendation: string;
   reasoning: string;
-}
-
-export interface ScanResultRow {
-  date: string;
-  ticker: string;
-  strategy: string;           // "CSP" | "CC"
-  right: string;
-  strike: string;
-  expiry: string;
-  dte: string;
-  delta: string;
-  premium: string;
-  bid: string;
-  ask: string;
-  annual_yield_pct: string;
-  cash_required: string;
-  breakeven: string;
-  iv: string;
-  iv_rank: string;
-  spread_pct: string;
-  underlying_last: string;
-  technical_score: string;
-  composite_score: string;
-  catalyst_flag: string;
-  notes?: string;             // multi-leg detail (IC/PCS/CCS/PMCC)
-}
-
-export interface OptionRecommendationRow {
-  date: string;
-  source: string;             // "market_scan" | "wheel_continuation" | etc.
-  account: string;            // "watchlist" | "caspar" | "sarah"
-  ticker: string;
-  strategy: string;           // "BUY_DIP" | "CSP" | "CC" | "PMCC" | "LONG_CALL" | "LONG_PUT"
-  right: string;              // "C" | "P" | ""
-  strike: string;
-  expiry: string;             // "YYYY-MM-DD"
-  premium_per_share: string;
-  delta: string;
-  annual_yield_pct: string;
-  breakeven: string;
-  cash_required: string;
-  iv_rank: string;
-  thesis_confidence: string;
-  thesis: string;
-  status: string;             // "NEW" | etc.
 }
 
 export interface TechnicalScoreRow {
@@ -1176,8 +1129,6 @@ export interface DashboardData {
   technicalScores: TechnicalScoreRow[];
   technicalScoresHistory: TechnicalScoreRow[];  // full history for sparklines
   wheelNextLeg: WheelNextLegRow[];
-  scanResults: ScanResultRow[];
-  optionRecommendations: OptionRecommendationRow[];  // market_scan source, latest date only
   exitPlans: ExitPlanRow[];
   optionsDefense: OptionsDefenseRow[];
   wsrSummary: WsrSummaryRow | null;
@@ -1246,7 +1197,7 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
-    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, scanRows, optRecRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows, regimeRows, postureRows, screenRows, tvRows, riskParityRows] =
+    const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows, regimeRows, postureRows, screenRows, tvRows, riskParityRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),
         fetchTab<Record<string, string>>("snapshot_caspar"),
@@ -1256,8 +1207,6 @@ export async function fetchDashboard(): Promise<DashboardData> {
         fetchTab<OptionRow>("options").catch(() => [] as OptionRow[]),
         fetchTab<TechnicalScoreRow>("technical_scores").catch(() => [] as TechnicalScoreRow[]),
         fetchTab<WheelNextLegRow>("wheel_next_leg").catch(() => [] as WheelNextLegRow[]),
-        fetchTab<ScanResultRow>("scan_results").catch(() => [] as ScanResultRow[]),
-        fetchTab<OptionRecommendationRow>("option_recommendations").catch(() => [] as OptionRecommendationRow[]),
         fetchTab<ExitPlanRow>("exit_plans").catch(() => [] as ExitPlanRow[]),
         fetchTab<OptionsDefenseRow>("options_defense").catch(() => [] as OptionsDefenseRow[]),
         fetchTab<WsrSummaryRow>("wsr_summary").catch(() => [] as WsrSummaryRow[]),
@@ -1340,17 +1289,6 @@ export async function fetchDashboard(): Promise<DashboardData> {
       technicalScores: latestGroup(techRows),
       technicalScoresHistory: sortByDate(techRows),
       wheelNextLeg: latestGroup(wheelRows),
-      scanResults: latestGroup(scanRows),
-      optionRecommendations: (() => {
-        // Filter to market_scan source, then take rows from the latest day (YYYY-MM-DD prefix).
-        const ms = optRecRows.filter((r) => r.source === "market_scan" && r.date);
-        if (!ms.length) return [];
-        const latestDay = ms.reduce(
-          (acc, r) => (r.date.slice(0, 10) > acc ? r.date.slice(0, 10) : acc),
-          "",
-        );
-        return ms.filter((r) => r.date.slice(0, 10) === latestDay);
-      })(),
       exitPlans: latestGroup(exitRows),
       optionsDefense: latestGroup(defenseRows),
       wsrSummary: (() => {
@@ -1404,7 +1342,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       dailyHistory: [], daily: null, caspar: null, sarah: null,
       casparPositions: [], sarahPositions: [], options: [],
       technicalScores: [], technicalScoresHistory: [],
-      wheelNextLeg: [], scanResults: [], optionRecommendations: [], exitPlans: [], optionsDefense: [],
+      wheelNextLeg: [], exitPlans: [], optionsDefense: [],
       wsrSummary: null, wsrLite: null, decisions: [], decisionsAll: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [],
