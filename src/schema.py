@@ -2132,3 +2132,58 @@ class HarvestScanRow:
             self.entry_signals, self.maintenance_signals, self.exit_signals,
             self.notes,
         ]
+
+
+@dataclass
+class IvSurfaceScanRow:
+    """IV surface scanner output — one row per option contract per day.
+
+    The key metric is iv_excess: actual IV minus fitted IV surface value
+    in percentage points. Positive = rich premium (sell candidate).
+    Negative = cheap (skip or buy).
+    """
+    TAB_NAME = "iv_surface_scan"
+    HEADERS = [
+        "date", "ticker", "type", "strike", "expiry", "dte", "spot",
+        "iv", "iv_fitted", "iv_excess",
+        "delta", "bid", "ask", "mid", "ann_yield_pct",
+        "oi", "volume", "spread_pct",
+        "assignment_risk", "earnings_before_expiry",
+    ]
+
+    date: str
+    ticker: str
+    type: str               # "P" or "C"
+    strike: float
+    expiry: str             # YYYY-MM-DD
+    dte: int
+    spot: float
+    iv: float               # actual implied vol (0-1 scale)
+    iv_fitted: float        # fitted surface value
+    iv_excess: float        # iv - iv_fitted in percentage points
+    delta: float            # Black-Scholes delta
+    bid: float
+    ask: float
+    mid: float
+    ann_yield_pct: float    # annualised yield on capital at risk
+    oi: int                 # open interest
+    volume: int
+    spread_pct: float       # bid-ask spread as %
+    assignment_risk: str    # "LOW" | "MEDIUM" | "HIGH"
+    earnings_before_expiry: bool
+
+    def to_row(self) -> List[str]:
+        return [
+            self.date, self.ticker, self.type,
+            _num(self.strike, 2), self.expiry, str(self.dte),
+            _num(self.spot, 2),
+            _num(self.iv, 4), _num(self.iv_fitted, 4),
+            _num(self.iv_excess, 2),
+            _num(self.delta, 4),
+            _num(self.bid, 2), _num(self.ask, 2), _num(self.mid, 2),
+            _num(self.ann_yield_pct, 1),
+            str(self.oi), str(self.volume),
+            _num(self.spread_pct, 1),
+            self.assignment_risk,
+            "TRUE" if self.earnings_before_expiry else "",
+        ]
