@@ -69,7 +69,7 @@ const GIDS: Record<string, string> = {
   snapshot_alpaca: "2094087184",
   positions_alpaca: "1331088115",
   harvest_scan: "1619087431",
-  iv_surface_scan: "0",  // placeholder — update after first scan creates the tab
+  iv_surface_scan: "1665887293",
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
