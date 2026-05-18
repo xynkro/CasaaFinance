@@ -1,11 +1,12 @@
 import { useRef, useEffect, useState } from "react";
-import { Home, Briefcase, CircleDot, Wheat, Landmark, Target, LineChart, Settings } from "lucide-react";
+import { Home, Briefcase, CircleDot, Wheat, Scan, Landmark, Target, LineChart, Settings } from "lucide-react";
 
 const TABS = [
   { icon: Home,       label: "Home"      },
   { icon: Briefcase,  label: "Portfolio" },
   { icon: CircleDot,  label: "Options"   },
   { icon: Wheat,      label: "Harvest"   },
+  { icon: Scan,       label: "Scanner"   },
   { icon: Landmark,   label: "Insider"   },
   { icon: Target,     label: "Decisions" },
   { icon: LineChart,  label: "Review"    },
