@@ -69,6 +69,7 @@ const GIDS: Record<string, string> = {
   snapshot_alpaca: "2094087184",
   positions_alpaca: "1331088115",
   harvest_scan: "1619087431",
+  iv_surface_scan: "0",  // placeholder — update after first scan creates the tab
 };
 
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
@@ -822,6 +823,29 @@ export interface HarvestScanRow {
   notes: string;
 }
 
+export interface IvSurfaceScanRow {
+  date?: string;
+  ticker?: string;
+  type?: string;        // "P" or "C"
+  strike?: string;
+  expiry?: string;
+  dte?: string;
+  spot?: string;
+  iv?: string;
+  iv_fitted?: string;
+  iv_excess?: string;   // percentage points above fitted surface
+  delta?: string;
+  bid?: string;
+  ask?: string;
+  mid?: string;
+  ann_yield_pct?: string;
+  oi?: string;
+  volume?: string;
+  spread_pct?: string;
+  assignment_risk?: string;  // "LOW" | "MEDIUM" | "HIGH"
+  earnings_before_expiry?: string;
+}
+
 export interface CongressTradeRow {
   audit_ts: string;
   filing_id: string;
@@ -1189,6 +1213,7 @@ export interface DashboardData {
   govConfluence: GovConfluenceRow[];     // today's gov confluence signals (score ≥ 10)
   congressTrades: CongressTradeRow[];    // recent politician trades (last 7 days)
   harvestScan: HarvestScanRow[];        // premium harvest picks (today)
+  ivSurfaceScan: IvSurfaceScanRow[];
   alpaca: AlpacaSnapshotRow | null;
   alpacaPositions: AlpacaPositionRow[];
   error: string | null;
@@ -1264,6 +1289,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       govConfRows,
       congressRows,
       harvestScanRows,
+      ivSurfaceScanRows,
       alpacaSnapRaw,
       alpacaPosRows,
     ] = await Promise.all([
@@ -1277,6 +1303,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTab<GovConfluenceRow>("gov_confluence_signals").catch(() => [] as GovConfluenceRow[]),
       fetchTab<CongressTradeRow>("congress_trades").catch(() => [] as CongressTradeRow[]),
       fetchTab<HarvestScanRow>("harvest_scan").catch(() => [] as HarvestScanRow[]),
+      fetchTab<IvSurfaceScanRow>("iv_surface_scan").catch(() => [] as IvSurfaceScanRow[]),
       fetchTab<Record<string, string>>("snapshot_alpaca").catch(() => [] as Record<string, string>[]),
       fetchTab<AlpacaPositionRow>("positions_alpaca").catch(() => [] as AlpacaPositionRow[]),
     ]);
@@ -1364,6 +1391,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
           .sort((a, b) => (b.transaction_date || b.filing_date || "").localeCompare(a.transaction_date || a.filing_date || ""));
       })(),
       harvestScan: latestGroup(harvestScanRows),
+      ivSurfaceScan: ivSurfaceScanRows,
       alpaca: (() => {
         const rows = normalizeSnapshot(alpacaSnapRaw) as unknown as AlpacaSnapshotRow[];
         return rows.length ? rows.reduce((a, b) => (a.date > b.date ? a : b)) : null;
@@ -1396,6 +1424,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       govConfluence: [],
       congressTrades: [],
       harvestScan: [],
+      ivSurfaceScan: [],
       alpaca: null,
       alpacaPositions: [],
       error: String(e),
