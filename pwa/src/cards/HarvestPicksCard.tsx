@@ -7,8 +7,18 @@ const SHORT_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct
 
 function fmtExpiry(s: string | undefined): string {
   if (!s) return "—";
-  const [y, m, d] = s.split("-").map(Number);
-  if (!y || !m || !d) return s;
+  let y: number, m: number, d: number;
+  if (s.includes("-")) {
+    [y, m, d] = s.split("-").map(Number);
+  } else if (s.length === 8) {
+    // "YYYYMMDD" format from scan
+    y = Number(s.slice(0, 4));
+    m = Number(s.slice(4, 6));
+    d = Number(s.slice(6, 8));
+  } else {
+    return s;
+  }
+  if (!y || !m || !d || m < 1 || m > 12) return s;
   return `${SHORT_MONTHS[m - 1]} ${d}`;
 }
 

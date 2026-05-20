@@ -369,6 +369,7 @@ def top_signal_reasons(ind: dict[str, Any], strategy: str, limit: int = 3) -> li
         "momentum": "Momentum", "volume_spike": "Volume",
         "divergence": "Divergence", "candle": "Candle",
         "fib_support": "Fib position",
+        "volatility": "Volatility", "vol_regime": "Vol regime",
     }
     out = []
     for sig_name, contrib, raw in contributions[:limit]:
