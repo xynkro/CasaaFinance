@@ -33,13 +33,18 @@ ParseMode = Literal["none", "MarkdownV2", "HTML"]
 # different chat without code change.
 # ────────────────────────────────────────────────────────────────────
 FINANCE_CHAT_ID = os.environ.get("TELEGRAM_FINANCE_CHAT_ID", "-1003942004211")
-MULTI_DAY_SWING_TOPIC = int(os.environ.get("TELEGRAM_MULTI_DAY_SWING_TOPIC", "3"))
-MACRO_NEWS_TOPIC = int(os.environ.get("TELEGRAM_MACRO_NEWS_TOPIC", "6"))
-OPTIONS_INTEL_TOPIC = int(os.environ.get("TELEGRAM_OPTIONS_INTEL_TOPIC", "492"))
 
-# Insider Trading topic (510) in the Finance & Trading supergroup.
-# Overridable via secret if topic ID changes.
-INSIDER_TRADING_TOPIC: int = int(os.environ.get("TELEGRAM_INSIDER_TRADING_TOPIC", "510"))
+
+def _env_int(key: str, default: int) -> int:
+    """Read an env var as int, falling back to *default* when missing OR empty."""
+    val = os.environ.get(key, "").strip()
+    return int(val) if val else default
+
+
+MULTI_DAY_SWING_TOPIC = _env_int("TELEGRAM_MULTI_DAY_SWING_TOPIC", 3)
+MACRO_NEWS_TOPIC = _env_int("TELEGRAM_MACRO_NEWS_TOPIC", 6)
+OPTIONS_INTEL_TOPIC = _env_int("TELEGRAM_OPTIONS_INTEL_TOPIC", 492)
+INSIDER_TRADING_TOPIC = _env_int("TELEGRAM_INSIDER_TRADING_TOPIC", 510)
 
 # Personal-chat fallback — not used by the production helpers below
 # but kept as a backstop for ad-hoc scripts that pre-date routing.
