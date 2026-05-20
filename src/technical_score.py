@@ -137,6 +137,31 @@ def _sig_fib_support(close: float, support: float, resistance: float) -> float:
     return max(-1.0, min(1.0, 1 - 2 * position))
 
 
+def _sig_volatility(vol_annual: float) -> float:
+    """
+    Realized volatility level, continuous [-1, +1].
+    Centre at 30% (typical large-cap), scale so 60%+ → +1, near 0% → -1.
+    Positive = high vol (rich premiums but wider moves).
+    """
+    if vol_annual <= 0:
+        return 0.0
+    # 0.30 centre, ±0.30 range → [-1, +1]
+    return max(-1.0, min(1.0, (vol_annual - 0.30) / 0.30))
+
+
+def _sig_vol_regime(regime: str) -> float:
+    """
+    Vol regime classification. earnings_approaching is a hard negative for
+    option sellers (binary event risk). high_vol is a moderate signal.
+    """
+    return {
+        "earnings_approaching": -1.0,  # don't sell options into earnings
+        "high_vol": 0.5,               # rich premiums but wider swings
+        "normal": 0.0,
+        "low_vol": -0.3,               # premiums thin, not worth selling
+    }.get(regime, 0.0)
+
+
 # -----------------------------------------------------------------------------
 # Strategy weights. The key is each strategy's *preference* for the signal.
 # Positive weight on a signal means the strategy benefits when that signal is
@@ -165,10 +190,12 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "divergence":     +2,
         "candle":         +2,
         "fib_support":    +3,   # near support = good buy zone
+        "volatility":     -2,   # high vol = wider drawdowns, worse entry
+        "vol_regime":     +1,   # earnings_approaching(-1) penalizes; high_vol(+0.5) mild boost
     },
     "CSP": {
         # Cash-secured put seller: wants oversold + support holding + bullish reversal
-        # so the put expires worthless
+        # so the put expires worthless. High vol = rich premiums but assignment risk.
         "rsi":            -4,   # oversold helps (negative RSI signal = bullish)
         "macd":           +3,   # bullish momentum keeps price up
         "macd_cross":     +4,
@@ -181,10 +208,12 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "divergence":     +4,   # bullish divergence strong
         "candle":         +3,
         "fib_support":    +5,   # near support best CSP entry
+        "volatility":     -4,   # HIGH vol = assignment risk dominates premium
+        "vol_regime":     +6,   # earnings(-1)→−6 penalty; high_vol(+0.5)→+3 premium boost
     },
     "CC": {
         # Covered call seller: wants overbought + resistance + bearish reversal
-        # so the call expires worthless
+        # so the call expires worthless. High vol = richer CC premiums.
         "rsi":            +4,   # overbought helps (call expiry OTM)
         "macd":           -2,   # bearish momentum helps the CC
         "macd_cross":     -3,
@@ -197,6 +226,8 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "divergence":     -3,   # bearish divergence helps the CC seller
         "candle":         -2,
         "fib_support":    -3,   # near support = upside setup = bad for CC
+        "volatility":     +3,   # high vol = rich CC premiums, stock already owned
+        "vol_regime":     +4,   # earnings(-1)→−4 gap risk; high_vol(+0.5)→+2 premium boost
     },
     "LONG_CALL": {
         "rsi":            -2,
@@ -211,6 +242,8 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "divergence":     +3,
         "candle":         +2,
         "fib_support":    +3,
+        "volatility":     -3,   # high vol = expensive options, theta bleeds faster
+        "vol_regime":     +2,   # earnings(-1)→−2 IV crush risk
     },
     "LONG_PUT": {
         "rsi":            +3,
@@ -225,6 +258,8 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "divergence":     -3,
         "candle":         -2,
         "fib_support":    -2,
+        "volatility":     -2,   # high vol = expensive puts too
+        "vol_regime":     +1,   # earnings = directional gamble, not our edge
     },
 }
 
@@ -248,6 +283,8 @@ def compute_signals(ind: dict[str, Any]) -> dict[str, float]:
             ind.get("support", 0.0),
             ind.get("resistance", 0.0),
         ),
+        "volatility":   _sig_volatility(ind.get("volatility_annual", 0.0)),
+        "vol_regime":   _sig_vol_regime(ind.get("vol_regime", "normal")),
     }
 
 
