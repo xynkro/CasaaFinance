@@ -146,14 +146,12 @@ def _find_target_expiry(yahoo_sym: str) -> Optional[str]:
     return best_exp
 
 
+# IV Rank: delegated to src/iv_rank.py for robust computation.
+# Kept as thin wrapper for backward compatibility with callers in this file.
 def _iv_rank(iv_now: float, iv_history: list[float]) -> float:
-    """IV percentile over history (0-100)."""
-    if not iv_history or iv_now <= 0:
-        return 0.0
-    low, high = min(iv_history), max(iv_history)
-    if high <= low:
-        return 50.0
-    return round((iv_now - low) / (high - low) * 100, 1)
+    """IV percentile over history (0-100). -1 if insufficient data."""
+    from src.iv_rank import compute_iv_rank
+    return compute_iv_rank(iv_now, iv_history)
 
 
 def _scan_one_side(
