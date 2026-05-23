@@ -38,18 +38,81 @@ def _norm_cdf(x: float) -> float:
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
+def _norm_pdf(x: float) -> float:
+    """Standard normal PDF."""
+    return math.exp(-0.5 * x * x) / math.sqrt(2 * math.pi)
+
+
+def _d1(S: float, K: float, T: float, sigma: float, r: float) -> float:
+    """Black-Scholes d1. Shared by all Greeks."""
+    return (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+
+
 def bs_delta(S: float, K: float, T: float, sigma: float, r: float, right: str) -> float:
     """Black-Scholes delta."""
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return 0.0
     try:
-        d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * math.sqrt(T))
+        d1 = _d1(S, K, T, sigma, r)
     except (ValueError, ZeroDivisionError):
         return 0.0
     if right == "C":
         return _norm_cdf(d1)
     else:
         return _norm_cdf(d1) - 1.0
+
+
+def bs_gamma(S: float, K: float, T: float, sigma: float, r: float) -> float:
+    """
+    Black-Scholes gamma (same for calls and puts).
+    Measures rate of change of delta per $1 move in underlying.
+    Short-gamma positions bleed when underlying moves — critical for CSP/CC sellers.
+    """
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0.0
+    try:
+        d1 = _d1(S, K, T, sigma, r)
+        return _norm_pdf(d1) / (S * sigma * math.sqrt(T))
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def bs_theta(S: float, K: float, T: float, sigma: float, r: float, right: str) -> float:
+    """
+    Black-Scholes theta (per calendar day).
+    Negative for long options (time decay).
+    Short options: positive theta = you collect time decay.
+    """
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0.0
+    try:
+        d1 = _d1(S, K, T, sigma, r)
+        d2 = d1 - sigma * math.sqrt(T)
+        nprime = _norm_pdf(d1)
+        term1 = -(S * nprime * sigma) / (2 * math.sqrt(T))
+        if right == "C":
+            term2 = -r * K * math.exp(-r * T) * _norm_cdf(d2)
+            theta_annual = term1 + term2
+        else:  # Put
+            term2 = r * K * math.exp(-r * T) * _norm_cdf(-d2)
+            theta_annual = term1 + term2
+        return theta_annual / 365  # per calendar day
+    except (ValueError, ZeroDivisionError):
+        return 0.0
+
+
+def bs_vega(S: float, K: float, T: float, sigma: float, r: float) -> float:
+    """
+    Black-Scholes vega: price change per 1 percentage point (0.01) IV change.
+    Same for calls and puts. Used to gauge IV-spike exposure.
+    """
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return 0.0
+    try:
+        d1 = _d1(S, K, T, sigma, r)
+        return S * _norm_pdf(d1) * math.sqrt(T) / 100  # per 1% IV change
+    except (ValueError, ZeroDivisionError):
+        return 0.0
 
 
 def _fmt_yahoo_ticker(sym: str, sgx_tickers: set[str]) -> str:
