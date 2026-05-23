@@ -175,6 +175,16 @@ def _sig_iv_rv_ratio(iv: float, rv: float) -> float:
     return max(-1.0, min(1.0, (ratio - 1.0) * 2.0))
 
 
+def _sig_term_structure(ts_slope: float) -> float:
+    """
+    Term structure slope signal.
+    Positive slope (contango) = favorable for selling vol.
+    Negative (backwardation) = stressed, unfavorable.
+    Typical range [-0.5, +0.5], mapped to [-1, +1].
+    """
+    return max(-1.0, min(1.0, ts_slope * 2.0))
+
+
 # -----------------------------------------------------------------------------
 # Strategy weights. The key is each strategy's *preference* for the signal.
 # Positive weight on a signal means the strategy benefits when that signal is
@@ -206,6 +216,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "volatility":     -2,   # high vol = wider drawdowns, worse entry
         "vol_regime":     +1,   # earnings_approaching(-1) penalizes; high_vol(+0.5) mild boost
         "iv_rv_ratio":    -1,   # rich premium = expensive options to buy
+        "term_structure": -1,   # contango = expensive options
     },
     "CSP": {
         # Cash-secured put seller: wants oversold + support holding + bullish reversal
@@ -225,6 +236,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "volatility":     -4,   # HIGH vol = assignment risk dominates premium
         "vol_regime":     +6,   # earnings(-1)→−6 penalty; high_vol(+0.5)→+3 premium boost
         "iv_rv_ratio":    +6,   # THIS IS THE CORE VRP SIGNAL
+        "term_structure": +4,   # contango = better VRP for sellers
     },
     "CC": {
         # Covered call seller: wants overbought + resistance + bearish reversal
@@ -244,6 +256,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "volatility":     +3,   # high vol = rich CC premiums, stock already owned
         "vol_regime":     +4,   # earnings(-1)→−4 gap risk; high_vol(+0.5)→+2 premium boost
         "iv_rv_ratio":    +5,   # rich premium = better CC income
+        "term_structure": +3,   # contango = better CC premium capture
     },
     "LONG_CALL": {
         "rsi":            -2,
@@ -261,6 +274,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "volatility":     -3,   # high vol = expensive options, theta bleeds faster
         "vol_regime":     +2,   # earnings(-1)→−2 IV crush risk
         "iv_rv_ratio":    -4,   # expensive options bad for buyers
+        "term_structure": -2,   # contango = expensive long options
     },
     "LONG_PUT": {
         "rsi":            +3,
@@ -278,6 +292,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "volatility":     -2,   # high vol = expensive puts too
         "vol_regime":     +1,   # earnings = directional gamble, not our edge
         "iv_rv_ratio":    -3,   # expensive options bad for put buyers too
+        "term_structure": -1,   # contango = expensive long puts
     },
 }
 
@@ -307,6 +322,7 @@ def compute_signals(ind: dict[str, Any]) -> dict[str, float]:
             ind.get("iv_annual", 0.0),
             ind.get("volatility_annual", 0.0),
         ),
+        "term_structure": _sig_term_structure(ind.get("ts_slope", 0.0)),
     }
 
 
@@ -393,6 +409,7 @@ def top_signal_reasons(ind: dict[str, Any], strategy: str, limit: int = 3) -> li
         "fib_support": "Fib position",
         "volatility": "Volatility", "vol_regime": "Vol regime",
         "iv_rv_ratio": "IV/RV",
+        "term_structure": "Term structure",
     }
     out = []
     for sig_name, contrib, raw in contributions[:limit]:
