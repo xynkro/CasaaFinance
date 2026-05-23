@@ -294,7 +294,14 @@ def technical_conviction(ticker: str, logger) -> tuple[bool, int, dict]:
     return True, score, ctx
 
 
-def scan_chain(ticker: str, ctx: dict, conviction: int, macro: dict, logger) -> list[dict]:
+def scan_chain(
+    ticker: str,
+    ctx: dict,
+    conviction: int,
+    macro: dict,
+    logger,
+    earnings_days_away: int = -1,
+) -> list[dict]:
     """Scan option chain for CSP + CC candidates. Build signal blocks."""
     import yfinance as yf
 
@@ -327,6 +334,15 @@ def scan_chain(ticker: str, ctx: dict, conviction: int, macro: dict, logger) -> 
         return []
 
     dte = (datetime.strptime(best_exp, "%Y-%m-%d").date() - today).days
+
+    # EARNINGS GATE: reject if earnings falls inside option DTE window.
+    # Selling premium into a binary event (earnings) is the #1 CSP blowup.
+    # -1 means no data / no upcoming earnings — allow through.
+    if 0 <= earnings_days_away <= dte:
+        logger.info(
+            f"  {ticker}: EARNINGS_BLOCKED — earnings in {earnings_days_away}d, option DTE={dte}d"
+        )
+        return []
     expiry_iso = best_exp.replace("-", "")
 
     try:
@@ -409,7 +425,9 @@ def scan_chain(ticker: str, ctx: dict, conviction: int, macro: dict, logger) -> 
                 "profit_target_optional": True,
                 "time_stop_dte": 21,
                 "strike_tested_pct": 3,
-                "earnings_in_dte": False,
+                # earnings_in_dte is always False here: the gate above blocks if True
+                "earnings_in_dte": (0 <= earnings_days_away <= dte),
+                "earnings_days_away": earnings_days_away,
                 "macro_shift_exit": True,
                 "trend_break_exit": True,
                 "sma50_at_entry": ctx["sma50"],
@@ -510,6 +528,11 @@ def main() -> int:
         logger.warning("No tickers survived fundamental filter — aborting")
         return 0
 
+    # ── Batch-fetch earnings dates ──
+    from src.indicators import fetch_earnings_dates
+    earnings_data = fetch_earnings_dates(survivors)
+    logger.info(f"  Earnings data: {len(earnings_data)} tickers with upcoming earnings")
+
     # ── Layer 3: Technical Conviction + Chain Scan ──
     all_candidates = []
     for i, ticker in enumerate(survivors):
@@ -518,7 +541,9 @@ def main() -> int:
             if not ok:
                 logger.debug(f"  {ticker}: technical reject")
                 continue
-            picks = scan_chain(ticker, ctx, score, macro, logger)
+            ed = earnings_data.get(ticker, {})
+            earnings_away = ed.get("earnings_days_away", -1)
+            picks = scan_chain(ticker, ctx, score, macro, logger, earnings_days_away=earnings_away)
             all_candidates.extend(picks)
             if (i + 1) % 10 == 0:
                 logger.info(f"  ... scanned {i + 1}/{len(survivors)} tickers, {len(all_candidates)} picks so far")
