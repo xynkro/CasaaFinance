@@ -54,8 +54,9 @@ def test_scan_chain_allows_no_earnings():
 
 
 def test_scan_chain_allows_earnings_after_expiry():
-    """scan_chain should allow when earnings are AFTER the option expires."""
+    """scan_chain should NOT block when earnings are AFTER the option expires."""
     from scripts.premium_harvest_scan import scan_chain
+    from datetime import date, timedelta
 
     logger = logging.getLogger("test_earnings")
     ctx = {
@@ -65,13 +66,19 @@ def test_scan_chain_allows_earnings_after_expiry():
     }
     macro = {"regime": "STANDARD", "vix": 18.0, "spx_above_200sma": True}
 
+    # Provide a real expiry ~35 days out so the function reaches the earnings gate
+    exp_date = (date.today() + timedelta(days=35)).strftime("%Y-%m-%d")
     mock_ticker = MagicMock()
-    mock_ticker.options = []
+    mock_ticker.options = [exp_date]
+    # Chain fetch will fail (no real data) → returns [] from chain error, NOT from earnings gate
+    mock_ticker.option_chain.side_effect = Exception("no chain data")
 
     with patch("yfinance.Ticker", return_value=mock_ticker):
-        # Earnings in 90 days — far beyond any DTE we'd pick (max 45) → allowed
+        # Earnings in 90 days, DTE ~35 → 0 <= 90 <= 35 is FALSE → not blocked
         result = scan_chain("TEST", ctx, 60, macro, logger, earnings_days_away=90)
-        assert isinstance(result, list)  # Should not be blocked by earnings gate
+        assert isinstance(result, list)
+        # Verify option_chain was actually called — proves we passed the earnings gate
+        mock_ticker.option_chain.assert_called_once()
 
 
 def test_scan_chain_blocks_earnings_same_day():
