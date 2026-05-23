@@ -46,11 +46,15 @@ DELTA_RANGE_CC = (0.08, 0.20)   # acceptable scan range for CC
 TARGET_DTE_MIN = 30
 TARGET_DTE_MAX = 45
 
-# Position sizing — Half-Kelly (Frontiers in Applied Math 2020)
-# Full Kelly: 48% max drawdown. Half-Kelly: 25% max drawdown.
+# Position sizing — Fractional Kelly
+# Full Kelly: maximizes terminal wealth but 48%+ max drawdown.
+# Half-Kelly (0.50): 25% max drawdown (traditional).
+# 5-10% of Kelly: recommended for VRP/short-vol trades where return
+# distribution has fat tails (Sinclair "Positional Option Trading",
+# OQuants S4, Bennett "Trading Volatility" 2014).
 MAX_POSITION_PCT = 0.05       # hard cap: 5% of account per position
 MAX_CONCURRENT_SHORT = 5      # CFA diversification: max 5 short options per account
-HALF_KELLY_FRACTION = 0.5     # fractional Kelly divisor
+KELLY_FRACTION = 0.10          # 10% of full Kelly (literature: 5-10% for short vol)
 
 # IV Rank Gate — only sell premium when implied vol is rich relative to history.
 # Volatility Risk Premium: IV exceeds realized vol by 4.2pp on average (CBOE since 1990).
@@ -283,18 +287,24 @@ def compute_composite(
     return round(composite, 1)
 
 
-def _half_kelly_size(
+def _fractional_kelly_size(
     win_rate: float,
     avg_win: float,
     avg_loss: float,
     account_value: float,
 ) -> float:
     """
-    Compute half-Kelly position size in dollars.
+    Compute fractional-Kelly position size in dollars.
 
     Kelly fraction: f = (win_rate × avg_win - loss_rate × avg_loss) / avg_win
-    Half-Kelly: f/2 — reduces max drawdown from ~48% to ~25% (Frontiers 2020).
+    Fractional Kelly: f × KELLY_FRACTION (10% of full Kelly).
     Hard cap: MAX_POSITION_PCT of account value.
+
+    Literature consensus for short-vol (CSP/CC) strategies:
+      - Full Kelly → 48%+ max drawdown (theoretically optimal but unsurvivable)
+      - Half Kelly (0.50) → ~25% max drawdown (traditional but still aggressive)
+      - 5-10% Kelly → max drawdown proportional, matches fat-tail reality of VRP trades
+      (Sinclair 2020, Bennett 2014, OQuants S4)
 
     Returns max cash to allocate to one position.
     """
@@ -303,10 +313,14 @@ def _half_kelly_size(
     loss_rate = 1 - win_rate
     kelly_f = (win_rate * avg_win - loss_rate * avg_loss) / avg_win
     kelly_f = max(0, kelly_f)  # never go negative (don't bet if edge is negative)
-    half_kelly = kelly_f * HALF_KELLY_FRACTION
+    frac_kelly = kelly_f * KELLY_FRACTION
     # Cap at MAX_POSITION_PCT
-    position_pct = min(half_kelly, MAX_POSITION_PCT)
+    position_pct = min(frac_kelly, MAX_POSITION_PCT)
     return account_value * position_pct
+
+
+# Backward-compatible alias
+_half_kelly_size = _fractional_kelly_size
 
 
 def scan_watchlist(
@@ -441,7 +455,7 @@ def scan_watchlist(
             effective_kelly = kelly_max * vix_rules["size_mult"]
             sizing_note = ""
             if effective_kelly > 0 and csp["cash_required"] > effective_kelly:
-                sizing_note = f"OVERSIZED: ${csp['cash_required']:.0f} > half-Kelly ${effective_kelly:.0f}"
+                sizing_note = f"OVERSIZED: ${csp['cash_required']:.0f} > Kelly-10% ${effective_kelly:.0f}"
             if vix_rules["size_mult"] < 1.0 and vix_rules["size_mult"] > 0:
                 sizing_note = (sizing_note + " | " if sizing_note else "") + f"VIX_REDUCED: {vix_rules['size_mult']:.0%} size"
 
@@ -525,7 +539,7 @@ def scan_watchlist(
             effective_kelly = kelly_max * vix_rules["size_mult"]
             sizing_note = ""
             if effective_kelly > 0 and cc["cash_required"] > effective_kelly:
-                sizing_note = f"OVERSIZED: ${cc['cash_required']:.0f} > half-Kelly ${effective_kelly:.0f}"
+                sizing_note = f"OVERSIZED: ${cc['cash_required']:.0f} > Kelly-10% ${effective_kelly:.0f}"
             if vix_rules["size_mult"] < 1.0 and vix_rules["size_mult"] > 0:
                 sizing_note = (sizing_note + " | " if sizing_note else "") + f"VIX_REDUCED: {vix_rules['size_mult']:.0%} size"
 
