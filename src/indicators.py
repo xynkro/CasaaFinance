@@ -276,12 +276,39 @@ def compute_indicators(df: pd.DataFrame) -> dict[str, Any]:
         out["catalyst_flag"] = False
         out["vol_regime"] = "normal"
 
-    # ----- Annualized realized volatility -----
-    if len(returns.dropna()) >= 20:
-        daily_vol = float(returns.iloc[-60:].std()) if len(returns) >= 60 else float(returns.std())
-        out["volatility_annual"] = round(daily_vol * math.sqrt(252), 4)
+    # ----- Realized Volatility: Yang-Zhang estimator -----
+    # Uses O/H/L/C; handles overnight gaps; 3-5x more efficient
+    # than close-to-close (Bennett 2014, OQuants S2).
+    if len(df) >= 20:
+        n_rv = min(30, len(df) - 1)  # 30-day lookback
+        o = df["Open"].iloc[-n_rv-1:]
+        h = df["High"].iloc[-n_rv-1:]
+        l = df["Low"].iloc[-n_rv-1:]
+        c = df["Close"].iloc[-n_rv-1:]
+
+        # Overnight returns (close-to-open)
+        log_co = (o.iloc[1:] / c.iloc[:-1]).apply(math.log)
+        # Open-to-close returns
+        log_oc = (c.iloc[1:] / o.iloc[1:]).apply(math.log)
+        # Rogers-Satchell component
+        log_hc = (h.iloc[1:] / c.iloc[1:]).apply(math.log)
+        log_ho = (h.iloc[1:] / o.iloc[1:]).apply(math.log)
+        log_lc = (l.iloc[1:] / c.iloc[1:]).apply(math.log)
+        log_lo = (l.iloc[1:] / o.iloc[1:]).apply(math.log)
+
+        sigma_o = float(log_co.var())  # overnight variance
+        sigma_c = float(log_oc.var())  # close-to-close intraday variance
+        sigma_rs = float((log_ho * log_hc + log_lo * log_lc).mean())  # Rogers-Satchell
+
+        k = 0.34 / (1.34 + (n_rv + 1) / (n_rv - 1))
+        sigma_yz_sq = sigma_o + k * sigma_c + (1 - k) * sigma_rs
+        sigma_yz_sq = max(sigma_yz_sq, 1e-10)
+
+        out["volatility_annual"] = round(math.sqrt(sigma_yz_sq * 252), 4)
+        out["rv_estimator"] = "yang_zhang"
     else:
         out["volatility_annual"] = 0.0
+        out["rv_estimator"] = "insufficient_data"
 
     # ----- Momentum -----
     if len(close) >= 6:

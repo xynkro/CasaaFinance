@@ -162,6 +162,19 @@ def _sig_vol_regime(regime: str) -> float:
     }.get(regime, 0.0)
 
 
+def _sig_iv_rv_ratio(iv: float, rv: float) -> float:
+    """
+    IV/RV ratio signal. Core VRP indicator.
+    Ratio > 1.0 = IV overpriced (sell premium). Ratio < 1.0 = IV cheap (buy).
+    Centred at 1.0, mapped to [-1, +1] with soft clip.
+    """
+    if rv <= 0 or iv <= 0:
+        return 0.0
+    ratio = iv / rv
+    # Centre at 1.0. Ratio 1.5 -> +1, ratio 0.5 -> -1.
+    return max(-1.0, min(1.0, (ratio - 1.0) * 2.0))
+
+
 # -----------------------------------------------------------------------------
 # Strategy weights. The key is each strategy's *preference* for the signal.
 # Positive weight on a signal means the strategy benefits when that signal is
@@ -192,6 +205,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "fib_support":    +3,   # near support = good buy zone
         "volatility":     -2,   # high vol = wider drawdowns, worse entry
         "vol_regime":     +1,   # earnings_approaching(-1) penalizes; high_vol(+0.5) mild boost
+        "iv_rv_ratio":    -1,   # rich premium = expensive options to buy
     },
     "CSP": {
         # Cash-secured put seller: wants oversold + support holding + bullish reversal
@@ -210,6 +224,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "fib_support":    +5,   # near support best CSP entry
         "volatility":     -4,   # HIGH vol = assignment risk dominates premium
         "vol_regime":     +6,   # earnings(-1)→−6 penalty; high_vol(+0.5)→+3 premium boost
+        "iv_rv_ratio":    +6,   # THIS IS THE CORE VRP SIGNAL
     },
     "CC": {
         # Covered call seller: wants overbought + resistance + bearish reversal
@@ -228,6 +243,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "fib_support":    -3,   # near support = upside setup = bad for CC
         "volatility":     +3,   # high vol = rich CC premiums, stock already owned
         "vol_regime":     +4,   # earnings(-1)→−4 gap risk; high_vol(+0.5)→+2 premium boost
+        "iv_rv_ratio":    +5,   # rich premium = better CC income
     },
     "LONG_CALL": {
         "rsi":            -2,
@@ -244,6 +260,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "fib_support":    +3,
         "volatility":     -3,   # high vol = expensive options, theta bleeds faster
         "vol_regime":     +2,   # earnings(-1)→−2 IV crush risk
+        "iv_rv_ratio":    -4,   # expensive options bad for buyers
     },
     "LONG_PUT": {
         "rsi":            +3,
@@ -260,6 +277,7 @@ STRATEGY_WEIGHTS: dict[str, dict[str, float]] = {
         "fib_support":    -2,
         "volatility":     -2,   # high vol = expensive puts too
         "vol_regime":     +1,   # earnings = directional gamble, not our edge
+        "iv_rv_ratio":    -3,   # expensive options bad for put buyers too
     },
 }
 
@@ -285,6 +303,10 @@ def compute_signals(ind: dict[str, Any]) -> dict[str, float]:
         ),
         "volatility":   _sig_volatility(ind.get("volatility_annual", 0.0)),
         "vol_regime":   _sig_vol_regime(ind.get("vol_regime", "normal")),
+        "iv_rv_ratio":  _sig_iv_rv_ratio(
+            ind.get("iv_annual", 0.0),
+            ind.get("volatility_annual", 0.0),
+        ),
     }
 
 
@@ -370,6 +392,7 @@ def top_signal_reasons(ind: dict[str, Any], strategy: str, limit: int = 3) -> li
         "divergence": "Divergence", "candle": "Candle",
         "fib_support": "Fib position",
         "volatility": "Volatility", "vol_regime": "Vol regime",
+        "iv_rv_ratio": "IV/RV",
     }
     out = []
     for sig_name, contrib, raw in contributions[:limit]:
