@@ -211,87 +211,68 @@ def fundamental_gate(ticker: str, logger) -> tuple[bool, str]:
 
 def technical_conviction(ticker: str, logger) -> tuple[bool, int, dict]:
     """
-    Technical gates + conviction score.
-    Returns (pass, score, context_dict).
+    Technical gates + conviction score via unified scoring engine.
+    Uses compute_indicators() for all indicator computation and
+    compute_scores() CSP score for conviction — no ad-hoc scoring.
     """
     import yfinance as yf
+    from src.indicators import compute_indicators
+    from src.technical_score import compute_scores
 
     try:
         yt = yf.Ticker(ticker)
         hist = yt.history(period="250d", interval="1d", auto_adjust=True)
         if hist.empty or len(hist) < 50:
             return False, 0, {}
-        closes = hist["Close"].dropna()
-        price = float(closes.iloc[-1])
     except Exception:
         return False, 0, {}
 
-    # SMA calculations
-    sma50 = float(closes.tail(50).mean()) if len(closes) >= 50 else 0
-    sma200 = float(closes.tail(200).mean()) if len(closes) >= 200 else 0
-    sma20 = float(closes.tail(20).mean()) if len(closes) >= 20 else 0
+    # Compute full indicator suite (reuses existing compute_indicators)
+    ind = compute_indicators(hist)
+    price = ind.get("close", 0)
+    if price <= 0:
+        return False, 0, {}
 
-    # RSI-14 (Wilder smoothing)
-    delta = closes.diff()
-    gain = delta.clip(lower=0)
-    loss = (-delta.clip(upper=0))
-    avg_gain = gain.ewm(alpha=1 / 14, min_periods=14).mean()
-    avg_loss = loss.ewm(alpha=1 / 14, min_periods=14).mean()
-    rs = avg_gain / avg_loss.replace(0, float("inf"))
-    rsi_series = 100 - (100 / (1 + rs))
-    rsi_14 = float(rsi_series.iloc[-1]) if len(rsi_series) >= 14 else 50.0
-    if math.isnan(rsi_14):
-        rsi_14 = 50.0
+    sma50 = ind.get("sma_50", 0)
+    sma200 = ind.get("sma_200", 0)
+    rsi = ind.get("rsi_14", 50)
+    # Use swing_low (60d low) as the floor reference for the falling-knife gate —
+    # analogous to the 20d min from the original code but more conservative.
+    swing_low = ind.get("swing_low", 0)
+    avg_vol = ind.get("vol_avg_20", 0)
 
-    # 20d support/resistance
-    recent_20 = closes.tail(20)
-    support = float(recent_20.min())
-    resistance = float(recent_20.max())
+    # ═══ GATES (non-negotiable — same as before) ═══
+    if sma50 > 0 and price < sma50:
+        return False, 0, ind
+    if sma200 > 0 and price < sma200:
+        return False, 0, ind
+    if rsi < 30 or rsi > 75:
+        return False, 0, ind
+    if swing_low > 0 and price < swing_low * 1.03:
+        return False, 0, ind  # falling knife
+    if avg_vol < 200_000:
+        return False, 0, ind
 
-    # HV30
-    log_rets = closes.pct_change().dropna().apply(lambda x: math.log(1 + x) if x > -1 else 0)
-    hv30 = float(log_rets.tail(30).std() * math.sqrt(252) * 100) if len(log_rets) >= 30 else 0
+    # ═══ UNIFIED SCORING: use technical_score.py CSP score ═══
+    scores = compute_scores(ind)
+    csp_score = scores.get("CSP", 0)
 
-    # Volume check
-    vols = hist["Volume"].dropna()
-    avg_vol = float(vols.tail(20).mean()) if len(vols) >= 20 else 0
+    # Map CSP score [-100, +100] to conviction [0, 100]
+    conviction = max(0, min(100, int((csp_score + 100) / 2)))
 
     ctx = {
         "price": round(price, 2),
-        "sma20": round(sma20, 2),
+        "sma20": round(ind.get("sma_20", 0), 2),
         "sma50": round(sma50, 2),
         "sma200": round(sma200, 2),
-        "rsi_14": round(rsi_14, 1),
-        "support": round(support, 2),
-        "resistance": round(resistance, 2),
-        "hv30": round(hv30, 1),
+        "rsi_14": round(rsi, 1),
+        "support": round(ind.get("support", 0), 2),
+        "resistance": round(ind.get("resistance", 0), 2),
+        "hv30": round(ind.get("volatility_annual", 0) * 100, 1),
         "avg_vol": int(avg_vol),
     }
 
-    # ═══ GATES (all must pass) ═══
-    if sma50 > 0 and price < sma50:
-        return False, 0, ctx
-    if sma200 > 0 and price < sma200:
-        return False, 0, ctx
-    if rsi_14 < 30 or rsi_14 > 75:
-        return False, 0, ctx
-    if support > 0 and price < support * 1.03:
-        return False, 0, ctx  # falling knife
-    if avg_vol < 200_000:
-        return False, 0, ctx
-
-    # ═══ CONVICTION SCORE (0-100) ═══
-    score = 40  # base: passed all gates
-    if sma20 > sma50:
-        score += 10  # uptrend confirmed
-    if 40 <= rsi_14 <= 60:
-        score += 10  # RSI sweet spot
-    if support > 0 and price < support * 1.05:
-        score += 10  # near support but holding
-    if avg_vol > 1_000_000:
-        score += 5   # high liquidity bonus
-
-    return True, score, ctx
+    return True, conviction, ctx
 
 
 def scan_chain(
@@ -390,14 +371,20 @@ def scan_chain(
             iv_pct = float(r.get("impliedVolatility", 0) or 0) * 100
             oi = int(r.get("openInterest", 0) or 0)
 
-            # Conviction bonuses from chain data
-            iv_rich_bonus = 10 if (hv30 > 0 and iv_pct / hv30 > 1.2) else 0
-            oi_bonus = 5 if oi > 200 else 0
+            # Chain-quality adjustments (liquidity only, not scoring)
+            oi_ok = oi > 200
             bid = float(r.get("bid", 0) or 0)
             ask = float(r.get("ask", 0) or 0)
             spread_pct = ((ask - bid) / mid * 100) if mid > 0 and bid > 0 else 99
-            spread_bonus = 5 if spread_pct < 10 else 0
-            final_conviction = min(100, conviction + iv_rich_bonus + oi_bonus + spread_bonus)
+            spread_ok = spread_pct < 15
+
+            # Penalize poor liquidity, don't boost for IV (that's in the score now)
+            liquidity_penalty = 0
+            if not oi_ok:
+                liquidity_penalty += 5
+            if not spread_ok:
+                liquidity_penalty += 5
+            final_conviction = max(0, conviction - liquidity_penalty)
 
             # S/R context string
             sr_parts = []
