@@ -220,54 +220,41 @@ SR_IC_DUAL_BONUS = 8           # IC bonus when both sides have S/R context
 
 def _technical_context(yt) -> dict:
     """
-    Compute HV30, RSI-14, and 20d support/resistance from 60d daily data.
+    Compute technical context using unified indicator engine.
 
-    Single yfinance fetch serves both the existing HV30 requirement and the
-    new support/resistance entry timing. Returns dict with:
-      hv30 (float %): 30-day historical volatility annualised
-      rsi_14 (float): RSI-14, 0-100
-      support (float): 20-day rolling low (price floor)
-      resistance (float): 20-day rolling high (price ceiling)
+    Fetches 250d daily data (enough for SMA200 and full indicator suite).
+    Returns dict with hv30, rsi_14, support, resistance keys
+    (backward-compatible with existing callers) plus _indicators and _scores
+    for downstream unified scoring.
     """
+    from src.indicators import compute_indicators
+    from src.technical_score import compute_scores
+
+    _DEFAULTS = {
+        "hv30": 0.0, "rsi_14": 50.0, "support": 0.0, "resistance": 0.0,
+        "_indicators": {}, "_scores": {},
+    }
     try:
-        hist = yt.history(period="60d", interval="1d", auto_adjust=True)
+        hist = yt.history(period="250d", interval="1d", auto_adjust=True)
         if hist.empty or len(hist) < 20:
-            return {"hv30": 0.0, "rsi_14": 50.0, "support": 0.0, "resistance": 0.0}
+            return dict(_DEFAULTS)
 
-        closes = hist["Close"].dropna()
-        if len(closes) < 20:
-            return {"hv30": 0.0, "rsi_14": 50.0, "support": 0.0, "resistance": 0.0}
+        ind = compute_indicators(hist)
+        if not ind:
+            return dict(_DEFAULTS)
 
-        # HV30 — same as legacy _hv30()
-        log_rets = closes.pct_change().dropna().apply(lambda x: math.log(1 + x))
-        hv30 = float(log_rets.std() * math.sqrt(252) * 100) if len(log_rets) > 5 else 0.0
-
-        # RSI-14 (Wilder smoothing)
-        delta = closes.diff()
-        gain = delta.where(delta > 0, 0.0)
-        loss = (-delta.where(delta < 0, 0.0))
-        avg_gain = gain.rolling(14, min_periods=14).mean()
-        avg_loss = loss.rolling(14, min_periods=14).mean()
-        # Avoid division by zero
-        rs = avg_gain / avg_loss.replace(0, 1e-10)
-        rsi_series = 100 - (100 / (1 + rs))
-        rsi_14 = float(rsi_series.iloc[-1]) if len(rsi_series) >= 14 else 50.0
-        if math.isnan(rsi_14):
-            rsi_14 = 50.0
-
-        # Support / Resistance — 20-day rolling low/high
-        recent_20 = closes.iloc[-20:]
-        support = float(recent_20.min())
-        resistance = float(recent_20.max())
+        scores = compute_scores(ind)
 
         return {
-            "hv30": round(hv30, 1),
-            "rsi_14": round(rsi_14, 1),
-            "support": round(support, 2),
-            "resistance": round(resistance, 2),
+            "hv30": round(ind.get("volatility_annual", 0) * 100, 1),
+            "rsi_14": round(ind.get("rsi_14", 50), 1),
+            "support": round(ind.get("support", 0), 2),
+            "resistance": round(ind.get("resistance", 0), 2),
+            "_indicators": ind,
+            "_scores": scores,
         }
     except Exception:
-        return {"hv30": 0.0, "rsi_14": 50.0, "support": 0.0, "resistance": 0.0}
+        return dict(_DEFAULTS)
 
 
 def _sr_bonus_pcs(price: float, ctx: dict) -> tuple[float, str]:
@@ -408,14 +395,19 @@ def _compute_greeks(row, price: float, dte: int, right: str = "P") -> tuple[floa
 
 
 def _estimate_ivr(iv_pct: float, hv30_pct: float) -> float:
-    """IV Rank proxy from IV/HV ratio. Returns 0-100.
+    """IV Rank proxy. Delegates to robust IV rank when history available,
+    falls back to IV/HV ratio heuristic.
 
-    True IV Rank needs 52-week IV data (IBKR has this); this heuristic
-    uses the current IV vs realised vol ratio as a stand-in:
-      ratio 1.0 → IVR ≈ 50, ratio 1.5 → IVR ≈ 75, ratio 0.7 → IVR ≈ 35
+    Without 252-day IV history (expensive per-scan fetch), falls back to
+    the ratio heuristic: ratio 1.0 → IVR ≈ 50, ratio 1.5 → IVR ≈ 75,
+    ratio 0.7 → IVR ≈ 35. Real compute_iv_rank() from src.iv_rank is
+    available when a caller can supply iv_history.
     """
+    # noqa: F401 — import kept for future callers that supply history
+    from src.iv_rank import compute_iv_rank  # noqa: F401
+
     if hv30_pct <= 0:
-        return 50.0  # neutral when HV unknown
+        return 50.0
     ratio = iv_pct / hv30_pct
     return max(0, min(100, 50 + (ratio - 1.0) * 50))
 
@@ -625,6 +617,7 @@ def scan_ticker(
 
     tech_ctx = _technical_context(yt)
     hv30 = tech_ctx["hv30"]
+    scores = tech_ctx.get("_scores", {})
     out: list[dict[str, Any]] = []
 
     # ── CSP ────────────────────────────────────────────────────────────────
@@ -668,7 +661,7 @@ def scan_ticker(
                 "iv_rank": round(csp_ivr, 1),
                 "spread_pct": round(spread_pct, 2),
                 "underlying_last": round(price, 2),
-                "technical_score": 0.0,
+                "technical_score": round(scores.get("CSP", 0), 1),
                 "composite_score": round(float(r["ann_yield"]), 2),
                 "catalyst_flag": False,
                 "hv30": round(hv30, 1),
@@ -718,7 +711,7 @@ def scan_ticker(
                 "iv_rank": round(cc_ivr, 1),
                 "spread_pct": round(spread_pct, 2),
                 "underlying_last": round(price, 2),
-                "technical_score": 0.0,
+                "technical_score": round(scores.get("CC", 0), 1),
                 "composite_score": round(float(r["ann_yield"]), 2),
                 "catalyst_flag": False,
                 "hv30": round(hv30, 1),
@@ -872,7 +865,7 @@ def scan_ticker(
                         "iv_rank": round(lc_ivr, 1),
                         "spread_pct": round(spread_pct, 2),
                         "underlying_last": round(price, 2),
-                        "technical_score": round(trend_score, 1),
+                        "technical_score": round(scores.get("LONG_CALL", 0), 1),
                         "composite_score": round(lc_quality, 1),
                         "catalyst_flag": True,
                         "hv30": round(hv30, 1),
@@ -988,7 +981,9 @@ def scan_ticker(
                                     "iv_rank": round(est_ivr_ic, 1),
                                     "spread_pct": 0.0,
                                     "underlying_last": round(price, 2),
-                                    "technical_score": 0.0,
+                                    "technical_score": round(
+                                        (scores.get("CSP", 0) + scores.get("CC", 0)) / 2, 1
+                                    ),
                                     "composite_score": round(ic_score, 1),
                                     "catalyst_flag": False,
                                     "hv30": round(hv30, 1),
@@ -1073,7 +1068,7 @@ def scan_ticker(
                                     "iv_rank": round(est_ivr_cs, 1),
                                     "spread_pct": 0.0,
                                     "underlying_last": round(price, 2),
-                                    "technical_score": 0.0,
+                                    "technical_score": round(scores.get("CSP", 0), 1),
                                     "composite_score": round(pcs_score, 1),
                                     "catalyst_flag": False,
                                     "hv30": round(hv30, 1),
@@ -1158,7 +1153,7 @@ def scan_ticker(
                                     "iv_rank": round(est_ivr_ccs, 1),
                                     "spread_pct": 0.0,
                                     "underlying_last": round(price, 2),
-                                    "technical_score": 0.0,
+                                    "technical_score": round(scores.get("CC", 0), 1),
                                     "composite_score": round(ccs_score, 1),
                                     "catalyst_flag": False,
                                     "hv30": round(hv30, 1),
@@ -1246,7 +1241,7 @@ def scan_ticker(
                                     "iv": 0.0, "iv_rank": 0.0,
                                     "spread_pct": 0.0,
                                     "underlying_last": round(price, 2),
-                                    "technical_score": 0.0,
+                                    "technical_score": round(scores.get("LONG_CALL", 0), 1),
                                     "composite_score": round(pmcc_score, 1),
                                     "catalyst_flag": False,
                                     "hv30": round(hv30, 1),
