@@ -241,12 +241,20 @@ def technical_conviction(ticker: str, logger) -> tuple[bool, int, dict]:
     swing_low = ind.get("swing_low", 0)
     avg_vol = ind.get("vol_avg_20", 0)
 
-    # ═══ GATES (non-negotiable — same as before) ═══
+    # ═══ GATES ═══
     if sma50 > 0 and price < sma50:
         return False, 0, ind
     if sma200 > 0 and price < sma200:
         return False, 0, ind
-    if rsi < 30 or rsi > 75:
+
+    # Vol-adjusted RSI bounds: high-vol names routinely hit extremes without
+    # meaning reversion is imminent.  Static 30/75 filters out valid high-vol
+    # CSP candidates while letting through stretched low-vol names.
+    vol = ind.get("volatility_annual", 0.30)
+    vol_shift = (vol - 0.30) * 25          # ±25 per 100pp vol above/below 30%
+    rsi_low  = max(20, 30 - vol_shift)     # high vol → 25; low vol → 35
+    rsi_high = min(85, 75 + vol_shift)     # high vol → 80; low vol → 70
+    if rsi < rsi_low or rsi > rsi_high:
         return False, 0, ind
     if swing_low > 0 and price < swing_low * 1.03:
         return False, 0, ind  # falling knife

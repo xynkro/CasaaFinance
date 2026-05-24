@@ -351,14 +351,18 @@ def compute_scores(ind: dict[str, Any]) -> dict[str, float]:
 
 
 def score_label(score: float) -> str:
-    """Bucket a score into a label."""
-    if score >= 60:
+    """Bucket a score into a label.
+
+    Thresholds calibrated against 2y backtest (15 tickers, 1946 signals):
+    scores cluster in [-25, +25], rarely exceed ±30.
+    """
+    if score >= 20:
         return "STRONG"
-    if score >= 30:
+    if score >= 10:
         return "FAVORABLE"
-    if score > -30:
+    if score > -10:
         return "NEUTRAL"
-    if score > -60:
+    if score > -20:
         return "UNFAVORABLE"
     return "HOSTILE"
 
@@ -377,9 +381,14 @@ def entry_exit_signal(ind: dict[str, Any], scores: dict[str, float]) -> str:
     if support > 0 and close > 0 and close < support * 0.98:
         return "SELL (SL)"
 
-    if buy_score >= 50 and trend in ("Strong Uptrend", "Uptrend", "Sideways"):
+    # Thresholds calibrated to actual score distribution (scores cluster ±25).
+    # Backtest caveat: BUY scores >25 showed INVERTED results (41% win rate)
+    # — momentum peaks mean-revert at 35d horizons. Require trend confirmation.
+    if buy_score >= 15 and trend in ("Strong Uptrend", "Uptrend"):
         return "BUY"
-    if buy_score <= -40 or trend == "Strong Downtrend":
+    if buy_score >= 10 and trend == "Sideways" and ind.get("wvf_bottom", False):
+        return "BUY"  # capitulation bounce in sideways market
+    if buy_score <= -15 or trend == "Strong Downtrend":
         return "SELL (SL)"
     return "HOLD"
 
