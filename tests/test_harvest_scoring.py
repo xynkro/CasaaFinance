@@ -42,9 +42,9 @@ def test_conviction_uses_compute_scores():
     assert ok is True
     # Conviction should be derived from CSP score, mapped to 0-100
     assert 0 <= conviction <= 100
-    # Should have ctx with standard keys
-    assert "price" in ctx
-    assert "hv30" in ctx
+    # Should have ctx with compute_indicators keys
+    assert "close" in ctx
+    assert "volatility_annual" in ctx
 
 
 def test_conviction_rejects_below_sma50():
@@ -174,8 +174,9 @@ def test_conviction_ctx_has_required_keys():
         ok, conviction, ctx = technical_conviction("TEST", logger)
 
     assert ok is True
-    required_keys = {"price", "sma20", "sma50", "sma200", "rsi_14", "support",
-                     "resistance", "hv30", "avg_vol"}
+    # compute_indicators keys (not the old premium_harvest_scan names)
+    required_keys = {"close", "sma_20", "sma_50", "sma_200", "rsi_14",
+                     "swing_low", "swing_high", "volatility_annual", "vol_avg_20"}
     assert required_keys.issubset(ctx.keys())
 
 

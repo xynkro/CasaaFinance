@@ -293,6 +293,8 @@ def position_action(p: PositionContext, regime: str = "bull_late_cycle") -> dict
     Output: {action, reason, urgency} where action ∈
       HOLD | TRIM_X% | EXIT | ADD_OK | REVIEW
     """
+    if p.avg_cost <= 0:
+        return {"action": "REVIEW", "reason": "avg_cost is zero — cannot compute UPL", "urgency": "LOW"}
     upl_pct = (p.current_price - p.avg_cost) / p.avg_cost * 100
 
     # Stop check
@@ -305,13 +307,14 @@ def position_action(p: PositionContext, regime: str = "bull_late_cycle") -> dict
         return {"action": "TRIM_50%", "reason": f"Held {p.days_held}d > 30d leverage decay window", "urgency": "HIGH"}
 
     # Sizing check
-    cap = SIZING_LIMITS_PCT_NETLIQ[p.bucket]
+    cap = SIZING_LIMITS_PCT_NETLIQ.get(p.bucket, 5.0)  # default 5% for unknown buckets
     if p.weight_pct > cap * 1.2:  # 20% over cap
         excess = p.weight_pct - cap
         return {"action": f"TRIM_{int(excess/p.weight_pct*100)}%", "reason": f"Weight {p.weight_pct:.1f}% > {cap}% cap by 20%+", "urgency": "MEDIUM"}
 
-    # Profit-take ladder
-    for gain_threshold, trim_pct in TRIM_LADDERS.get(p.bucket, []):
+    # Profit-take ladder — iterate HIGHEST threshold first so a +200% gain
+    # matches the +100% rung (TRIM_33%) not the +50% rung (TRIM_25%).
+    for gain_threshold, trim_pct in reversed(TRIM_LADDERS.get(p.bucket, [])):
         if upl_pct >= gain_threshold:
             return {"action": f"TRIM_{trim_pct}%", "reason": f"Hit +{gain_threshold}% trim ladder", "urgency": "MEDIUM"}
 
