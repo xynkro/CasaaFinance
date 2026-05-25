@@ -420,18 +420,12 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
         # --- Drive: N/A for grab ---
         result.drive_ok = True
 
-        # --- Telegram ---
-        try:
-            pwa_url = os.environ.get("PWA_URL") or None
-            tg.ping_grab_ready(date, len(pos_c), len(pos_s), len(opts_c), len(opts_s), pwa_url)
-            result.telegram_ok = True
-            logger.info("Telegram OK")
-        except Exception as e:
-            result.errors.append(f"telegram: {e}")
-            logger.error(f"Telegram failed: {e}")
+        # --- Telegram: disabled (portfolio data is private) ---
+        result.telegram_ok = True
+        logger.info("Telegram: grab notification disabled (private data)")
 
         print(json.dumps(asdict(result), indent=2))
-        return result.exit_code(drive_required=False, telegram_required=True)
+        return result.exit_code(drive_required=False, telegram_required=False)
 
     except Exception as e:
         logger.error(f"Grab sync fatal: {e}")

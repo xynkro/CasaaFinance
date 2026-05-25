@@ -1,0 +1,64 @@
+name: Signal Feedback — Weekly Weight Calibration
+
+# Weekly signal-outcome feedback loop. Matches historical scanner picks
+# against forward price returns to evaluate which signals in
+# technical_score.py actually predicted profitable setups.
+#
+# Runs Sunday evening (after markets close Friday, before WSR Full Sunday
+# night) so the weekly brain brief can reference accuracy findings.
+#
+# Output: signal_outcomes sheet tab + Telegram summary. Once enough data
+# accumulates (50+ outcomes per strategy), the script computes empirical
+# weight correlations and flags misalignments vs STRATEGY_WEIGHTS.
+
+on:
+  schedule:
+    # 14:00 UTC Sunday = 22:00 SGT Sunday — after market close, before WSR
+    - cron: "0 14 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+      days:
+        description: "Lookback window in days"
+        type: string
+        default: "90"
+      force:
+        description: "Re-evaluate all picks"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: signal-feedback
+  cancel-in-progress: true
+
+jobs:
+  feedback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Run signal feedback
+        run: |
+          ARGS="--days ${{ inputs.days || '90' }}"
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          python scripts/signal_feedback.py $ARGS

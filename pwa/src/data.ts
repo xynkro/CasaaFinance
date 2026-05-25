@@ -27,7 +27,7 @@ const GIDS: Record<string, string> = {
   regime_signals: "1037039714",
   exposure_posture: "1572953132",
   // screen_candidates created on first Sunday cron run — placeholder until then.
-  screen_candidates: "0",
+  screen_candidates: "1773922612",
   // TradingView 26-indicator consensus, populated daily by tv-signals.yml.
   // One row per (ticker, interval) — both 1d and 1W. The DecisionCard reads
   // the latest 1d + 1W row per ticker for the consensus chip.

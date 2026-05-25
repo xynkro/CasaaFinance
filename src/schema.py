@@ -2190,6 +2190,93 @@ class IvSurfaceScanRow:
 
 
 @dataclass
+class SignalOutcomeRow:
+    """Per-pick signal outcome — matches scan picks to forward price action.
+
+    Enables empirical weight calibration: which signals in technical_score.py
+    ACTUALLY predicted profitable setups vs which are noise?
+
+    Written weekly by scripts/signal_feedback.py. Each row captures:
+      - The scan pick identity (date, ticker, strategy, strike, expiry)
+      - The 16 normalized signal values at scan time (reconstructed from
+        yfinance OHLCV via compute_indicators + compute_signals)
+      - Forward price returns at evaluation horizon
+      - Strategy-specific outcome (WIN/LOSS/SCRATCH)
+
+    The weight optimizer (Phase 2) reads these rows and runs OLS regression
+    outcome ~ beta_i * signal_i to derive empirically-optimal weights, then
+    compares to STRATEGY_WEIGHTS in technical_score.py.
+
+    UPSERT key: (scan_date, ticker, strategy, strike, expiry) — one outcome
+    per unique pick. Re-runs overwrite with updated forward data.
+    """
+    TAB_NAME = "signal_outcomes"
+    HEADERS = [
+        "scan_date", "eval_date", "ticker", "strategy",
+        "scan_composite", "scan_technical",
+        "strike", "expiry", "dte",
+        "price_at_scan", "price_at_eval",
+        "fwd_return_pct", "strategy_outcome", "outcome_pnl_pct",
+        # 16 normalized signal values at scan time [-1, +1]
+        "sig_rsi", "sig_macd", "sig_macd_cross", "sig_bb_pct_b",
+        "sig_bb_squeeze", "sig_wvf", "sig_trend", "sig_momentum",
+        "sig_volume_spike", "sig_divergence", "sig_candle",
+        "sig_fib_support", "sig_volatility", "sig_vol_regime",
+        "sig_iv_rv_ratio", "sig_term_structure",
+    ]
+
+    scan_date: str
+    eval_date: str          # date outcome was evaluated
+    ticker: str
+    strategy: str           # CSP | CC | BUY | LONG_CALL | LONG_PUT
+    scan_composite: float   # composite_score from scan_results
+    scan_technical: float   # technical_score from scan_results
+    strike: float
+    expiry: str             # YYYYMMDD
+    dte: int
+    price_at_scan: float    # underlying_last from scan row
+    price_at_eval: float    # price at expiry or +30d
+    fwd_return_pct: float   # (price_at_eval / price_at_scan - 1) * 100
+    strategy_outcome: str   # WIN | LOSS | SCRATCH
+    outcome_pnl_pct: float  # estimated strategy P&L %
+    # Signal values (from compute_signals at scan date)
+    sig_rsi: float = 0.0
+    sig_macd: float = 0.0
+    sig_macd_cross: float = 0.0
+    sig_bb_pct_b: float = 0.0
+    sig_bb_squeeze: float = 0.0
+    sig_wvf: float = 0.0
+    sig_trend: float = 0.0
+    sig_momentum: float = 0.0
+    sig_volume_spike: float = 0.0
+    sig_divergence: float = 0.0
+    sig_candle: float = 0.0
+    sig_fib_support: float = 0.0
+    sig_volatility: float = 0.0
+    sig_vol_regime: float = 0.0
+    sig_iv_rv_ratio: float = 0.0
+    sig_term_structure: float = 0.0
+
+    def to_row(self) -> List[str]:
+        return [
+            self.scan_date, self.eval_date, self.ticker, self.strategy,
+            _num(self.scan_composite, 1), _num(self.scan_technical, 1),
+            _num(self.strike, 2), self.expiry, str(self.dte),
+            _num(self.price_at_scan, 4), _num(self.price_at_eval, 4),
+            _num(self.fwd_return_pct, 2), self.strategy_outcome,
+            _num(self.outcome_pnl_pct, 2),
+            _num(self.sig_rsi, 3), _num(self.sig_macd, 3),
+            _num(self.sig_macd_cross, 3), _num(self.sig_bb_pct_b, 3),
+            _num(self.sig_bb_squeeze, 3), _num(self.sig_wvf, 3),
+            _num(self.sig_trend, 3), _num(self.sig_momentum, 3),
+            _num(self.sig_volume_spike, 3), _num(self.sig_divergence, 3),
+            _num(self.sig_candle, 3), _num(self.sig_fib_support, 3),
+            _num(self.sig_volatility, 3), _num(self.sig_vol_regime, 3),
+            _num(self.sig_iv_rv_ratio, 3), _num(self.sig_term_structure, 3),
+        ]
+
+
+@dataclass
 class UoaAlertRow:
     """Unusual Options Activity alert — one row per alert per day.
 

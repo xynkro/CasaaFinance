@@ -1,0 +1,600 @@
+#!/usr/bin/env python3
+"""
+signal_feedback.py — Strategy Signal Feedback Loop
+
+Matches historical scanner picks (scan_results) against forward price
+outcomes to evaluate whether each pick's signals predicted correctly.
+
+Phase 1: Data collection
+  - Read scan_results from sheet (last 90 days)
+  - For mature picks (past expiry or >30d old), fetch yfinance data
+  - Re-derive the 16 signal values using compute_indicators + compute_signals
+  - Compute strategy-specific outcome (WIN/LOSS/SCRATCH)
+  - Write to signal_outcomes sheet
+  - Send Telegram summary with key findings
+
+Phase 2 (future, needs data accumulation):
+  - OLS regression: outcome ~ beta_i * signal_i
+  - Compare empirical betas to STRATEGY_WEIGHTS
+  - Suggest weight adjustments
+
+Usage:
+    python scripts/signal_feedback.py [--dry] [--days 90] [--force]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+import time
+from collections import defaultdict
+from datetime import datetime, timedelta
+from pathlib import Path
+
+import yfinance as yf
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from src import sheets as sh
+from src import schema as S
+from src.indicators import compute_indicators
+from src.technical_score import compute_signals, STRATEGY_WEIGHTS
+
+logger = logging.getLogger("signal_feedback")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+# ── Constants ──────────────────────────────────────────────────────────────
+
+# Minimum days after scan before we evaluate outcome.
+# CSP/CC: use DTE (evaluate at expiry). BUY: fixed 30d window.
+BUY_EVAL_DAYS = 30
+MIN_EVAL_DAYS = 5  # don't evaluate anything less than 5 days old
+
+# Outcome thresholds
+SCRATCH_THRESHOLD_PCT = 0.5  # ±0.5% of strike = scratch for options
+
+# yfinance rate limiting — pause between ticker downloads
+YF_DELAY_S = 0.3
+
+
+# ── Sheet reading helpers ──────────────────────────────────────────────────
+
+def _read_tab(client, tab_name: str) -> list[dict]:
+    """Read a sheet tab and return list of dicts keyed by header row."""
+    ss = sh._open_sheet(client)
+    try:
+        ws = ss.worksheet(tab_name)
+    except Exception:
+        logger.warning(f"Tab '{tab_name}' not found")
+        return []
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return []
+    headers = rows[0]
+    out = []
+    for r in rows[1:]:
+        d = {}
+        for i, h in enumerate(headers):
+            d[h] = r[i] if i < len(r) else ""
+        out.append(d)
+    return out
+
+
+def _parse_date(date_str: str) -> datetime | None:
+    """Parse a date string that may have THHMMSS audit suffix."""
+    if not date_str:
+        return None
+    # Strip audit suffix: "2026-05-20T143022" → "2026-05-20"
+    base = date_str[:10]
+    try:
+        return datetime.strptime(base, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _parse_float(s: str, default: float = 0.0) -> float:
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return default
+
+
+# ── Price fetching ─────────────────────────────────────────────────────────
+
+def _fetch_prices(ticker: str, start: datetime, end: datetime) -> dict | None:
+    """Fetch OHLCV from yfinance. Returns dict keyed by date string."""
+    try:
+        df = yf.download(
+            ticker,
+            start=start.strftime("%Y-%m-%d"),
+            end=(end + timedelta(days=5)).strftime("%Y-%m-%d"),
+            progress=False,
+            auto_adjust=True,
+        )
+        if df is None or df.empty:
+            return None
+        # Flatten MultiIndex columns if present
+        if hasattr(df.columns, 'levels'):
+            df.columns = df.columns.get_level_values(0)
+        out = {}
+        for idx, row in df.iterrows():
+            d = idx.strftime("%Y-%m-%d")
+            out[d] = {
+                "open": float(row["Open"]),
+                "high": float(row["High"]),
+                "low": float(row["Low"]),
+                "close": float(row["Close"]),
+                "volume": float(row.get("Volume", 0)),
+            }
+        return out
+    except Exception as e:
+        logger.warning(f"yfinance error for {ticker}: {e}")
+        return None
+
+
+def _get_price_at(prices: dict, target_date: datetime, window: int = 5) -> float | None:
+    """Get closing price at or near target_date (±window business days)."""
+    for delta in range(0, window + 1):
+        for sign in [0, 1, -1]:
+            d = (target_date + timedelta(days=delta * sign)).strftime("%Y-%m-%d")
+            if d in prices:
+                return prices[d]["close"]
+    return None
+
+
+def _get_indicators_at(ticker: str, scan_date: datetime) -> dict | None:
+    """Fetch 120 days of OHLCV up to scan_date, run compute_indicators."""
+    start = scan_date - timedelta(days=180)
+    try:
+        df = yf.download(
+            ticker,
+            start=start.strftime("%Y-%m-%d"),
+            end=(scan_date + timedelta(days=2)).strftime("%Y-%m-%d"),
+            progress=False,
+            auto_adjust=True,
+        )
+        if df is None or df.empty or len(df) < 30:
+            return None
+        if hasattr(df.columns, 'levels'):
+            df.columns = df.columns.get_level_values(0)
+        # Trim to scan_date
+        df = df[df.index <= scan_date.strftime("%Y-%m-%d")]
+        if len(df) < 30:
+            return None
+        indicators = compute_indicators(df, ticker)
+        return indicators
+    except Exception as e:
+        logger.warning(f"Indicator computation failed for {ticker} @ {scan_date}: {e}")
+        return None
+
+
+# ── Outcome evaluation ─────────────────────────────────────────────────────
+
+def _eval_csp_outcome(
+    strike: float, premium: float, price_at_eval: float, cash_required: float,
+) -> tuple[str, float]:
+    """Evaluate CSP outcome.
+
+    WIN = put expired OTM (price > strike).
+    LOSS = put expired ITM (price < strike).
+    Returns (outcome, pnl_pct).
+    """
+    if cash_required <= 0:
+        cash_required = strike * 100  # approximate
+
+    if price_at_eval > strike * (1 + SCRATCH_THRESHOLD_PCT / 100):
+        # OTM — put expires worthless, keep premium
+        pnl_pct = (premium * 100 / cash_required) * 100  # annualize later if needed
+        return "WIN", round(pnl_pct, 2)
+    elif price_at_eval < strike * (1 - SCRATCH_THRESHOLD_PCT / 100):
+        # ITM — assigned. Loss = strike - price - premium received
+        loss_per_share = strike - price_at_eval - premium
+        pnl_pct = (-loss_per_share * 100 / cash_required) * 100
+        return "LOSS", round(pnl_pct, 2)
+    else:
+        return "SCRATCH", 0.0
+
+
+def _eval_cc_outcome(
+    strike: float, price_at_scan: float, price_at_eval: float,
+) -> tuple[str, float]:
+    """Evaluate CC outcome.
+
+    WIN = call expired OTM (price < strike). Keep premium + stock.
+    LOSS = call expired ITM (price > strike). Called away.
+    """
+    if price_at_eval < strike * (1 - SCRATCH_THRESHOLD_PCT / 100):
+        # OTM — win
+        fwd_ret = (price_at_eval / price_at_scan - 1) * 100
+        return "WIN", round(fwd_ret, 2)
+    elif price_at_eval > strike * (1 + SCRATCH_THRESHOLD_PCT / 100):
+        # ITM — stock called away. P&L capped at strike.
+        capped_ret = (strike / price_at_scan - 1) * 100
+        return "LOSS", round(capped_ret, 2)
+    else:
+        return "SCRATCH", 0.0
+
+
+def _eval_buy_outcome(
+    price_at_scan: float, price_at_eval: float,
+) -> tuple[str, float]:
+    """Evaluate BUY outcome — simple forward return."""
+    if price_at_scan <= 0:
+        return "SCRATCH", 0.0
+    fwd_ret = (price_at_eval / price_at_scan - 1) * 100
+    if fwd_ret > 1.0:
+        return "WIN", round(fwd_ret, 2)
+    elif fwd_ret < -1.0:
+        return "LOSS", round(fwd_ret, 2)
+    else:
+        return "SCRATCH", round(fwd_ret, 2)
+
+
+# ── Main pipeline ──────────────────────────────────────────────────────────
+
+def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
+    logger.info("── Signal Feedback Loop ──")
+    client = sh.authenticate()
+
+    # 1. Read scan_results
+    scan_rows = _read_tab(client, S.ScanResultRow.TAB_NAME)
+    logger.info(f"Read {len(scan_rows)} rows from scan_results")
+
+    # 2. Read existing signal_outcomes to avoid re-processing
+    existing_outcomes = set()
+    if not force:
+        outcomes = _read_tab(client, S.SignalOutcomeRow.TAB_NAME)
+        for o in outcomes:
+            key = (o.get("scan_date", "")[:10], o.get("ticker", ""),
+                   o.get("strategy", ""), o.get("strike", ""), o.get("expiry", ""))
+            existing_outcomes.add(key)
+        logger.info(f"Found {len(existing_outcomes)} existing outcomes (skipping)")
+
+    # 3. Filter to mature picks
+    now = datetime.now()
+    cutoff_earliest = now - timedelta(days=lookback_days)
+    candidates = []
+
+    for r in scan_rows:
+        scan_dt = _parse_date(r.get("date", ""))
+        if not scan_dt:
+            continue
+        if scan_dt < cutoff_earliest:
+            continue
+
+        ticker = r.get("ticker", "").strip()
+        strategy = r.get("strategy", "").strip().upper()
+        strike = _parse_float(r.get("strike", ""))
+        expiry = r.get("expiry", "").strip()
+        dte = int(_parse_float(r.get("dte", "")))
+
+        if not ticker or not strategy:
+            continue
+
+        # Determine evaluation date
+        if strategy in ("CSP", "CC", "LONG_CALL", "LONG_PUT") and expiry:
+            # Evaluate at expiry
+            try:
+                eval_dt = datetime.strptime(expiry[:8], "%Y%m%d")
+            except ValueError:
+                try:
+                    eval_dt = datetime.strptime(expiry[:10], "%Y-%m-%d")
+                except ValueError:
+                    eval_dt = scan_dt + timedelta(days=max(dte, BUY_EVAL_DAYS))
+        else:
+            # BUY or unknown — evaluate at +30d
+            eval_dt = scan_dt + timedelta(days=BUY_EVAL_DAYS)
+
+        # Must be past evaluation date
+        if eval_dt > now - timedelta(days=MIN_EVAL_DAYS):
+            continue
+
+        # Check dedup
+        key = (scan_dt.strftime("%Y-%m-%d"), ticker, strategy,
+               f"{strike:.2f}", expiry)
+        if key in existing_outcomes:
+            continue
+
+        candidates.append({
+            "scan_dt": scan_dt,
+            "eval_dt": eval_dt,
+            "ticker": ticker,
+            "strategy": strategy,
+            "strike": strike,
+            "expiry": expiry,
+            "dte": dte,
+            "price_at_scan": _parse_float(r.get("underlying_last", "")),
+            "composite_score": _parse_float(r.get("composite_score", "")),
+            "technical_score": _parse_float(r.get("technical_score", "")),
+            "premium": _parse_float(r.get("premium", "")),
+            "cash_required": _parse_float(r.get("cash_required", "")),
+            "breakeven": _parse_float(r.get("breakeven", "")),
+        })
+
+    logger.info(f"Found {len(candidates)} mature picks to evaluate")
+
+    if not candidates:
+        logger.info("No new picks to evaluate — done")
+        return
+
+    # 4. Group by ticker to minimize yfinance calls
+    by_ticker: dict[str, list[dict]] = defaultdict(list)
+    for c in candidates:
+        by_ticker[c["ticker"]].append(c)
+
+    # 5. Process each ticker
+    new_outcomes: list[S.SignalOutcomeRow] = []
+    stats = {"win": 0, "loss": 0, "scratch": 0, "error": 0}
+    signal_hits: dict[str, list[tuple[float, float]]] = defaultdict(list)
+
+    for ticker, picks in by_ticker.items():
+        logger.info(f"Processing {ticker} ({len(picks)} picks)")
+
+        # Find date range needed
+        earliest_scan = min(p["scan_dt"] for p in picks)
+        latest_eval = max(p["eval_dt"] for p in picks)
+
+        # Fetch price data (scan_date - 180d to latest_eval + 5d)
+        prices = _fetch_prices(
+            ticker,
+            start=earliest_scan - timedelta(days=180),
+            end=latest_eval + timedelta(days=5),
+        )
+        if not prices:
+            logger.warning(f"No price data for {ticker} — skipping {len(picks)} picks")
+            stats["error"] += len(picks)
+            continue
+
+        time.sleep(YF_DELAY_S)
+
+        for pick in picks:
+            # Get price at evaluation date
+            price_at_eval = _get_price_at(prices, pick["eval_dt"])
+            if price_at_eval is None:
+                logger.warning(f"No eval price for {ticker} @ {pick['eval_dt'].date()}")
+                stats["error"] += 1
+                continue
+
+            price_at_scan = pick["price_at_scan"]
+            if price_at_scan <= 0:
+                # Try to get from yfinance
+                price_at_scan = _get_price_at(prices, pick["scan_dt"]) or 0
+            if price_at_scan <= 0:
+                stats["error"] += 1
+                continue
+
+            # Compute forward return
+            fwd_ret = (price_at_eval / price_at_scan - 1) * 100
+
+            # Strategy-specific outcome
+            strategy = pick["strategy"]
+            if strategy == "CSP":
+                outcome, pnl_pct = _eval_csp_outcome(
+                    pick["strike"], pick["premium"], price_at_eval, pick["cash_required"],
+                )
+            elif strategy == "CC":
+                outcome, pnl_pct = _eval_cc_outcome(
+                    pick["strike"], price_at_scan, price_at_eval,
+                )
+            elif strategy in ("LONG_CALL", "LONG_PUT"):
+                # Simplified: LONG_CALL wins if price > strike, LONG_PUT if price < strike
+                if strategy == "LONG_CALL":
+                    outcome, pnl_pct = _eval_buy_outcome(price_at_scan, price_at_eval)
+                else:
+                    # Invert for puts
+                    o, p = _eval_buy_outcome(price_at_scan, price_at_eval)
+                    outcome = {"WIN": "LOSS", "LOSS": "WIN", "SCRATCH": "SCRATCH"}[o]
+                    pnl_pct = -p
+            else:
+                # BUY or anything else — simple forward return
+                outcome, pnl_pct = _eval_buy_outcome(price_at_scan, price_at_eval)
+
+            stats[outcome.lower()] = stats.get(outcome.lower(), 0) + 1
+
+            # Compute signals at scan time
+            indicators = _get_indicators_at(ticker, pick["scan_dt"])
+            if indicators:
+                signals = compute_signals(indicators)
+            else:
+                signals = {k: 0.0 for k in [
+                    "rsi", "macd", "macd_cross", "bb_pct_b", "bb_squeeze",
+                    "wvf", "trend", "momentum", "volume_spike", "divergence",
+                    "candle", "fib_support", "volatility", "vol_regime",
+                    "iv_rv_ratio", "term_structure",
+                ]}
+
+            time.sleep(YF_DELAY_S)
+
+            # Build outcome row
+            row = S.SignalOutcomeRow(
+                scan_date=pick["scan_dt"].strftime("%Y-%m-%d"),
+                eval_date=pick["eval_dt"].strftime("%Y-%m-%d"),
+                ticker=ticker,
+                strategy=strategy,
+                scan_composite=pick["composite_score"],
+                scan_technical=pick["technical_score"],
+                strike=pick["strike"],
+                expiry=pick["expiry"],
+                dte=pick["dte"],
+                price_at_scan=price_at_scan,
+                price_at_eval=price_at_eval,
+                fwd_return_pct=round(fwd_ret, 2),
+                strategy_outcome=outcome,
+                outcome_pnl_pct=pnl_pct,
+                sig_rsi=signals.get("rsi", 0),
+                sig_macd=signals.get("macd", 0),
+                sig_macd_cross=signals.get("macd_cross", 0),
+                sig_bb_pct_b=signals.get("bb_pct_b", 0),
+                sig_bb_squeeze=signals.get("bb_squeeze", 0),
+                sig_wvf=signals.get("wvf", 0),
+                sig_trend=signals.get("trend", 0),
+                sig_momentum=signals.get("momentum", 0),
+                sig_volume_spike=signals.get("volume_spike", 0),
+                sig_divergence=signals.get("divergence", 0),
+                sig_candle=signals.get("candle", 0),
+                sig_fib_support=signals.get("fib_support", 0),
+                sig_volatility=signals.get("volatility", 0),
+                sig_vol_regime=signals.get("vol_regime", 0),
+                sig_iv_rv_ratio=signals.get("iv_rv_ratio", 0),
+                sig_term_structure=signals.get("term_structure", 0),
+            )
+            new_outcomes.append(row)
+
+            # Track signal-outcome correlation data
+            for sig_name, sig_val in signals.items():
+                signal_hits[f"{strategy}:{sig_name}"].append((sig_val, pnl_pct))
+
+    logger.info(f"Evaluated {len(new_outcomes)} picks: "
+                f"{stats['win']} WIN, {stats['loss']} LOSS, "
+                f"{stats['scratch']} SCRATCH, {stats['error']} errors")
+
+    if not new_outcomes:
+        logger.info("No outcomes to write")
+        return
+
+    # 6. Write to sheet
+    if dry:
+        logger.info(f"[DRY] Would write {len(new_outcomes)} rows to signal_outcomes")
+        for o in new_outcomes[:5]:
+            logger.info(f"  {o.ticker} {o.strategy} {o.scan_date} → {o.strategy_outcome} ({o.outcome_pnl_pct:+.1f}%)")
+    else:
+        sh.ensure_headers(client, S.SignalOutcomeRow.TAB_NAME, S.SignalOutcomeRow.HEADERS)
+        outcome_rows = [o.to_row() for o in new_outcomes]
+        sh.append_rows(client, S.SignalOutcomeRow.TAB_NAME, outcome_rows)
+        logger.info(f"✓ Wrote {len(outcome_rows)} rows to signal_outcomes")
+
+    # 7. Compute signal accuracy report
+    report = _build_report(new_outcomes, signal_hits, stats)
+
+    # 8. Send Telegram summary
+    if not dry:
+        _send_telegram(report)
+    else:
+        logger.info(f"[DRY] Telegram report:\n{report}")
+
+
+# ── Signal accuracy analysis ──────────────────────────────────────────────
+
+def _build_report(
+    outcomes: list[S.SignalOutcomeRow],
+    signal_hits: dict[str, list[tuple[float, float]]],
+    stats: dict,
+) -> str:
+    """Build a text report of signal accuracy findings."""
+    total = stats.get("win", 0) + stats.get("loss", 0) + stats.get("scratch", 0)
+    if total == 0:
+        return "No outcomes to report."
+
+    win_rate = stats["win"] / total * 100
+    avg_pnl = sum(o.outcome_pnl_pct for o in outcomes) / len(outcomes)
+
+    lines = [
+        "📊 Signal Feedback Report",
+        f"Picks evaluated: {total}",
+        f"Win rate: {win_rate:.0f}% ({stats['win']}W / {stats['loss']}L / {stats['scratch']}S)",
+        f"Avg outcome: {avg_pnl:+.1f}%",
+        "",
+    ]
+
+    # Per-strategy breakdown
+    by_strat: dict[str, list] = defaultdict(list)
+    for o in outcomes:
+        by_strat[o.strategy].append(o)
+
+    for strat, picks in sorted(by_strat.items()):
+        wins = sum(1 for p in picks if p.strategy_outcome == "WIN")
+        wr = wins / len(picks) * 100 if picks else 0
+        avg = sum(p.outcome_pnl_pct for p in picks) / len(picks)
+        lines.append(f"{strat}: {wr:.0f}% WR ({len(picks)} picks, avg {avg:+.1f}%)")
+
+    # Signal correlation analysis (only if enough data)
+    if len(outcomes) >= 15:
+        lines.append("")
+        lines.append("Signal alignment vs weights:")
+
+        # For each strategy, compute signal-outcome correlations
+        for strat in sorted(by_strat.keys()):
+            if strat not in STRATEGY_WEIGHTS:
+                continue
+            strat_outcomes = by_strat[strat]
+            if len(strat_outcomes) < 10:
+                continue
+
+            misaligned = []
+            weights = STRATEGY_WEIGHTS[strat]
+
+            for sig_name in weights:
+                key = f"{strat}:{sig_name}"
+                pairs = signal_hits.get(key, [])
+                if len(pairs) < 10:
+                    continue
+
+                # Simple correlation: when signal is positive, is outcome positive?
+                sig_vals = [p[0] for p in pairs]
+                pnl_vals = [p[1] for p in pairs]
+                mean_sig = sum(sig_vals) / len(sig_vals)
+                mean_pnl = sum(pnl_vals) / len(pnl_vals)
+
+                # Pearson correlation (simplified)
+                cov = sum((s - mean_sig) * (p - mean_pnl) for s, p in pairs) / len(pairs)
+                var_s = sum((s - mean_sig) ** 2 for s in sig_vals) / len(sig_vals)
+                var_p = sum((p - mean_pnl) ** 2 for p in pnl_vals) / len(pnl_vals)
+
+                if var_s > 0 and var_p > 0:
+                    corr = cov / (var_s ** 0.5 * var_p ** 0.5)
+                else:
+                    corr = 0.0
+
+                configured_weight = weights[sig_name]
+                # Weight sign should match correlation sign
+                weight_sign = 1 if configured_weight > 0 else (-1 if configured_weight < 0 else 0)
+                corr_sign = 1 if corr > 0.1 else (-1 if corr < -0.1 else 0)
+
+                if weight_sign != 0 and corr_sign != 0 and weight_sign != corr_sign:
+                    misaligned.append((sig_name, configured_weight, corr))
+
+            if misaligned:
+                lines.append(f"\n⚠️ {strat} weight misalignments:")
+                for sig, wt, corr in sorted(misaligned, key=lambda x: abs(x[2]), reverse=True)[:3]:
+                    lines.append(f"  {sig}: weight={wt:+.0f} but corr={corr:+.2f}")
+            else:
+                lines.append(f"✅ {strat}: weights aligned with outcomes")
+
+    # Sample size warning
+    if total < 30:
+        lines.append("")
+        lines.append(f"⚠️ Small sample ({total} picks) — findings are directional, not conclusive.")
+        lines.append(f"Need ≥50 picks per strategy for reliable weight calibration.")
+
+    return "\n".join(lines)
+
+
+# ── Telegram ───────────────────────────────────────────────────────────────
+
+def _send_telegram(report: str):
+    """Send feedback report to Telegram."""
+    try:
+        from src.telegram import send
+        # Use the options intel topic (closest fit for quantitative signals)
+        send(report, topic="options_intel")
+        logger.info("✓ Sent Telegram report")
+    except Exception as e:
+        logger.warning(f"Telegram send failed: {e}")
+
+
+# ── CLI ────────────────────────────────────────────────────────────────────
+
+def main():
+    ap = argparse.ArgumentParser(description="Signal Feedback Loop")
+    ap.add_argument("--dry", action="store_true", help="Don't write to sheets or Telegram")
+    ap.add_argument("--days", type=int, default=90, help="Lookback window in days")
+    ap.add_argument("--force", action="store_true", help="Re-evaluate all picks (ignore existing outcomes)")
+    args = ap.parse_args()
+
+    run(dry=args.dry, lookback_days=args.days, force=args.force)
+
+
+if __name__ == "__main__":
+    main()
