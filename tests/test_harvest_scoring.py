@@ -27,7 +27,7 @@ def _make_bullish_hist(n=250):
 
 def test_conviction_uses_compute_scores():
     """technical_conviction should use compute_scores, not ad-hoc scoring."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
 
     logger = logging.getLogger("test_harvest_scoring")
     hist = _make_bullish_hist()
@@ -49,7 +49,7 @@ def test_conviction_uses_compute_scores():
 
 def test_conviction_rejects_below_sma50():
     """Should reject when price < SMA50."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
 
     logger = logging.getLogger("test_harvest_scoring")
     # Create bearish data: price trending down, below SMA50
@@ -72,7 +72,7 @@ def test_conviction_rejects_below_sma50():
 
 def test_conviction_rejects_low_volume():
     """Should reject when average volume < 200K."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
 
     logger = logging.getLogger("test_harvest_scoring")
     hist = _make_bullish_hist()
@@ -89,7 +89,7 @@ def test_conviction_rejects_low_volume():
 
 def test_conviction_delegates_to_compute_scores():
     """Conviction value must come from compute_scores CSP output, not ad-hoc."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
     from src.indicators import compute_indicators
     from src.technical_score import compute_scores
 
@@ -113,7 +113,7 @@ def test_conviction_delegates_to_compute_scores():
 
 def test_conviction_rejects_rsi_too_low():
     """Should reject RSI < 30 (deeply oversold, falling knife risk)."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
     from src.indicators import compute_indicators
     from src.technical_score import compute_scores
 
@@ -139,7 +139,7 @@ def test_conviction_rejects_rsi_too_low():
 
 def test_conviction_rejects_rsi_too_high():
     """Should reject RSI > 75 (overbought, momentum chasing risk for CSP)."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
 
     logger = logging.getLogger("test_harvest_scoring")
     # Extremely parabolic up: RSI will be very high
@@ -162,7 +162,7 @@ def test_conviction_rejects_rsi_too_high():
 
 def test_conviction_ctx_has_required_keys():
     """Returned ctx dict should have all expected keys."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
 
     logger = logging.getLogger("test_harvest_scoring")
     hist = _make_bullish_hist()
@@ -181,7 +181,7 @@ def test_conviction_ctx_has_required_keys():
 
 def test_conviction_rejects_empty_history():
     """Should return (False, 0, {}) on empty history."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
 
     logger = logging.getLogger("test_harvest_scoring")
 
@@ -198,7 +198,7 @@ def test_conviction_rejects_empty_history():
 
 def test_conviction_rejects_insufficient_history():
     """Should return (False, 0, {}) when history < 50 bars."""
-    from scripts.premium_harvest_scan import technical_conviction
+    from scripts.daily_options_scan import technical_conviction_gate as technical_conviction
 
     logger = logging.getLogger("test_harvest_scoring")
     n = 30

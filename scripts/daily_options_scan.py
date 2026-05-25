@@ -1,19 +1,16 @@
 """
-daily_options_scan.py — Cloud-native replacement for the IBKR-required
-Daily Scan card on the PWA Options page.
+daily_options_scan.py — Unified options scanner (merged daily + harvest).
 
-Scans the user's WATCHLIST (current positions + decision queue + a curated
-cross-reference) via yfinance for fresh CSP/CC opportunities each morning.
-Writes to the `scan_results` sheet that the PWA Daily Scan card reads.
+Two-universe pipeline:
+  1. WATCHLIST universe (positions + decision queue + gov/screen signals)
+     → all strategies: CSP, CC, LONG_CALL, IC, PCS, CCS, PMCC
+  2. HIGH-IV DISCOVERY universe (FinViz screener → optionable high-IV stocks)
+     → CSP only (harvest pipeline: macro gate, fundamental gate,
+       technical conviction, earnings gate, vol-adjusted OTM)
 
-Differences from market_scan.py:
-  - market_scan: BROAD universe (LunarCrush + WSB + quality watchlist)
-                 → option_recommendations sheet (history archive; brain
-                   reads last 30 rows for context per generate_wsr_full.py
-                   and generate_daily_brief.py — no PWA surface since
-                   Phase D of the Decisions↔Ideas merge)
-  - daily_options_scan: USER'S OWN tickers (positions + queue)
-                 → scan_results sheet → "Daily Scan" card (executable)
+Both universes funnel into ONE scan_results sheet and ONE Telegram push.
+CSP picks from the discovery universe are ALSO written to harvest_scan
+(the PWA Harvest page reads that tab for signal-block display).
 
 Triggered daily by .github/workflows/daily-options-scan.yml at 10:35 SGT
 (US market open + 3h, fresh option chains).
@@ -25,10 +22,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -87,6 +85,34 @@ PMCC_SHORT_OTM      = (0.04, 0.12)   # 4-12% OTM ≈ 0.20-0.35Δ
 PMCC_MAX_COST_RATIO = 0.80       # LEAPS cost < 80% of strike width
 PMCC_MIN_OI         = 10
 PMCC_MIN_QUALITY    = 30
+
+# ── Harvest Discovery parameters ──────────────────────────────────────
+# Absorbed from premium_harvest_scan.py. Discovery pipeline adds high-IV
+# tickers beyond the user's watchlist for CSP harvesting.
+HARVEST_UNIVERSE_TOP = 150          # FinViz screener cap
+CSP_VOL_SIGMA   = 1.0              # target ≥ 1σ OTM (vol-adjusted)
+CSP_OTM_FLOOR   = 0.10             # minimum 10% OTM regardless of vol
+CSP_OTM_CEIL    = 0.40             # maximum OTM distance
+HARVEST_TARGET_DTE = 35            # ideal DTE for harvest CSPs
+HARVEST_DTE_RANGE  = (25, 45)      # acceptable range
+HARVEST_MIN_YIELD  = 14.0          # annualised yield floor for harvest CSPs
+MAX_HARVEST_PICKS  = 25            # max harvest picks to sheet
+TG_HARVEST_PICKS   = 8             # max harvest picks in Telegram
+
+FALLBACK_HIGH_IV_UNIVERSE = [
+    "SLV", "GDX", "COPX", "GLD", "TLT", "USO", "XLE",
+    "MSTR", "COIN", "HOOD", "RIOT", "MARA", "CLSK",
+    "AAOI", "CRWV", "BMNR", "OPEN", "SNAP", "PINS", "ROKU",
+    "DKNG", "PENN", "AFRM", "UPST", "SOFI", "LCID", "RIVN",
+    "PLTR", "RKLB", "ASTS", "NBIS", "RDDT", "PATH", "IONQ",
+    "TSLA", "AMD", "NVDA", "MU", "SMCI", "ARM", "AVGO",
+    "NFLX", "META", "AMZN", "GOOGL",
+    "MRNA", "CRSP", "BA", "GE", "CAT", "DE",
+    "JPM", "GS", "BAC", "C", "MS",
+    "NKE", "LULU", "COST", "WMT",
+    "OXY", "CVX", "XOM", "HAL",
+    "ORCL", "SHOP", "SQ", "PYPL",
+]
 
 
 def _setup_logging() -> logging.Logger:
@@ -456,6 +482,178 @@ def _best_leaps_expiry(expiries: tuple[str, ...], min_dte: int = 270) -> str | N
     return best
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Harvest Discovery Pipeline (absorbed from premium_harvest_scan.py)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def discover_universe(logger: logging.Logger, top_n: int = HARVEST_UNIVERSE_TOP) -> list[str]:
+    """FinViz screener for optionable high-IV stocks. Falls back to curated list."""
+    try:
+        from finvizfinance.screener.overview import Overview
+
+        foverview = Overview()
+        filters_dict = {
+            "Option/Short": "Optionable",
+            "Price": "Over $5",
+            "Average Volume": "Over 500K",
+            "Market Cap": "+Small (over $300mln)",
+        }
+        foverview.set_filter(filters_dict=filters_dict)
+        df = foverview.screener_view()
+
+        if df is not None and not df.empty:
+            tickers = df["Ticker"].tolist()[:top_n]
+            logger.info(f"  Discovery: FinViz returned {len(df)} optionable stocks, taking top {len(tickers)}")
+            return tickers
+        else:
+            logger.warning("  Discovery: FinViz returned empty — using fallback universe")
+            return FALLBACK_HIGH_IV_UNIVERSE[:top_n]
+
+    except Exception as e:
+        logger.warning(f"  Discovery: FinViz unavailable ({e}) — using fallback universe")
+        return FALLBACK_HIGH_IV_UNIVERSE[:top_n]
+
+
+def macro_gate(logger: logging.Logger) -> dict:
+    """Check macro regime. Returns {regime, vix, spx, spx_above_200sma, halted, caution}."""
+    import yfinance as yf
+
+    result: dict[str, Any] = {"regime": "STANDARD", "halted": False, "blackout": False, "caution": False}
+
+    # VIX
+    try:
+        vix_data = yf.download("^VIX", period="5d", progress=False)
+        if not vix_data.empty:
+            vix = float(vix_data["Close"].dropna().iloc[-1])
+        else:
+            vix = 18.0
+        result["vix"] = round(vix, 1)
+    except Exception:
+        vix = 18.0
+        result["vix"] = vix
+
+    # SPX + 200 SMA
+    try:
+        spx_data = yf.download("^GSPC", period="250d", progress=False)
+        if not spx_data.empty:
+            spx_close = spx_data["Close"].dropna()
+            spx = float(spx_close.iloc[-1])
+            sma200 = float(spx_close.tail(200).mean()) if len(spx_close) >= 200 else 0
+            result["spx"] = round(spx, 1)
+            result["spx_sma200"] = round(sma200, 1)
+            result["spx_above_200sma"] = spx > sma200
+        else:
+            result["spx"] = 0
+            result["spx_above_200sma"] = True
+    except Exception:
+        result["spx"] = 0
+        result["spx_above_200sma"] = True
+
+    # Macro blackout check (FOMC/CPI/NFP within 2 days)
+    try:
+        from src.macro_blackouts import MacroFeed
+        feed = MacroFeed.fetch()
+        now_utc = datetime.now(timezone.utc)
+        for ev in feed.events:
+            ev_time = ev.get("_dt") or ev.get("datetime")
+            if ev_time and abs((ev_time - now_utc).total_seconds()) < 2 * 86400:
+                if ev.get("impact") == "high":
+                    result["blackout"] = True
+                    result["blackout_event"] = ev.get("event", "unknown")
+                    break
+    except Exception:
+        pass
+
+    # Regime classification
+    if vix > 30 or not result.get("spx_above_200sma", True):
+        result["regime"] = "HALTED"
+        result["halted"] = True
+    elif vix > 25 or result.get("blackout"):
+        result["regime"] = "CAUTION"
+        result["caution"] = True
+
+    logger.info(f"  Macro: {result['regime']} (VIX={result['vix']}, SPX>200SMA={result.get('spx_above_200sma')})")
+    return result
+
+
+def fundamental_gate(ticker: str, logger: logging.Logger) -> tuple[bool, str]:
+    """Soft fundamental filter for discovery universe. Returns (pass, reason)."""
+    import yfinance as yf
+
+    try:
+        info = yf.Ticker(ticker).info
+    except Exception:
+        return False, "info fetch failed"
+
+    mkt_cap = info.get("marketCap") or 0
+    if mkt_cap < 500_000_000:
+        return False, f"market cap ${mkt_cap / 1e6:.0f}M < $500M"
+
+    revenue = info.get("totalRevenue") or info.get("revenue") or 0
+    if revenue <= 0:
+        return False, "no revenue"
+
+    price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+    if price < 3:
+        return False, f"price ${price:.2f} < $3"
+
+    return True, "pass"
+
+
+def technical_conviction_gate(ticker: str, logger: logging.Logger) -> tuple[bool, int, dict]:
+    """
+    Technical gates + conviction for discovery universe tickers.
+    Uses compute_indicators() and compute_scores() for vol-adjusted gating.
+    Returns (pass, conviction_0_100, context_dict).
+    """
+    import yfinance as yf
+    from src.indicators import compute_indicators
+    from src.technical_score import compute_scores
+
+    try:
+        yt = yf.Ticker(ticker)
+        hist = yt.history(period="250d", interval="1d", auto_adjust=True)
+        if hist.empty or len(hist) < 50:
+            return False, 0, {}
+    except Exception:
+        return False, 0, {}
+
+    ind = compute_indicators(hist)
+    price = ind.get("close", 0)
+    if price <= 0:
+        return False, 0, {}
+
+    sma50 = ind.get("sma_50", 0)
+    sma200 = ind.get("sma_200", 0)
+    rsi = ind.get("rsi_14", 50)
+    swing_low = ind.get("swing_low", 0)
+    avg_vol = ind.get("vol_avg_20", 0)
+
+    # Gates
+    if sma50 > 0 and price < sma50:
+        return False, 0, ind
+    if sma200 > 0 and price < sma200:
+        return False, 0, ind
+
+    # Vol-adjusted RSI bounds
+    vol = ind.get("volatility_annual", 0.30)
+    vol_shift = (vol - 0.30) * 25
+    rsi_low = max(20, 30 - vol_shift)
+    rsi_high = min(85, 75 + vol_shift)
+    if rsi < rsi_low or rsi > rsi_high:
+        return False, 0, ind
+    if swing_low > 0 and price < swing_low * 1.03:
+        return False, 0, ind
+    if avg_vol < 200_000:
+        return False, 0, ind
+
+    scores = compute_scores(ind)
+    csp_score = scores.get("CSP", 0)
+    conviction = max(0, min(100, int((csp_score + 100) / 2)))
+
+    return True, conviction, ind
+
+
 def _long_call_quality(
     fi, price: float, gov_info: dict, logger: logging.Logger, ticker: str,
 ) -> tuple[float, list[str]]:
@@ -572,8 +770,11 @@ def scan_ticker(
     gov_info: dict | None = None,
     insider_info: dict | None = None,
     screen_info: dict | None = None,
+    earnings_days_away: int = -1,
+    macro: dict | None = None,
+    is_discovery: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return CSP + CC + LONG_CALL candidates for a single ticker.
+    """Return CSP + CC + LONG_CALL + spread candidates for a single ticker.
 
     LONG_CALL triggers (any one sufficient, quality-gated to >= 40):
       1. gov_info: gov confluence score >= 30 + not TRIM
@@ -586,6 +787,11 @@ def scan_ticker(
         insider transactions for this ticker over last 14 days
     screen_info: dict {source, score, trigger_price, rationale} — from
         screen_candidates if this ticker passed VCP/CANSLIM screen
+    earnings_days_away: days until next earnings (-1 = no data)
+    macro: macro_gate() dict (for signal blocks on harvest CSPs)
+    is_discovery: True if ticker is from the FinViz discovery universe
+        (vs the user's watchlist). Discovery tickers get vol-adjusted
+        CSP OTM range; watchlist tickers keep the standard range.
     """
     import yfinance as yf
     try:
@@ -620,55 +826,136 @@ def scan_ticker(
     scores = tech_ctx.get("_scores", {})
     out: list[dict[str, Any]] = []
 
-    # ── CSP ────────────────────────────────────────────────────────────────
-    try:
-        puts = chain.puts.copy()
-        puts = puts[puts["openInterest"] >= MIN_OI]
-        puts["mid"] = puts.apply(_option_mid, axis=1)
-        puts = puts[puts["mid"] >= MIN_MID]
-        # Strike 2-18% OTM (below price)
-        puts = puts[(puts["strike"] >= price * (1 - CSP_OTM_RANGE[1])) &
-                    (puts["strike"] <= price * (1 - CSP_OTM_RANGE[0]))]
-        puts = puts.copy()
-        puts["ann_yield"] = puts["mid"] / puts["strike"] * (365 / dte) * 100
-        puts = puts[puts["ann_yield"] >= MIN_CSP_YIELD]
-        puts = puts.sort_values("ann_yield", ascending=False)
-        if not puts.empty:
-            r = puts.iloc[0]
-            spread_pct = 0.0
-            bid = float(r.get("bid", 0) or 0)
-            ask = float(r.get("ask", 0) or 0)
-            mid = float(r["mid"])
-            if mid > 0 and bid > 0 and ask > 0:
-                spread_pct = (ask - bid) / mid * 100
-            csp_delta, csp_iv = _compute_greeks(r, price, dte, "P")
-            csp_ivr = _estimate_ivr(csp_iv, hv30)
-            out.append({
-                "ticker": ticker,
-                "strategy": "CSP",
-                "right": "P",
-                "strike": float(r["strike"]),
-                "expiry": expiry_iso,
-                "dte": dte,
-                "delta": csp_delta,
-                "premium": round(mid, 2),
-                "bid": round(bid, 2),
-                "ask": round(ask, 2),
-                "annual_yield_pct": round(float(r["ann_yield"]), 2),
-                "cash_required": round(float(r["strike"]) * 100, 2),
-                "breakeven": round(float(r["strike"]) - mid, 2),
-                "iv": csp_iv,
-                "iv_rank": round(csp_ivr, 1),
-                "spread_pct": round(spread_pct, 2),
-                "underlying_last": round(price, 2),
-                "technical_score": round(scores.get("CSP", 0), 1),
-                "composite_score": round(float(r["ann_yield"]), 2),
-                "catalyst_flag": False,
-                "hv30": round(hv30, 1),
-                "notes": "",
-            })
-    except Exception as e:
-        logger.debug(f"  {ticker}: CSP error — {e}")
+    # ── CSP (unified: vol-adjusted OTM for discovery, static for watchlist) ──
+    # EARNINGS GATE: reject CSP if earnings falls inside option DTE window.
+    # Selling premium into a binary event (earnings) is the #1 CSP blowup.
+    # -1 means no data / no upcoming earnings — allow through.
+    csp_earnings_blocked = (0 <= earnings_days_away <= dte)
+    if csp_earnings_blocked:
+        logger.info(f"  {ticker}: CSP EARNINGS_BLOCKED — earnings in {earnings_days_away}d, option DTE={dte}d")
+
+    if not csp_earnings_blocked:
+        try:
+            puts = chain.puts.copy()
+            puts = puts[puts["openInterest"] >= MIN_OI]
+            puts["mid"] = puts.apply(_option_mid, axis=1)
+            puts = puts[puts["mid"] >= MIN_MID]
+
+            # OTM range: vol-adjusted for discovery tickers, static for watchlist
+            if is_discovery:
+                # Vol-adjusted: ≥ 1σ move below spot, clamped to [10%, 40%]
+                _vol = hv30 / 100 if hv30 > 0 else 0.30
+                _sigma_otm = CSP_VOL_SIGMA * _vol * math.sqrt(dte / 365)
+                _otm_min = max(CSP_OTM_FLOOR, _sigma_otm)
+                _otm_max = min(CSP_OTM_CEIL, _sigma_otm * 1.5)
+                if _otm_max <= _otm_min:
+                    _otm_max = _otm_min + 0.05
+                csp_yield_floor = HARVEST_MIN_YIELD
+            else:
+                _otm_min, _otm_max = CSP_OTM_RANGE
+                csp_yield_floor = MIN_CSP_YIELD
+
+            puts = puts[(puts["strike"] >= price * (1 - _otm_max)) &
+                        (puts["strike"] <= price * (1 - _otm_min))]
+            puts = puts.copy()
+            puts["ann_yield"] = puts["mid"] / puts["strike"] * (365 / dte) * 100
+            puts = puts[puts["ann_yield"] >= csp_yield_floor]
+            puts = puts.sort_values("ann_yield", ascending=False)
+            if not puts.empty:
+                r = puts.iloc[0]
+                spread_pct = 0.0
+                bid = float(r.get("bid", 0) or 0)
+                ask = float(r.get("ask", 0) or 0)
+                mid = float(r["mid"])
+                if mid > 0 and bid > 0 and ask > 0:
+                    spread_pct = (ask - bid) / mid * 100
+                csp_delta, csp_iv = _compute_greeks(r, price, dte, "P")
+                csp_ivr = _estimate_ivr(csp_iv, hv30)
+
+                # Conviction score: unified scoring CSP score mapped to [0, 100]
+                csp_score_raw = scores.get("CSP", 0)
+                conviction = max(0, min(100, int((csp_score_raw + 100) / 2)))
+
+                # Liquidity adjustments (discovery tickers only)
+                if is_discovery:
+                    oi = int(r.get("openInterest", 0) or 0)
+                    if oi <= 200:
+                        conviction = max(0, conviction - 5)
+                    if spread_pct > 15:
+                        conviction = max(0, conviction - 5)
+
+                # S/R context
+                sr_parts = []
+                support = tech_ctx.get("support", 0)
+                rsi_val = tech_ctx.get("rsi_14", 50)
+                if support > 0:
+                    dist_pct = (price - support) / price * 100
+                    sr_parts.append(f"support ${support:.0f} ({dist_pct:.0f}%)")
+                sr_parts.append(f"RSI {rsi_val:.0f}")
+                sr_context = " · ".join(sr_parts)
+
+                # Strategy tag: HARVEST_CSP for discovery universe, CSP for watchlist
+                strat_tag = "HARVEST_CSP" if is_discovery else "CSP"
+
+                csp_candidate = {
+                    "ticker": ticker,
+                    "strategy": strat_tag,
+                    "right": "P",
+                    "strike": float(r["strike"]),
+                    "expiry": expiry_iso,
+                    "dte": dte,
+                    "delta": csp_delta,
+                    "premium": round(mid, 2),
+                    "bid": round(bid, 2),
+                    "ask": round(ask, 2),
+                    "annual_yield_pct": round(float(r["ann_yield"]), 2),
+                    "cash_required": round(float(r["strike"]) * 100, 2),
+                    "breakeven": round(float(r["strike"]) - mid, 2),
+                    "iv": csp_iv,
+                    "iv_rank": round(csp_ivr, 1),
+                    "spread_pct": round(spread_pct, 2),
+                    "underlying_last": round(price, 2),
+                    "technical_score": round(csp_score_raw, 1),
+                    "composite_score": round(conviction, 1) if is_discovery else round(float(r["ann_yield"]), 2),
+                    "catalyst_flag": False,
+                    "hv30": round(hv30, 1),
+                    "notes": "",
+                    # Harvest-specific fields (used for harvest_scan tab write)
+                    "_conviction": conviction,
+                    "_sr_context": sr_context,
+                    "_is_discovery": is_discovery,
+                }
+
+                # Build signal blocks for harvest CSP picks
+                if is_discovery and macro:
+                    csp_candidate["_entry_signals"] = json.dumps({
+                        "strategy": "HARVEST_CSP", "ticker": ticker,
+                        "strike": float(r["strike"]), "expiry": expiry_iso,
+                        "dte": dte, "credit": round(mid, 2),
+                        "annual_yield_pct": round(float(r["ann_yield"]), 1),
+                        "iv_rank": round(csp_ivr, 1), "conviction": conviction,
+                        "sr_context": sr_context,
+                        "macro_regime": macro.get("regime", "STANDARD"),
+                        "vix": macro.get("vix", 0),
+                        "spx_above_200sma": macro.get("spx_above_200sma", True),
+                    })
+                    csp_candidate["_maintenance_signals"] = json.dumps({
+                        "profit_target_pct": 50, "profit_target_optional": True,
+                        "time_stop_dte": 21, "strike_tested_pct": 3,
+                        "earnings_in_dte": False,
+                        "earnings_days_away": earnings_days_away,
+                        "macro_shift_exit": True, "trend_break_exit": True,
+                        "sma50_at_entry": tech_ctx.get("_indicators", {}).get("sma_50", 0),
+                    })
+                    csp_candidate["_exit_signals"] = json.dumps({
+                        "max_loss_mult": 2.0, "max_loss_value": round(mid * 2, 2),
+                        "mechanical_close_dte": 14, "assignment_risk_dte": 7,
+                        "expired_worthless": True,
+                    })
+
+                out.append(csp_candidate)
+        except Exception as e:
+            logger.debug(f"  {ticker}: CSP error — {e}")
 
     # ── CC ─────────────────────────────────────────────────────────────────
     try:
@@ -1284,27 +1571,61 @@ def scan_ticker(
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry", action="store_true", help="Print, no sheet write")
+    ap.add_argument("--top", type=int, default=HARVEST_UNIVERSE_TOP, help="Discovery universe cap")
     args = ap.parse_args()
 
     logger = _setup_logging()
-    logger.info("=== daily-options-scan start ===")
+    logger.info("═══ Unified Options Scanner (watchlist + harvest) ═══")
 
-    watchlist = gather_watchlist(logger)
-    logger.info(f"Watchlist: {len(watchlist)} tickers — {', '.join(watchlist)}")
-    if not watchlist:
-        logger.error("No tickers to scan")
-        return 1
+    # ── Macro Gate ────────────────────────────────────────────────────
+    macro = macro_gate(logger)
 
-    # Load gov confluence signals for catalyst tagging + directional gate
+    # ── Universe Assembly ─────────────────────────────────────────────
+    # 1) User's watchlist (positions + decision queue + gov/screen signals)
+    watchlist_set = set(gather_watchlist(logger))
+    logger.info(f"  Watchlist: {len(watchlist_set)} tickers")
+
+    # 2) High-IV discovery universe (FinViz screener)
+    discovery_raw = discover_universe(logger, top_n=args.top)
+    # Filter out tickers already in watchlist (avoid double-scanning)
+    discovery_only = [t for t in discovery_raw if t.upper() not in watchlist_set]
+    logger.info(f"  Discovery: {len(discovery_only)} tickers (excl {len(discovery_raw) - len(discovery_only)} watchlist overlap)")
+
+    # 3) Fundamental filter on discovery tickers (watchlist tickers already vetted)
+    if macro.get("halted"):
+        logger.warning(f"MACRO HALTED (VIX={macro['vix']}, regime={macro['regime']}) — skipping discovery universe")
+        discovery_survivors: list[str] = []
+    else:
+        discovery_survivors = []
+        for ticker in discovery_only:
+            ok, reason = fundamental_gate(ticker, logger)
+            if ok:
+                discovery_survivors.append(ticker)
+            else:
+                logger.debug(f"  {ticker}: fundamental reject — {reason}")
+        logger.info(f"  Discovery fundamentals: {len(discovery_survivors)} of {len(discovery_only)} passed")
+
+    # 4) Technical conviction gate on discovery survivors
+    discovery_final: list[str] = []
+    for ticker in discovery_survivors:
+        ok, conv, ctx = technical_conviction_gate(ticker, logger)
+        if ok:
+            discovery_final.append(ticker)
+        else:
+            logger.debug(f"  {ticker}: technical reject")
+    logger.info(f"  Discovery technical: {len(discovery_final)} of {len(discovery_survivors)} passed")
+
+    # ── Sheets + signal data ──────────────────────────────────────────
     from src.sync import load_env
     from src import sheets as sh
     from src import schema as S
     load_env()
     client = sh.authenticate()
+    ss = sh._open_sheet(client)
+
+    # Gov confluence signals (for catalyst tagging + LONG_CALL trigger)
     gov_data: dict[str, dict] = {}
     try:
-        import datetime as _dt
-        ss = sh._open_sheet(client)
         ws_gc = ss.worksheet(S.GovConfluenceSignalRow.TAB_NAME)
         gc_rows = ws_gc.get_all_values()
         if len(gc_rows) > 1:
@@ -1316,7 +1637,7 @@ def main() -> int:
                     return default
                 return r[gc_cols[col_name]] or default
 
-            seven_d = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+            seven_d = (date.today() - timedelta(days=7)).isoformat()
             for r in gc_rows[1:]:
                 if len(r) <= gc_cols.get("date", 0) or r[gc_cols["date"]] < seven_d:
                     continue
@@ -1327,8 +1648,6 @@ def main() -> int:
                     sc = 0
                 prev = gov_data.get(tk)
                 if prev is None or sc > prev.get("score", 0):
-                    # Carry sub-scores so LONG_CALL quality can check
-                    # for multi-signal confirmation (not just contracts)
                     gov_data[tk] = {
                         "score": sc,
                         "tier": _safe_col(r, "tier"),
@@ -1338,20 +1657,19 @@ def main() -> int:
                         "insider_score": float(_safe_col(r, "insider_score", "0")),
                         "analyst_score": float(_safe_col(r, "analyst_score", "0")),
                     }
-            logger.info(f"  loaded {len(gov_data)} gov confluence signals for catalyst tagging")
+            logger.info(f"  loaded {len(gov_data)} gov confluence signals")
     except Exception as e:
-        logger.warning(f"  gov confluence unavailable ({e}) — no catalyst tagging")
+        logger.warning(f"  gov confluence unavailable ({e})")
 
-    # Load insider transactions for LONG_CALL trigger (cluster buying)
+    # Insider transactions (for LONG_CALL trigger)
     insider_data: dict[str, dict] = {}
     try:
-        import datetime as _dt2
         ws_ins = ss.worksheet(S.InsiderTransactionRow.TAB_NAME)
         ins_rows = ws_ins.get_all_values()
         if len(ins_rows) > 1:
             ins_hdr = ins_rows[0]
             ins_cols = {h: i for i, h in enumerate(ins_hdr)}
-            fourteen_d = (_dt2.date.today() - _dt2.timedelta(days=14)).isoformat()
+            fourteen_d = (date.today() - timedelta(days=14)).isoformat()
             for r in ins_rows[1:]:
                 tx_date = r[ins_cols.get("transaction_date", 0)] if ins_cols.get("transaction_date", 0) < len(r) else ""
                 if tx_date < fourteen_d:
@@ -1375,7 +1693,7 @@ def main() -> int:
     except Exception as e:
         logger.warning(f"  insider transactions unavailable ({e})")
 
-    # Load screen candidates for LONG_CALL trigger (VCP/CANSLIM breakouts)
+    # Screen candidates (for LONG_CALL trigger)
     screen_data: dict[str, dict] = {}
     try:
         ws_sc = ss.worksheet(S.ScreenCandidateRow.TAB_NAME)
@@ -1383,7 +1701,7 @@ def main() -> int:
         if len(sc_rows) > 1:
             sc_hdr = sc_rows[0]
             sc_cols = {h: i for i, h in enumerate(sc_hdr)}
-            seven_d2 = (_dt.date.today() - _dt.timedelta(days=7)).isoformat()
+            seven_d2 = (date.today() - timedelta(days=7)).isoformat()
             for r in sc_rows[1:]:
                 sc_date = r[sc_cols.get("date", 0)] if sc_cols.get("date", 0) < len(r) else ""
                 if sc_date < seven_d2:
@@ -1403,29 +1721,38 @@ def main() -> int:
                         "trigger_price": r[sc_cols.get("trigger_price", 0)] if sc_cols.get("trigger_price", 0) < len(r) else "",
                         "rationale": r[sc_cols.get("rationale", 0)] if sc_cols.get("rationale", 0) < len(r) else "",
                     }
-            logger.info(f"  loaded {len(screen_data)} screen candidates for breakout triggers")
+            logger.info(f"  loaded {len(screen_data)} screen candidates")
     except Exception as e:
         logger.warning(f"  screen candidates unavailable ({e})")
 
+    # ── Batch-fetch earnings dates ────────────────────────────────────
+    from src.indicators import fetch_earnings_dates
+    all_tickers = sorted(watchlist_set | set(discovery_final))
+    earnings_data = fetch_earnings_dates(all_tickers)
+    logger.info(f"  Earnings data: {len(earnings_data)} tickers with upcoming earnings")
+
+    # ── Scan: Watchlist (all strategies) ──────────────────────────────
     all_candidates: list[dict] = []
-    for ticker in watchlist:
+    for ticker in sorted(watchlist_set):
         try:
             gov_info = gov_data.get(ticker) or None
             ins_info = insider_data.get(ticker) or None
             scr_info = screen_data.get(ticker) or None
+            ed = earnings_data.get(ticker, {})
+            earnings_away = ed.get("earnings_days_away", -1)
             cands = scan_ticker(ticker, logger, gov_info=gov_info,
-                                insider_info=ins_info, screen_info=scr_info)
+                                insider_info=ins_info, screen_info=scr_info,
+                                earnings_days_away=earnings_away, macro=macro,
+                                is_discovery=False)
             # Tag candidates with gov confluence catalyst flag + gate
             for c in cands:
                 if gov_info:
                     if not c.get("catalyst_flag"):
                         c["catalyst_flag"] = True
                     gov_strategy = gov_info.get("strategy", "")
-                    # Block CSPs where Congress is selling (TRIM signal)
                     if c["strategy"] == "CSP" and gov_strategy == "TRIM":
                         logger.info(f"  {ticker}: CSP blocked — Congress cluster selling")
                         continue
-                    # Block CCs where gov confluence says BUY (Tier A/B catalyst)
                     if c["strategy"] == "CC" and gov_info.get("tier") in ("A", "B") and gov_strategy in ("BUY_DIP", "LONG_CALL"):
                         logger.info(f"  {ticker}: CC blocked — gov confluence Tier {gov_info['tier']} {gov_strategy}")
                         continue
@@ -1433,28 +1760,58 @@ def main() -> int:
         except Exception as e:
             logger.debug(f"  {ticker}: {e}")
 
-    # Sort by yield desc
-    all_candidates.sort(key=lambda c: c["annual_yield_pct"], reverse=True)
-    logger.info(f"Total candidates found: {len(all_candidates)}")
+    watchlist_count = len(all_candidates)
+    logger.info(f"  Watchlist scan: {watchlist_count} candidates")
+
+    # ── Scan: Discovery (CSP only via harvest pipeline) ───────────────
+    for i, ticker in enumerate(discovery_final):
+        try:
+            ed = earnings_data.get(ticker, {})
+            earnings_away = ed.get("earnings_days_away", -1)
+            cands = scan_ticker(ticker, logger,
+                                earnings_days_away=earnings_away, macro=macro,
+                                is_discovery=True)
+            # Discovery tickers only produce CSP (HARVEST_CSP) — no CC/spreads
+            harvest_cands = [c for c in cands if c.get("strategy") == "HARVEST_CSP"]
+            all_candidates.extend(harvest_cands)
+            if (i + 1) % 20 == 0:
+                logger.info(f"  ... scanned {i + 1}/{len(discovery_final)} discovery tickers")
+        except Exception as e:
+            logger.debug(f"  {ticker}: discovery scan error — {e}")
+
+    discovery_count = len(all_candidates) - watchlist_count
+    logger.info(f"  Discovery scan: {discovery_count} harvest CSP candidates")
+
+    # Sort: HARVEST_CSP by conviction desc, others by yield desc
+    harvest_picks = [c for c in all_candidates if c.get("strategy") == "HARVEST_CSP"]
+    other_picks = [c for c in all_candidates if c.get("strategy") != "HARVEST_CSP"]
+    harvest_picks.sort(key=lambda c: c.get("_conviction", 0), reverse=True)
+    other_picks.sort(key=lambda c: c["annual_yield_pct"], reverse=True)
+
+    logger.info(f"Total: {len(all_candidates)} candidates ({len(other_picks)} watchlist + {len(harvest_picks)} harvest)")
 
     if args.dry:
-        logger.info("[DRY] Would write to scan_results")
+        for c in (other_picks[:5] + harvest_picks[:5]):
+            logger.info(f"  {c['strategy']:15} {c['ticker']:6} ${c['strike']:.0f} {c['dte']}d yield={c['annual_yield_pct']:.0f}%")
+        logger.info("[DRY] Would write to scan_results + harvest_scan")
         return 0
 
     if not all_candidates:
         logger.warning("No candidates met threshold — sheet not updated")
         return 0
 
-    # Write to scan_results (client already authenticated above)
-    sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
+    today_iso = date.today().isoformat()
 
-    today_iso = datetime.now().strftime("%Y-%m-%d")
-    rows_to_write: list[list[str]] = []
-    for c in all_candidates:
+    # ── Write to scan_results (all candidates) ────────────────────────
+    sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
+    scan_rows: list[list[str]] = []
+    for c in other_picks + harvest_picks[:MAX_HARVEST_PICKS]:
+        # Normalize HARVEST_CSP → CSP for scan_results (one canonical strategy name)
+        strat = "CSP" if c["strategy"] == "HARVEST_CSP" else c["strategy"]
         row = S.ScanResultRow(
             date=today_iso,
             ticker=c["ticker"],
-            strategy=c["strategy"],
+            strategy=strat,
             right=c["right"],
             strike=c["strike"],
             expiry=c["expiry"],
@@ -1475,24 +1832,69 @@ def main() -> int:
             catalyst_flag=c["catalyst_flag"],
             notes=c.get("notes", ""),
         )
-        rows_to_write.append(row.to_row())
+        scan_rows.append(row.to_row())
+    sh.append_rows(client, S.ScanResultRow.TAB_NAME, scan_rows)
+    logger.info(f"✓ Wrote {len(scan_rows)} rows to scan_results")
 
-    sh.append_rows(client, S.ScanResultRow.TAB_NAME, rows_to_write)
-    logger.info(f"✓ Wrote {len(rows_to_write)} rows to scan_results")
+    # ── Write to harvest_scan (discovery CSP picks for PWA Harvest page) ──
+    if harvest_picks:
+        try:
+            sh.ensure_headers(client, S.HarvestScanRow.TAB_NAME, S.HarvestScanRow.HEADERS)
+            harvest_rows: list[list[str]] = []
+            for c in harvest_picks[:MAX_HARVEST_PICKS]:
+                hrow = S.HarvestScanRow(
+                    date=today_iso, ticker=c["ticker"], strategy="HARVEST_CSP",
+                    strike=c["strike"], expiry=c["expiry"], dte=c["dte"],
+                    credit=c["premium"],
+                    annual_yield_pct=c["annual_yield_pct"],
+                    iv_rank=c["iv_rank"],
+                    conviction=c.get("_conviction", 0),
+                    underlying_last=c["underlying_last"],
+                    cash_required=c["cash_required"],
+                    breakeven=c["breakeven"],
+                    sr_context=c.get("_sr_context", ""),
+                    macro_regime=macro.get("regime", "STANDARD"),
+                    vix=macro.get("vix", 0),
+                    entry_signals=c.get("_entry_signals", "{}"),
+                    maintenance_signals=c.get("_maintenance_signals", "{}"),
+                    exit_signals=c.get("_exit_signals", "{}"),
+                    notes=c.get("notes", ""),
+                )
+                harvest_rows.append(hrow.to_row())
+            sh.append_rows(client, S.HarvestScanRow.TAB_NAME, harvest_rows)
+            logger.info(f"✓ Wrote {len(harvest_rows)} rows to harvest_scan")
+        except Exception as e:
+            logger.warning(f"  harvest_scan write failed: {e}")
 
-    # ── Telegram → Options Intel topic ────────────────────────────────
+    # ── Single Telegram push → Options Intel topic ────────────────────
+    # Combine all candidates into one message. HARVEST_CSP shows as "CSP"
+    # in the Telegram digest (user doesn't need to see the internal tag).
+    tg_candidates = []
+    for c in other_picks + harvest_picks[:TG_HARVEST_PICKS]:
+        tc = dict(c)
+        if tc["strategy"] == "HARVEST_CSP":
+            tc["strategy"] = "CSP"
+        # Clean internal keys before passing to Telegram formatter
+        tc.pop("_conviction", None)
+        tc.pop("_sr_context", None)
+        tc.pop("_is_discovery", None)
+        tc.pop("_entry_signals", None)
+        tc.pop("_maintenance_signals", None)
+        tc.pop("_exit_signals", None)
+        tg_candidates.append(tc)
+
     try:
         from src import telegram as tg
         tg.ping_options_intel(
             date=today_iso,
-            candidates=all_candidates,
+            candidates=tg_candidates,
             pwa_url="https://xynkro.github.io/CasaaFinance/",
         )
         logger.info("✓ Options Intel digest sent to Telegram")
     except Exception as e:
         logger.warning(f"Telegram Options Intel ping failed: {e}")
 
-    logger.info("=== daily-options-scan done ===")
+    logger.info("═══ unified options scan done ═══")
     return 0
 
 

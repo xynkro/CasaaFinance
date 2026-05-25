@@ -1,4 +1,4 @@
-name: Daily Options Scan — Watchlist (no IBKR needed)
+name: Daily Options Scan — Unified Watchlist + Discovery
 
 on:
   schedule:
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     env:
       OAUTH_TOKEN_JSON:    ${{ secrets.OAUTH_TOKEN_JSON }}
       SHEET_ID:            ${{ secrets.SHEET_ID }}
