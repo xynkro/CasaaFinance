@@ -2187,3 +2187,46 @@ class IvSurfaceScanRow:
             self.assignment_risk,
             "TRUE" if self.earnings_before_expiry else "",
         ]
+
+
+@dataclass
+class UoaAlertRow:
+    """Unusual Options Activity alert — one row per alert per day.
+
+    Flags abnormal volume/OI patterns that may indicate informed money,
+    institutional positioning, or large directional bets.
+    """
+    TAB_NAME = "uoa_alerts"
+    HEADERS = [
+        "date", "ticker", "alert_type", "side", "strike", "expiry", "dte",
+        "volume", "open_interest", "vol_oi_ratio", "implied_vol",
+        "notional", "moneyness", "underlying_last", "severity", "detail",
+    ]
+
+    date: str
+    ticker: str
+    alert_type: str         # VOL_OI_SPIKE | STRIKE_CONC | OTM_FLOW | PC_SKEW
+    side: str               # CALL | PUT
+    strike: float
+    expiry: str             # YYYY-MM-DD
+    dte: int
+    volume: int
+    open_interest: int
+    vol_oi_ratio: float
+    implied_vol: float      # 0-1 scale
+    notional: float         # dollar value of flow
+    moneyness: str          # ITM | ATM | OTM | FAR_OTM
+    underlying_last: float
+    severity: int           # 1=notable, 2=significant, 3=extreme
+    detail: str             # human-readable explanation
+
+    def to_row(self) -> List[str]:
+        return [
+            self.date, self.ticker, self.alert_type, self.side,
+            _num(self.strike, 2), self.expiry, str(self.dte),
+            str(self.volume), str(self.open_interest),
+            _num(self.vol_oi_ratio, 1), _num(self.implied_vol, 4),
+            _num(self.notional, 0), self.moneyness,
+            _num(self.underlying_last, 2), str(self.severity),
+            self.detail,
+        ]

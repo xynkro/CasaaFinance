@@ -1110,3 +1110,59 @@ def ping_harvest_scan(
         message_thread_id=OPTIONS_INTEL_TOPIC,
         disable_web_page_preview=True,
     )
+
+
+def ping_unusual_options(
+    date: str,
+    alerts: list[dict],
+    total_scanned: int = 0,
+    total_alerts: int = 0,
+    pwa_url: str | None = None,
+) -> dict:
+    """Push unusual options activity alerts to Options Intel topic."""
+    import html as _html
+
+    if not alerts:
+        return {"skipped": "no UOA alerts"}
+
+    sev_icon = {1: "⚡", 2: "🔥", 3: "🚨"}
+    type_label = {
+        "VOL_OI_SPIKE": "Vol/OI",
+        "STRIKE_CONC": "Concentration",
+        "OTM_FLOW": "OTM Flow",
+        "PC_SKEW": "P/C Skew",
+    }
+
+    lines = [f"<b>🔍 UNUSUAL OPTIONS ACTIVITY</b> · {_html.escape(date)}"]
+    lines.append(f"Scanned {total_scanned} tickers · {total_alerts} total alerts")
+    lines.append("")
+
+    for a in alerts:
+        icon = sev_icon.get(a.get("severity", 1), "⚡")
+        tk = _html.escape(str(a.get("ticker", "?")))
+        atype = type_label.get(a.get("alert_type", ""), a.get("alert_type", ""))
+        side = a.get("side", "")
+        strike = float(a.get("strike", 0))
+        expiry = a.get("expiry", "")
+        detail = _html.escape(str(a.get("detail", "")))
+
+        if a.get("alert_type") == "PC_SKEW":
+            lines.append(f"{icon} <b>${tk}</b> [{atype}]")
+        else:
+            strike_str = f"${strike:.0f}" if strike > 0 else ""
+            lines.append(
+                f"{icon} <b>${tk}</b> {strike_str}{side[0] if side else ''} "
+                f"{expiry} [{atype}]"
+            )
+        lines.append(f"    {detail}")
+        lines.append("")
+
+    if pwa_url:
+        lines.append(f'📱 <a href="{_html.escape(pwa_url)}">Full alerts in PWA</a>')
+
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=OPTIONS_INTEL_TOPIC,
+        disable_web_page_preview=True,
+    )
