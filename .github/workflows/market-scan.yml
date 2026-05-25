@@ -2,8 +2,8 @@ name: Market Scan — Daily Options Opportunities (10:30 SGT)
 
 on:
   schedule:
-    # 02:33 UTC = 10:33 SGT (US market ~3h into session — good options liquidity)
-    - cron: "33 2 * * *"
+    # 02:15 UTC = 10:15 SGT (staggered 20 min before daily-options-scan to avoid yfinance rate limits)
+    - cron: "15 2 * * *"
   workflow_dispatch:
     inputs:
       dry:

@@ -823,7 +823,19 @@ def scan_ticker(
 
     tech_ctx = _technical_context(yt)
     hv30 = tech_ctx["hv30"]
-    scores = tech_ctx.get("_scores", {})
+
+    # Inject ATM IV into indicators so iv_rv_ratio signal contributes to
+    # CSP/CC scores (weight +6/+5 — the heaviest option-selling signals).
+    # Without this, compute_scores() always returns 0.0 for iv_rv_ratio.
+    ind = tech_ctx.get("_indicators", {})
+    atm_iv_pct = _atm_iv(chain.puts, chain.calls, price, dte)
+    if atm_iv_pct > 0:
+        ind["iv_annual"] = atm_iv_pct / 100  # % → decimal
+        from src.technical_score import compute_scores as _recompute
+        scores = _recompute(ind)
+    else:
+        scores = tech_ctx.get("_scores", {})
+
     out: list[dict[str, Any]] = []
 
     # ── CSP (unified: vol-adjusted OTM for discovery, static for watchlist) ──

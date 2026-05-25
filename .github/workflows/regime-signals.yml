@@ -18,7 +18,8 @@ on:
     # 22:00 UTC = 06:00 SGT next day = US after-close + ~6h. Latest TraderMonty
     # CSV is usually fresh by then; macro-regime/FTD pull the day's close from FMP.
     # Mon-Fri only (no weekend US sessions to detect).
-    - cron: "0 22 * * 1-5"
+    # Staggered: gov-contracts 22:00, regime-signals 22:10
+    - cron: "10 22 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

@@ -32,12 +32,6 @@ def _sig_rsi(rsi: float) -> float:
     return (rsi - 50) / 50
 
 
-def _sig_stoch(k: float, d: float) -> float:
-    """Stochastic signal, similar scaling to RSI."""
-    avg = (k + d) / 2
-    return (avg - 50) / 50
-
-
 def _sig_macd(macd_hist: float, close: float) -> float:
     """MACD histogram strength relative to price. Positive = bullish momentum."""
     if close <= 0:

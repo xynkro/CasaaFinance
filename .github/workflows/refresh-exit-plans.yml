@@ -14,7 +14,8 @@ on:
     # 22:30 UTC = 06:30 SGT — after the 06:22 SGT yahoo_grab tranche
     # finishes refreshing positions, before the 07:00 SGT confluence
     # screener and 07:30 SGT brain briefs read exit_plans.
-    - cron: "30 22 * * *"
+    # Staggered: exit-plans 22:20, congress-trades 22:30, tv-signals 22:40
+    - cron: "20 22 * * *"
   workflow_dispatch:
     inputs:
       dry:

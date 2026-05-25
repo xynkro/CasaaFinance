@@ -271,7 +271,14 @@ def compute_indicators(df: pd.DataFrame) -> dict[str, Any]:
         recent_std = float(returns.iloc[-5:].std())
         baseline_std = float(returns.iloc[-60:].std())
         out["catalyst_flag"] = bool(recent_std > 2 * baseline_std)
-        out["vol_regime"] = "elevated" if recent_std > 1.5 * baseline_std else "normal"
+        # Values must match _sig_vol_regime map in technical_score.py:
+        #   high_vol → +0.5, normal → 0.0, low_vol → -0.3
+        if recent_std > 1.5 * baseline_std:
+            out["vol_regime"] = "high_vol"
+        elif recent_std < 0.5 * baseline_std:
+            out["vol_regime"] = "low_vol"
+        else:
+            out["vol_regime"] = "normal"
     else:
         out["catalyst_flag"] = False
         out["vol_regime"] = "normal"
@@ -286,15 +293,19 @@ def compute_indicators(df: pd.DataFrame) -> dict[str, Any]:
         l = df["Low"].iloc[-n_rv-1:]
         c = df["Close"].iloc[-n_rv-1:]
 
+        # Use .values for positional arithmetic — avoids pandas index
+        # misalignment that silently drops ~3% of data points.
+        o_v, h_v, l_v, c_v = o.values, h.values, l.values, c.values
         # Overnight returns (close-to-open)
-        log_co = (o.iloc[1:] / c.iloc[:-1]).apply(math.log)
+        log_co = pd.Series([math.log(o_v[i] / c_v[i - 1]) for i in range(1, len(o_v))])
         # Open-to-close returns
-        log_oc = (c.iloc[1:] / o.iloc[1:]).apply(math.log)
+        log_oc = pd.Series([math.log(c_v[i] / o_v[i]) for i in range(1, len(c_v))])
         # Rogers-Satchell component
-        log_hc = (h.iloc[1:] / c.iloc[1:]).apply(math.log)
-        log_ho = (h.iloc[1:] / o.iloc[1:]).apply(math.log)
-        log_lc = (l.iloc[1:] / c.iloc[1:]).apply(math.log)
-        log_lo = (l.iloc[1:] / o.iloc[1:]).apply(math.log)
+        log_hc = pd.Series([math.log(h_v[i] / c_v[i]) for i in range(1, len(h_v))])
+        log_ho = pd.Series([math.log(h_v[i] / o_v[i]) for i in range(1, len(h_v))])
+        log_lc = pd.Series([math.log(l_v[i] / c_v[i]) for i in range(1, len(l_v))])
+        log_lo = pd.Series([math.log(l_v[i] / o_v[i]) for i in range(1, len(l_v))])
+
 
         sigma_o = float(log_co.var())  # overnight variance
         sigma_c = float(log_oc.var())  # close-to-close intraday variance
