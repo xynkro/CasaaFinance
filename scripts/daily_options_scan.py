@@ -92,7 +92,8 @@ PMCC_MIN_QUALITY    = 30
 HARVEST_UNIVERSE_TOP = 150          # FinViz screener cap
 CSP_VOL_SIGMA   = 1.0              # target ≥ 1σ OTM (vol-adjusted)
 CSP_OTM_FLOOR   = 0.10             # minimum 10% OTM regardless of vol
-CSP_OTM_CEIL    = 0.40             # maximum OTM distance
+CSP_OTM_CEIL    = 0.30             # max 30% OTM (was 40% — beyond this = zero premium)
+CSP_MIN_PREMIUM = 0.30             # min $0.30/share — kills impractical far-OTM picks
 HARVEST_TARGET_DTE = 35            # ideal DTE for harvest CSPs
 HARVEST_DTE_RANGE  = (25, 45)      # acceptable range
 HARVEST_MIN_YIELD  = 14.0          # annualised yield floor for harvest CSPs
@@ -869,6 +870,10 @@ def scan_ticker(
 
             puts = puts[(puts["strike"] >= price * (1 - _otm_max)) &
                         (puts["strike"] <= price * (1 - _otm_min))]
+            # Kill impractical picks: if the best put at the vol-adjusted
+            # distance has < $0.30 premium, the stock isn't CSP-able.
+            # (CLSK $9P on $17 stock → $0.10 premium → skip entirely)
+            puts = puts[puts["mid"] >= CSP_MIN_PREMIUM]
             puts = puts.copy()
             puts["ann_yield"] = puts["mid"] / puts["strike"] * (365 / dte) * 100
             puts = puts[puts["ann_yield"] >= csp_yield_floor]
