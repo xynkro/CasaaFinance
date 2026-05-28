@@ -18,11 +18,6 @@ pwa/node_modules/
 pwa/dist/
 pwa/.vite/
 
-# MonteCarloEdge
-monte-carlo-edge/node_modules/
-monte-carlo-edge/dist/
-monte-carlo-edge/.vite/
-
 # OS
 .DS_Store
 Thumbs.db
