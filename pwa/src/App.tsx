@@ -113,6 +113,7 @@ function Dashboard() {
             casparPositions={data?.casparPositions ?? []}
             sarahPositions={data?.sarahPositions ?? []}
             harvestScan={data?.harvestScan ?? []}
+            scanResults={data?.scanResults ?? []}
             loading={loading && !data}
           />
         );

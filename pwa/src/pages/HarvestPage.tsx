@@ -1,7 +1,10 @@
-import type { HarvestScanRow, OptionRow } from "../data";
+import { useMemo } from "react";
+import type { HarvestScanRow, OptionRow, ScanResultRow } from "../data";
 import { HarvestPicksCard } from "../cards/HarvestPicksCard";
+import { ScanResultsCard } from "../cards/ScanResultsCard";
 import { ActiveHarvestCard, matchHarvestPositions } from "../cards/ActiveHarvestCard";
 import { Card } from "../cards/Card";
+import { SwipeTabs } from "../components/SwipeTabs";
 import { BarChart3 } from "lucide-react";
 
 function MacroBanner({ picks }: { picks: HarvestScanRow[] }) {
@@ -66,22 +69,62 @@ function HarvestStatsCard({ options }: { options: OptionRow[] }) {
   );
 }
 
+/** Strategy label map for display. */
+const STRATEGY_LABELS: Record<string, string> = {
+  CSP: "CSP",
+  CC: "CC",
+  PCS: "PCS",
+  CCS: "CCS",
+  IC: "Iron Condor",
+  PMCC: "PMCC",
+  LONG_CALL: "Long Call",
+};
+
+/** Ordering for the strategy tabs — most common first. */
+const STRATEGY_ORDER = ["CSP", "CC", "PCS", "CCS", "IC", "PMCC", "LONG_CALL"];
+
 /** Inner content without outer wrapper — used as Options subtab. */
 export function HarvestContent({
   harvestScan,
+  scanResults,
   options,
   loading,
 }: {
   harvestScan: HarvestScanRow[];
+  scanResults: ScanResultRow[];
   options: OptionRow[];
   loading: boolean;
 }) {
-  if (loading && !harvestScan.length && !options.length) {
+  if (loading && !harvestScan.length && !scanResults.length && !options.length) {
     return <div className="py-8 text-center text-slate-500 text-[length:var(--t-sm)]">Loading…</div>;
   }
 
   const picks = harvestScan.filter((r) => r.strategy !== "HALTED");
   const activeHarvests = matchHarvestPositions(options, harvestScan);
+
+  // Group scan_results by strategy — only include strategies that have data
+  const byStrategy = useMemo(() => {
+    const map = new Map<string, ScanResultRow[]>();
+    for (const row of scanResults) {
+      const strat = (row.strategy || "").toUpperCase();
+      if (!strat) continue;
+      const arr = map.get(strat) ?? [];
+      arr.push(row);
+      map.set(strat, arr);
+    }
+    // Sort each group by composite_score descending
+    for (const [, arr] of map) {
+      arr.sort((a, b) => Number(b.composite_score || 0) - Number(a.composite_score || 0));
+    }
+    return map;
+  }, [scanResults]);
+
+  // Build ordered tab list — only tabs with data
+  const strategyTabs = useMemo(() => {
+    return STRATEGY_ORDER.filter((s) => byStrategy.has(s));
+  }, [byStrategy]);
+
+  const hasScanData = strategyTabs.length > 0;
 
   return (
     <>
@@ -98,9 +141,40 @@ export function HarvestContent({
           <HarvestStatsCard options={options} />
         </div>
       )}
-      <div className={`fade-up ${activeHarvests.length > 0 ? "fade-up-4" : "fade-up-2"} mt-3`}>
-        <HarvestPicksCard picks={picks} />
-      </div>
+
+      {/* Swipeable strategy tabs — all scan_results strategies.
+          -mx-4 breaks out of parent px-4 so SwipeTabs has edge-to-edge swipe. */}
+      {hasScanData ? (
+        <div className={`fade-up ${activeHarvests.length > 0 ? "fade-up-4" : "fade-up-2"} mt-1 -mx-4`}>
+          <SwipeTabs
+            tabs={strategyTabs.map((s) => ({
+              label: `${STRATEGY_LABELS[s] || s} (${byStrategy.get(s)?.length ?? 0})`,
+            }))}
+            panels={strategyTabs.map((strat) => {
+              // CSP tab: use the richer HarvestPicksCard if we have harvest picks
+              if (strat === "CSP" && picks.length > 0) {
+                return (
+                  <div className="px-4 pb-4">
+                    <HarvestPicksCard picks={picks} />
+                  </div>
+                );
+              }
+              const rows = byStrategy.get(strat) ?? [];
+              return (
+                <div className="px-4 pb-4">
+                  <ScanResultsCard strategy={strat} rows={rows} />
+                </div>
+              );
+            })}
+            persistKey="casaa_harvest_strategy_tab"
+          />
+        </div>
+      ) : (
+        /* Fallback: no scan_results, show harvest picks only */
+        <div className={`fade-up ${activeHarvests.length > 0 ? "fade-up-4" : "fade-up-2"} mt-3`}>
+          <HarvestPicksCard picks={picks} />
+        </div>
+      )}
     </>
   );
 }

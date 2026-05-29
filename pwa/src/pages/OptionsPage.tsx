@@ -7,6 +7,7 @@ import type {
   ExitPlanRow,
   OptionsDefenseRow,
   HarvestScanRow,
+  ScanResultRow,
 } from "../data";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { WheelCard } from "../cards/WheelCard";
@@ -27,6 +28,7 @@ export function OptionsPage({
   casparPositions,
   sarahPositions,
   harvestScan,
+  scanResults,
   loading,
 }: {
   options: OptionRow[];
@@ -37,6 +39,7 @@ export function OptionsPage({
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
   harvestScan: HarvestScanRow[];
+  scanResults: ScanResultRow[];
   loading: boolean;
 }) {
   const [sub, setSub] = useState<Subtab>(() => {
@@ -62,7 +65,7 @@ export function OptionsPage({
     (d) => d.severity === "CRITICAL" || d.severity === "HIGH",
   ).length;
   const openPositions = options.length;
-  const harvestCount = harvestScan.filter((r) => r.strategy !== "HALTED").length;
+  const harvestCount = harvestScan.filter((r) => r.strategy !== "HALTED").length + scanResults.length;
 
   return (
     <div className="flex flex-col px-4 pb-4">
@@ -102,7 +105,7 @@ export function OptionsPage({
       )}
 
       {sub === "harvest" && (
-        <HarvestContent harvestScan={harvestScan} options={options} loading={loading} />
+        <HarvestContent harvestScan={harvestScan} scanResults={scanResults} options={options} loading={loading} />
       )}
     </div>
   );

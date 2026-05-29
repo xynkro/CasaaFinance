@@ -6,6 +6,11 @@ function csvUrl(gid: string): string {
   return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${gid}`;
 }
 
+/** Fetch by sheet name instead of GID — for tabs whose GID isn't known. */
+function csvUrlByName(sheetName: string): string {
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+}
+
 const GIDS: Record<string, string> = {
   daily_brief_latest: "1490893125",
   snapshot_caspar: "1233934747",
@@ -73,6 +78,15 @@ const GIDS: Record<string, string> = {
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
   const res = await fetch(csvUrl(GIDS[tab]));
   if (!res.ok) throw new Error(`Sheet fetch failed: ${tab} (${res.status})`);
+  const text = await res.text();
+  const { data } = Papa.parse<T>(text, { header: true, skipEmptyLines: true });
+  return data;
+}
+
+/** Fetch a tab by sheet name (for tabs without a known GID). */
+async function fetchTabByName<T>(sheetName: string): Promise<T[]> {
+  const res = await fetch(csvUrlByName(sheetName));
+  if (!res.ok) throw new Error(`Sheet fetch failed: ${sheetName} (${res.status})`);
   const text = await res.text();
   const { data } = Papa.parse<T>(text, { header: true, skipEmptyLines: true });
   return data;
@@ -776,6 +790,36 @@ export interface HarvestScanRow {
   notes: string;
 }
 
+/**
+ * Scan result row — ALL strategy candidates from the daily options scanner.
+ * Strategies: CSP, CC, PCS, CCS, IC, PMCC, LONG_CALL.
+ * The harvest_scan tab is a CSP-only subset; this tab is the full universe.
+ */
+export interface ScanResultRow {
+  date: string;
+  ticker: string;
+  strategy: string;      // "CSP" | "CC" | "PCS" | "CCS" | "IC" | "PMCC" | "LONG_CALL"
+  right: string;         // "P" | "C" | ""
+  strike: string;
+  expiry: string;        // "YYYYMMDD"
+  dte: string;
+  delta: string;
+  premium: string;
+  bid: string;
+  ask: string;
+  annual_yield_pct: string;
+  cash_required: string;
+  breakeven: string;
+  iv: string;
+  iv_rank: string;
+  spread_pct: string;
+  underlying_last: string;
+  technical_score: string;
+  composite_score: string;
+  catalyst_flag: string;
+  notes: string;         // multi-leg detail for IC/PCS/CCS/PMCC
+}
+
 export interface IvSurfaceScanRow {
   date?: string;
   ticker?: string;
@@ -1164,6 +1208,7 @@ export interface DashboardData {
   govConfluence: GovConfluenceRow[];     // today's gov confluence signals (score ≥ 10)
   congressTrades: CongressTradeRow[];    // recent politician trades (last 7 days)
   harvestScan: HarvestScanRow[];        // premium harvest picks (today)
+  scanResults: ScanResultRow[];         // all strategy candidates (today) — CSP/CC/PCS/CCS/IC/PMCC/LONG_CALL
   ivSurfaceScan: IvSurfaceScanRow[];
   alpaca: AlpacaSnapshotRow | null;
   alpacaPositions: AlpacaPositionRow[];
@@ -1238,6 +1283,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       govConfRows,
       congressRows,
       harvestScanRows,
+      scanResultRows,
       ivSurfaceScanRows,
       alpacaSnapRaw,
       alpacaPosRows,
@@ -1252,6 +1298,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTab<GovConfluenceRow>("gov_confluence_signals").catch(() => [] as GovConfluenceRow[]),
       fetchTab<CongressTradeRow>("congress_trades").catch(() => [] as CongressTradeRow[]),
       fetchTab<HarvestScanRow>("harvest_scan").catch(() => [] as HarvestScanRow[]),
+      fetchTabByName<ScanResultRow>("scan_results").catch(() => [] as ScanResultRow[]),
       fetchTab<IvSurfaceScanRow>("iv_surface_scan").catch(() => [] as IvSurfaceScanRow[]),
       fetchTab<Record<string, string>>("snapshot_alpaca").catch(() => [] as Record<string, string>[]),
       fetchTab<AlpacaPositionRow>("positions_alpaca").catch(() => [] as AlpacaPositionRow[]),
@@ -1329,6 +1376,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
           .sort((a, b) => (b.transaction_date || b.filing_date || "").localeCompare(a.transaction_date || a.filing_date || ""));
       })(),
       harvestScan: latestGroup(harvestScanRows),
+      scanResults: latestGroup(scanResultRows),
       ivSurfaceScan: ivSurfaceScanRows,
       alpaca: (() => {
         const rows = normalizeSnapshot(alpacaSnapRaw) as unknown as AlpacaSnapshotRow[];
@@ -1362,6 +1410,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       govConfluence: [],
       congressTrades: [],
       harvestScan: [],
+      scanResults: [],
       ivSurfaceScan: [],
       alpaca: null,
       alpacaPositions: [],
