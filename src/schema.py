@@ -471,7 +471,7 @@ class ScanResultRow:
         "annual_yield_pct", "cash_required", "breakeven",
         "iv", "iv_rank", "spread_pct",
         "underlying_last", "technical_score", "composite_score",
-        "catalyst_flag", "notes",
+        "catalyst_flag", "notes", "signals_json",
     ]
 
     date: str
@@ -496,6 +496,9 @@ class ScanResultRow:
     composite_score: float     # 0-100
     catalyst_flag: bool
     notes: str = ""            # multi-leg detail (IC/PCS/CCS/PMCC legs)
+    signals_json: str = ""     # JSON snapshot of the 16 technical signals at scan time
+                               # (incl. IV-aware iv_rv_ratio) so signal_feedback can
+                               # validate against the EXACT inputs, not a reconstruction
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
@@ -511,6 +514,7 @@ class ScanResultRow:
             _num(self.technical_score, 1), _num(self.composite_score, 1),
             "TRUE" if self.catalyst_flag else "",
             self.notes,
+            self.signals_json,
         ]
 
 

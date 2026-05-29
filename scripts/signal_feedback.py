@@ -163,10 +163,10 @@ def _get_indicators_at(ticker: str, scan_date: datetime) -> dict | None:
         df = df[df.index <= scan_date.strftime("%Y-%m-%d")]
         if len(df) < 30:
             return None
-        indicators = compute_indicators(df, ticker)
+        indicators = compute_indicators(df)
         return indicators
     except Exception as e:
-        logger.warning(f"Indicator computation failed for {ticker} @ {scan_date}: {e}")
+        logger.warning(f"Indicator computation failed for {ticker} @ {scan_date}: {type(e).__name__}: {e}")
         return None
 
 
@@ -311,6 +311,7 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
             "premium": _parse_float(r.get("premium", "")),
             "cash_required": _parse_float(r.get("cash_required", "")),
             "breakeven": _parse_float(r.get("breakeven", "")),
+            "signals_json": r.get("signals_json", ""),
         })
 
     logger.info(f"Found {len(candidates)} mature picks to evaluate")
@@ -393,17 +394,30 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
 
             stats[outcome.lower()] = stats.get(outcome.lower(), 0) + 1
 
-            # Compute signals at scan time
-            indicators = _get_indicators_at(ticker, pick["scan_dt"])
-            if indicators:
-                signals = compute_signals(indicators)
-            else:
-                signals = {k: 0.0 for k in [
-                    "rsi", "macd", "macd_cross", "bb_pct_b", "bb_squeeze",
-                    "wvf", "trend", "momentum", "volume_spike", "divergence",
-                    "candle", "fib_support", "volatility", "vol_regime",
-                    "iv_rv_ratio", "term_structure",
-                ]}
+            # Signals at scan time. Prefer the exact snapshot persisted by the
+            # scanner (includes the IV-dependent iv_rv_ratio / term_structure
+            # that can't be reconstructed from price-only history). Fall back to
+            # reconstruction for older rows written before signals_json existed.
+            signals = None
+            snap = pick.get("signals_json", "")
+            if snap:
+                try:
+                    parsed = json.loads(snap)
+                    if isinstance(parsed, dict) and parsed:
+                        signals = {k: float(v) for k, v in parsed.items()}
+                except Exception:
+                    signals = None
+            if signals is None:
+                indicators = _get_indicators_at(ticker, pick["scan_dt"])
+                if indicators:
+                    signals = compute_signals(indicators)
+                else:
+                    signals = {k: 0.0 for k in [
+                        "rsi", "macd", "macd_cross", "bb_pct_b", "bb_squeeze",
+                        "wvf", "trend", "momentum", "volume_spike", "divergence",
+                        "candle", "fib_support", "volatility", "vol_regime",
+                        "iv_rv_ratio", "term_structure",
+                    ]}
 
             time.sleep(YF_DELAY_S)
 

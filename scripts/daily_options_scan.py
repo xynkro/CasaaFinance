@@ -579,20 +579,19 @@ def macro_gate(logger: logging.Logger) -> dict:
         result["spx"] = 0
         result["spx_above_200sma"] = True
 
-    # Macro blackout check (FOMC/CPI/NFP within 2 days)
+    # Macro blackout check (FOMC/CPI/NFP within 2 days).
+    # Uses MacroFeed.next_high_impact (the real API) — the old code iterated a
+    # non-existent `feed.events` / `_dt` key, raised AttributeError, and was
+    # swallowed, so the blackout gate never actually fired.
     try:
         from src.macro_blackouts import MacroFeed
         feed = MacroFeed.fetch()
-        now_utc = datetime.now(timezone.utc)
-        for ev in feed.events:
-            ev_time = ev.get("_dt") or ev.get("datetime")
-            if ev_time and abs((ev_time - now_utc).total_seconds()) < 2 * 86400:
-                if ev.get("impact") == "high":
-                    result["blackout"] = True
-                    result["blackout_event"] = ev.get("event", "unknown")
-                    break
-    except Exception:
-        pass
+        upcoming = feed.next_high_impact(within_hours=48)
+        if upcoming:
+            result["blackout"] = True
+            result["blackout_event"] = upcoming.get("event", "unknown")
+    except Exception as e:
+        logger.debug(f"  macro blackout check failed: {e}")
 
     # Regime classification
     if vix > 30 or not result.get("spx_above_200sma", True):
@@ -865,6 +864,17 @@ def scan_ticker(
         scores = _recompute(ind)
     else:
         scores = tech_ctx.get("_scores", {})
+
+    # Snapshot the 16 technical signals (from the IV-injected `ind`) as JSON so
+    # signal_feedback validates against the EXACT scan-time inputs instead of
+    # reconstructing them later from price-only history (which can't recover the
+    # IV-dependent iv_rv_ratio / term_structure signals). Guarded — a failure
+    # here must never block candidate generation.
+    try:
+        from src.technical_score import compute_signals as _csig
+        _sig_snapshot = json.dumps({k: round(float(v), 4) for k, v in _csig(ind).items()})
+    except Exception:
+        _sig_snapshot = ""
 
     out: list[dict[str, Any]] = []
 
@@ -1653,6 +1663,9 @@ def scan_ticker(
                     f"{c['dte']}DTE  prem=${c['premium']:5.2f}  yield={c['annual_yield_pct']:5.1f}%  "
                     f"u=${c['underlying_last']:.2f}"
                 )
+    # Attach the scan-time signal snapshot to every candidate for the feedback loop.
+    for c in out:
+        c["signals_json"] = _sig_snapshot
     return out
 
 
@@ -1919,6 +1932,7 @@ def main() -> int:
             composite_score=c["composite_score"],
             catalyst_flag=c["catalyst_flag"],
             notes=c.get("notes", ""),
+            signals_json=c.get("signals_json", ""),
         )
         scan_rows.append(row.to_row())
     sh.append_rows(client, S.ScanResultRow.TAB_NAME, scan_rows)

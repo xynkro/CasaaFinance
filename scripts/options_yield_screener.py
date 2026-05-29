@@ -694,6 +694,7 @@ def scan_ticker(
     logger: logging.Logger,
     tv_daily: dict[str, str] | None = None,
     analyst: dict[str, float] | None = None,
+    gov: dict[str, dict] | None = None,
 ) -> list[dict]:
     """
     Returns a list of fully-scored candidate dicts (CSP and/or CC) for one
@@ -872,7 +873,7 @@ def main() -> int:
     # Yahoo's rate-limiter (max_workers=3 + sleep between submissions).
     def _wrapped(t: str) -> list[dict]:
         try:
-            return scan_ticker(t, logger, tv_daily=tv_daily, analyst=analyst)
+            return scan_ticker(t, logger, tv_daily=tv_daily, analyst=analyst, gov=gov)
         except Exception as e:
             logger.warning(f"  {t}: scan_ticker raised {e}")
             return []
