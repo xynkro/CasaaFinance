@@ -40,11 +40,12 @@ TARGET_DTE      = 35
 CSP_OTM_RANGE   = (0.02, 0.18)   # 2%-18% OTM
 CC_OTM_RANGE    = (0.01, 0.10)   # 1%-10% OTM
 MIN_OI          = 50
-MIN_MID         = 0.05
+MIN_MID         = 0.15       # min option mid-price — $0.05 was letting penny options through
 MIN_CSP_YIELD   = 12.0    # annualised %
 MIN_CC_YIELD    = 10.0
-MIN_PRICE       = 3.0
+MIN_PRICE       = 8.0     # stocks < $8 produce garbage premiums and huge assignment risk
 MAX_PRICE       = 800
+MIN_NET_CREDIT  = 0.25    # minimum net credit per share for credit spreads (PCS/CCS/IC)
 MAX_PER_TICKER  = 2       # at most 1 CSP + 1 CC per ticker
 
 # LONG_CALL — directional play for gov confluence catalysts
@@ -1243,7 +1244,7 @@ def scan_ticker(
                             sp_strike - float(long_put["strike"]),
                             float(long_call["strike"]) - sc_strike,
                         )
-                        if actual_width <= 0 or net_credit <= 0:
+                        if actual_width <= 0 or net_credit <= 0 or net_credit < MIN_NET_CREDIT:
                             continue
                         credit_ratio = net_credit / actual_width
 
@@ -1340,7 +1341,7 @@ def scan_ticker(
                         actual_width = sp_strike - float(long_put["strike"])
                         net_credit = sp_mid - lp_mid
 
-                        if actual_width <= 0 or net_credit <= 0:
+                        if actual_width <= 0 or net_credit <= 0 or net_credit < MIN_NET_CREDIT:
                             continue
                         credit_ratio = net_credit / actual_width
                         if credit_ratio >= CS_MIN_CREDIT_RATIO:
@@ -1425,7 +1426,7 @@ def scan_ticker(
                         actual_width = float(long_call["strike"]) - sc_strike
                         net_credit = sc_mid - lc_mid
 
-                        if actual_width <= 0 or net_credit <= 0:
+                        if actual_width <= 0 or net_credit <= 0 or net_credit < MIN_NET_CREDIT:
                             continue
                         credit_ratio = net_credit / actual_width
                         if credit_ratio >= CS_MIN_CREDIT_RATIO:

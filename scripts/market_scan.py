@@ -67,7 +67,7 @@ QUALITY_WATCHLIST: list[str] = [
 
 # Minimum thresholds
 MIN_OI          = 50      # open interest per strike
-MIN_MID_PRICE   = 0.05    # minimum option mid-price ($)
+MIN_MID_PRICE   = 0.30    # minimum option mid-price ($) — kills penny-premium garbage
 MIN_CSP_YIELD   = 10.0    # annualised yield % for CSP
 MIN_CC_YIELD    = 8.0     # annualised yield % for CC
 IV_HV_RATIO_MIN = 1.05    # IV must be at least 5% above HV30
@@ -75,7 +75,7 @@ TARGET_DTE_MIN  = 15
 TARGET_DTE_MAX  = 60
 TARGET_DTE_IDEAL= 35
 MAX_PRICE       = 650     # skip ultra-high priced stocks (cash req too big)
-MIN_PRICE       = 3.0
+MIN_PRICE       = 8.0     # stocks < $8 produce garbage premiums
 
 
 def _setup_logging() -> logging.Logger:
