@@ -41,6 +41,8 @@ CSP_OTM_RANGE   = (0.02, 0.18)   # 2%-18% OTM (coarse pre-filter; delta is the r
 CC_OTM_RANGE    = (0.01, 0.10)   # 1%-10% OTM (coarse pre-filter; delta is the real gate)
 CSP_DELTA_RANGE = (0.15, 0.35)   # short-put |Δ| — PRIMARY strike gate (assignment prob)
 CC_DELTA_RANGE  = (0.15, 0.35)   # short-call |Δ| — PRIMARY strike gate
+CSP_DELTA_TARGET = 0.25          # select the strike CLOSEST to this Δ within the band
+CC_DELTA_TARGET  = 0.20          # CC favours lower Δ (keep the shares more often)
 MIN_OI          = 50
 MIN_MID         = 0.15       # min option mid-price — $0.05 was letting penny options through
 MIN_CSP_YIELD   = 12.0    # annualised %
@@ -74,7 +76,8 @@ IC_MIN_QUALITY  = 30
 CS_DTE_RANGE    = (25, 50)
 CS_TARGET_DTE   = 42
 CS_OTM_RANGE    = (0.04, 0.12)   # 4-12% OTM (coarse pre-filter; delta is the real gate)
-CS_SHORT_DELTA_RANGE = (0.18, 0.35)  # short-leg |Δ| target for PCS/CCS (tastytrade 20-30Δ)
+CS_SHORT_DELTA_RANGE = (0.18, 0.35)  # short-leg |Δ| band for PCS/CCS (tastytrade 20-30Δ)
+CS_SHORT_DELTA_TARGET = 0.30         # select short leg CLOSEST to this Δ within the band
 CS_WING_WIDTHS  = [5, 10]
 CS_MIN_CREDIT_RATIO = 0.28       # ~1/3 width credit
 CS_MIN_IVR      = 25             # lower bar than IC
@@ -927,7 +930,12 @@ def scan_ticker(
             puts = puts.copy()
             puts["ann_yield"] = puts["mid"] / puts["strike"] * (365 / dte) * 100
             puts = puts[puts["ann_yield"] >= csp_yield_floor]
-            puts = puts.sort_values("ann_yield", ascending=False)
+            # Among yield-qualifying strikes in the Δ band, pick the one CLOSEST
+            # to the target delta — NOT the richest (which is always the band's
+            # high-Δ/high-assignment edge). Centres exposure on ~0.25Δ.
+            puts = puts.copy()
+            puts["delta_dist"] = (puts["abs_delta"] - CSP_DELTA_TARGET).abs()
+            puts = puts.sort_values("delta_dist")
             if not puts.empty:
                 r = puts.iloc[0]
                 spread_pct = 0.0
@@ -1053,7 +1061,10 @@ def scan_ticker(
         calls = calls.copy()
         calls["ann_yield"] = calls["mid"] / price * (365 / dte) * 100
         calls = calls[calls["ann_yield"] >= MIN_CC_YIELD]
-        calls = calls.sort_values("ann_yield", ascending=False)
+        # Closest to the target Δ within the band (not the richest = highest-Δ edge).
+        calls = calls.copy()
+        calls["delta_dist"] = (calls["abs_delta"] - CC_DELTA_TARGET).abs()
+        calls = calls.sort_values("delta_dist")
         if not calls.empty:
             r = calls.iloc[0]
             bid = float(r.get("bid", 0) or 0)
@@ -1406,9 +1417,9 @@ def scan_ticker(
                     (cs_puts["strike"] <= price * (1 - CS_OTM_RANGE[0]))
                 ]
                 if not sp_cands.empty:
-                    # Constrain short leg to the target delta band, then take
-                    # the richest premium within it (was: richest in the whole
-                    # OTM band, which biased toward the near-money/high-delta edge).
+                    # Constrain short leg to the target delta band, then take the
+                    # strike CLOSEST to the target delta (was: richest premium,
+                    # which biased toward the near-money/high-delta edge).
                     sp_cands = sp_cands.copy()
                     sp_cands["abs_delta"] = sp_cands.apply(
                         lambda row: abs(_compute_greeks(row, price, cs_dte, "P")[0]), axis=1
@@ -1416,8 +1427,12 @@ def scan_ticker(
                     sp_band = sp_cands[(sp_cands["abs_delta"] >= CS_SHORT_DELTA_RANGE[0]) &
                                        (sp_cands["abs_delta"] <= CS_SHORT_DELTA_RANGE[1])]
                     if sp_band.empty:
-                        sp_band = sp_cands  # greeks unsolvable — fall back (spread is defined-risk)
-                    short_put = sp_band.sort_values("mid", ascending=False).iloc[0]
+                        # greeks unsolvable — fall back to richest (defined risk anyway)
+                        short_put = sp_cands.sort_values("mid", ascending=False).iloc[0]
+                    else:
+                        sp_band = sp_band.copy()
+                        sp_band["delta_dist"] = (sp_band["abs_delta"] - CS_SHORT_DELTA_TARGET).abs()
+                        short_put = sp_band.sort_values("delta_dist").iloc[0]
                     sp_strike = float(short_put["strike"])
                     sp_mid = float(short_put["mid"])
 
@@ -1508,8 +1523,8 @@ def scan_ticker(
                     (ccs_calls["strike"] <= price * (1 + CS_OTM_RANGE[1]))
                 ]
                 if not sc_cands.empty:
-                    # Constrain short leg to the target delta band, then take
-                    # the richest premium within it.
+                    # Constrain short leg to the target delta band, then take the
+                    # strike CLOSEST to the target delta.
                     sc_cands = sc_cands.copy()
                     sc_cands["abs_delta"] = sc_cands.apply(
                         lambda row: abs(_compute_greeks(row, price, ccs_dte, "C")[0]), axis=1
@@ -1517,8 +1532,12 @@ def scan_ticker(
                     sc_band = sc_cands[(sc_cands["abs_delta"] >= CS_SHORT_DELTA_RANGE[0]) &
                                        (sc_cands["abs_delta"] <= CS_SHORT_DELTA_RANGE[1])]
                     if sc_band.empty:
-                        sc_band = sc_cands  # greeks unsolvable — fall back (spread is defined-risk)
-                    short_call = sc_band.sort_values("mid", ascending=False).iloc[0]
+                        # greeks unsolvable — fall back to richest (defined risk anyway)
+                        short_call = sc_cands.sort_values("mid", ascending=False).iloc[0]
+                    else:
+                        sc_band = sc_band.copy()
+                        sc_band["delta_dist"] = (sc_band["abs_delta"] - CS_SHORT_DELTA_TARGET).abs()
+                        short_call = sc_band.sort_values("delta_dist").iloc[0]
                     sc_strike = float(short_call["strike"])
                     sc_mid = float(short_call["mid"])
 
