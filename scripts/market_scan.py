@@ -75,7 +75,7 @@ TARGET_DTE_MIN  = 15
 TARGET_DTE_MAX  = 60
 TARGET_DTE_IDEAL= 35
 MAX_PRICE       = 650     # skip ultra-high priced stocks (cash req too big)
-MIN_PRICE       = 8.0     # stocks < $8 produce garbage premiums
+MIN_PRICE       = 10.0    # tastytrade: $10 floor for wheel/income targets
 
 
 def _setup_logging() -> logging.Logger:

@@ -714,6 +714,9 @@ def scan_ticker(
     sigma_proxy = base["sigma_proxy"]
     if spot <= 0 or sigma_proxy <= 0:
         return []
+    if spot < 10.0:
+        logger.debug(f"  {ticker}: spot ${spot:.2f} < $10 — premiums too thin for income")
+        return []
 
     try:
         t = yf.Ticker(ticker)
