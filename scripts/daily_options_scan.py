@@ -1026,7 +1026,14 @@ def scan_ticker(
 
     # ── CC ─────────────────────────────────────────────────────────────────
     try:
-        calls = chain.calls.copy()
+        # EARNINGS GATE: skip CC if earnings falls inside the option's DTE
+        # window — a gap through the short call caps the upside / forces
+        # assignment, the same binary-event risk that blocks CSPs.
+        if 0 <= earnings_days_away <= dte:
+            logger.info(f"  {ticker}: CC EARNINGS_BLOCKED — earnings in {earnings_days_away}d ≤ {dte}DTE")
+            calls = chain.calls.iloc[0:0].copy()  # empty frame → no CC candidate
+        else:
+            calls = chain.calls.copy()
         calls = calls[calls["openInterest"] >= MIN_OI]
         calls["mid"] = calls.apply(_option_mid, axis=1)
         calls = calls[calls["mid"] >= MIN_MID]
@@ -1248,6 +1255,13 @@ def scan_ticker(
     # IVR > 40 (proxy), credit/width ≥ 30%, manage at 50% profit.
     try:
         ic_expiry = _best_expiry(expiries, dte_range=IC_DTE_RANGE, target=IC_TARGET_DTE)
+        # EARNINGS GATE: an earnings gap blows through a short strike — defined
+        # risk, but a near-certain loss. Skip IC if earnings is inside the window.
+        if ic_expiry:
+            _ic_dte0 = (datetime.strptime(ic_expiry, "%Y-%m-%d").date() - today).days
+            if 0 <= earnings_days_away <= _ic_dte0:
+                logger.info(f"  {ticker}: IC EARNINGS_BLOCKED — earnings in {earnings_days_away}d ≤ {_ic_dte0}DTE")
+                ic_expiry = None
         if ic_expiry:
             ic_dte = (datetime.strptime(ic_expiry, "%Y-%m-%d").date() - today).days
             ic_expiry_iso = ic_expiry.replace("-", "")
@@ -1367,6 +1381,12 @@ def scan_ticker(
     # credit ≥ 1/3 width, IVR ≥ 25, manage at 50% profit.
     try:
         cs_expiry = _best_expiry(expiries, dte_range=CS_DTE_RANGE, target=CS_TARGET_DTE)
+        # EARNINGS GATE: skip PCS if earnings falls inside the DTE window.
+        if cs_expiry:
+            _cs_dte0 = (datetime.strptime(cs_expiry, "%Y-%m-%d").date() - today).days
+            if 0 <= earnings_days_away <= _cs_dte0:
+                logger.info(f"  {ticker}: PCS EARNINGS_BLOCKED — earnings in {earnings_days_away}d ≤ {_cs_dte0}DTE")
+                cs_expiry = None
         if cs_expiry:
             cs_dte = (datetime.strptime(cs_expiry, "%Y-%m-%d").date() - today).days
             cs_expiry_iso = cs_expiry.replace("-", "")
@@ -1463,6 +1483,12 @@ def scan_ticker(
     try:
         # Reuse cs_expiry/cs_chain if already fetched, else fetch
         ccs_expiry = _best_expiry(expiries, dte_range=CS_DTE_RANGE, target=CS_TARGET_DTE)
+        # EARNINGS GATE: skip CCS if earnings falls inside the DTE window.
+        if ccs_expiry:
+            _ccs_dte0 = (datetime.strptime(ccs_expiry, "%Y-%m-%d").date() - today).days
+            if 0 <= earnings_days_away <= _ccs_dte0:
+                logger.info(f"  {ticker}: CCS EARNINGS_BLOCKED — earnings in {earnings_days_away}d ≤ {_ccs_dte0}DTE")
+                ccs_expiry = None
         if ccs_expiry:
             ccs_dte = (datetime.strptime(ccs_expiry, "%Y-%m-%d").date() - today).days
             ccs_expiry_iso = ccs_expiry.replace("-", "")
@@ -1834,7 +1860,15 @@ def main() -> int:
 
     # ── Scan: Watchlist (all strategies) ──────────────────────────────
     all_candidates: list[dict] = []
-    for ticker in sorted(watchlist_set):
+    # MACRO HALT now gates the WATCHLIST too (previously only discovery was
+    # suppressed). VIX>30 or SPX<200dma → don't generate new premium ideas into
+    # a falling tape; defense/exit is handled by a separate pipeline.
+    if macro.get("halted"):
+        logger.warning(
+            f"MACRO HALTED (VIX={macro.get('vix')}, regime={macro.get('regime')}) — "
+            f"suppressing ALL new watchlist premium ideas"
+        )
+    for ticker in (sorted(watchlist_set) if not macro.get("halted") else []):
         try:
             gov_info = gov_data.get(ticker) or None
             ins_info = insider_data.get(ticker) or None

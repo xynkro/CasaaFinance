@@ -482,10 +482,16 @@ def scan_watchlist(
                 "earnings_note": earnings_note,
                 "post_earnings": is_post_earnings,
             }
+            # VIX-crisis gate now BLOCKS new short premium (was advisory only —
+            # it just wrote a note and emitted the trade anyway). When the regime
+            # forbids new shorts (VIX > ~35), skip the candidate entirely.
+            if not vix_rules["allow_new_short"]:
+                continue
+            # NOTE: at_capacity stays advisory here — it's computed across BOTH
+            # accounts (any-account-maxed), so blocking on it would wrongly
+            # suppress the un-maxed account. Fix per-account before making it block.
             if at_capacity:
                 result["sizing_note"] = f"AT CAPACITY: {MAX_CONCURRENT_SHORT} short options already open"
-            if not vix_rules["allow_new_short"]:
-                result["sizing_note"] = f"VIX CRISIS ({vix:.1f}): no new short premium"
             results.append(result)
 
         # ---- CC candidate (short call, 0.10-0.16Δ) ----
@@ -566,10 +572,16 @@ def scan_watchlist(
                 "earnings_note": earnings_note,
                 "post_earnings": is_post_earnings,
             }
+            # VIX-crisis gate now BLOCKS new short premium (was advisory only —
+            # it just wrote a note and emitted the trade anyway). When the regime
+            # forbids new shorts (VIX > ~35), skip the candidate entirely.
+            if not vix_rules["allow_new_short"]:
+                continue
+            # NOTE: at_capacity stays advisory here — it's computed across BOTH
+            # accounts (any-account-maxed), so blocking on it would wrongly
+            # suppress the un-maxed account. Fix per-account before making it block.
             if at_capacity:
                 result["sizing_note"] = f"AT CAPACITY: {MAX_CONCURRENT_SHORT} short options already open"
-            if not vix_rules["allow_new_short"]:
-                result["sizing_note"] = f"VIX CRISIS ({vix:.1f}): no new short premium"
             results.append(result)
 
     # Sort by composite score descending
