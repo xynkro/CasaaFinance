@@ -366,10 +366,14 @@ def scan_watchlist(
 
     # Max concurrent guard
     short_counts = current_short_count_by_account or {}
-    at_capacity = any(
-        count >= MAX_CONCURRENT_SHORT
-        for count in short_counts.values()
-    ) if short_counts else False
+    # Per-account capacity. A candidate here is account-agnostic (it could be
+    # taken in either account), so flag "at capacity" only when EVERY funded
+    # account is full — the old any() wrongly flagged the un-maxed account
+    # whenever the OTHER account had hit the cap.
+    at_capacity_by_acct = {
+        acct: count >= MAX_CONCURRENT_SHORT for acct, count in short_counts.items()
+    }
+    at_capacity = bool(at_capacity_by_acct) and all(at_capacity_by_acct.values())
 
     for sym in tickers:
         ind = indicators.get(sym, {})

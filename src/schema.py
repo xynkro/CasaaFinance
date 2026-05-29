@@ -51,33 +51,37 @@ def _ts_suffix(date: str) -> str:
 @dataclass
 class SnapshotCaspar:
     TAB_NAME = "snapshot_caspar"
-    HEADERS = ["date", "net_liq_usd", "cash", "upl", "upl_pct"]
+    HEADERS = ["date", "net_liq_usd", "cash", "upl", "upl_pct", "excess_liq"]
 
     date: str
     net_liq_usd: float
     cash: float
     upl: float
     upl_pct: float
+    excess_liq: float = 0.0    # IBKR excess liquidity — margin headroom for sizing
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
-        return [d, _num(self.net_liq_usd), _num(self.cash), _num(self.upl), _num(self.upl_pct, 4)]
+        return [d, _num(self.net_liq_usd), _num(self.cash), _num(self.upl),
+                _num(self.upl_pct, 4), _num(self.excess_liq)]
 
 
 @dataclass
 class SnapshotSarah:
     TAB_NAME = "snapshot_sarah"
-    HEADERS = ["date", "net_liq_sgd", "cash_sgd", "upl_sgd", "upl_pct"]
+    HEADERS = ["date", "net_liq_sgd", "cash_sgd", "upl_sgd", "upl_pct", "excess_liq_sgd"]
 
     date: str
     net_liq_sgd: float
     cash_sgd: float
     upl_sgd: float
     upl_pct: float
+    excess_liq_sgd: float = 0.0    # IBKR excess liquidity (SGD) — margin headroom
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
-        return [d, _num(self.net_liq_sgd), _num(self.cash_sgd), _num(self.upl_sgd), _num(self.upl_pct, 4)]
+        return [d, _num(self.net_liq_sgd), _num(self.cash_sgd), _num(self.upl_sgd),
+                _num(self.upl_pct, 4), _num(self.excess_liq_sgd)]
 
 
 @dataclass

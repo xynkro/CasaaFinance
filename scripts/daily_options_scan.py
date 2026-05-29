@@ -1718,23 +1718,40 @@ def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
     except Exception:
         pass
 
-    # Caspar — snapshot_caspar headers: date, net_liq_usd, cash, upl, upl_pct
+    def _latest(tab: str) -> dict:
+        rows = ss.worksheet(tab).get_all_values()
+        if len(rows) < 2:
+            return {}
+        return dict(zip(rows[0], rows[-1]))
+
+    def _f(d: dict, key: str) -> float:
+        try:
+            return float(d.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    # Caspar — USD margin account, aggressive profile.
     try:
-        rows = ss.worksheet("snapshot_caspar").get_all_values()
-        if len(rows) > 1:
-            nlv = float(rows[-1][1] or 0)
-            if nlv > 0:
-                states["caspar"] = {"nlv": nlv, "is_margin": True, "profile": "aggressive"}
+        last = _latest("snapshot_caspar")
+        nlv = _f(last, "net_liq_usd")
+        if nlv > 0:
+            states["caspar"] = {
+                "nlv": nlv, "is_margin": True, "profile": "aggressive",
+                "excess_liq": _f(last, "excess_liq") or None,
+            }
     except Exception as e:
         logger.debug(f"  sizing: snapshot_caspar read failed: {e}")
 
-    # Sarah — snapshot_sarah headers: date, net_liq_sgd, cash_sgd, upl_sgd, upl_pct
+    # Sarah — SGD cash account, balanced profile (NLV + excess-liq → USD).
     try:
-        rows = ss.worksheet("snapshot_sarah").get_all_values()
-        if len(rows) > 1:
-            nlv_sgd = float(rows[-1][1] or 0)
-            if nlv_sgd > 0:
-                states["sarah"] = {"nlv": nlv_sgd / usd_sgd, "is_margin": False, "profile": "balanced"}
+        last = _latest("snapshot_sarah")
+        nlv_sgd = _f(last, "net_liq_sgd")
+        if nlv_sgd > 0:
+            xl = _f(last, "excess_liq_sgd")
+            states["sarah"] = {
+                "nlv": nlv_sgd / usd_sgd, "is_margin": False, "profile": "balanced",
+                "excess_liq": (xl / usd_sgd) if xl else None,
+            }
     except Exception as e:
         logger.debug(f"  sizing: snapshot_sarah read failed: {e}")
 
@@ -1766,6 +1783,7 @@ def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
                 underlying=float(c.get("underlying_last", 0)),
                 premium=float(c.get("premium", 0)),
                 profile_name=st["profile"], nlv=st["nlv"], is_margin=st["is_margin"],
+                excess_liquidity=st.get("excess_liq"),
                 bpr_override=override, vix=float(vix), spx_above_200dma=spx_ok,
             )
             parts.append(f"{acct[0].upper()}:{sr.recommended_contracts}x")

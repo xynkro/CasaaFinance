@@ -203,9 +203,13 @@ def build_snapshots(grab: dict, prices: dict[str, float], macro: dict[str, float
                 pr.weight = abs(pr.mkt_val) / net_liq if acct_key == "caspar" else abs(pr.mkt_val * (usd_sgd if pr.ticker not in SGX_TICKERS else 1.0)) / net_liq
 
         if acct_key == "caspar":
-            snap = S.SnapshotCaspar(date=date, net_liq_usd=net_liq, cash=cash, upl=total_upl, upl_pct=upl_pct)
+            excess_liq = float(summary.get("excess_liquidity", 0) or 0)
+            snap = S.SnapshotCaspar(date=date, net_liq_usd=net_liq, cash=cash,
+                                    upl=total_upl, upl_pct=upl_pct, excess_liq=excess_liq)
         else:
-            snap = S.SnapshotSarah(date=date, net_liq_sgd=net_liq, cash_sgd=cash, upl_sgd=total_upl, upl_pct=upl_pct)
+            excess_liq = float(summary.get("excess_liquidity_sgd", 0) or 0)
+            snap = S.SnapshotSarah(date=date, net_liq_sgd=net_liq, cash_sgd=cash,
+                                   upl_sgd=total_upl, upl_pct=upl_pct, excess_liq_sgd=excess_liq)
 
         results[f"snap_{acct_key}"] = snap
         results[f"pos_{acct_key}"] = pos_rows
