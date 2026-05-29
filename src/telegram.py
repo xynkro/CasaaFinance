@@ -1041,21 +1041,50 @@ def ping_unusual_options(
         side = a.get("side", "")
         strike = float(a.get("strike", 0))
         expiry = a.get("expiry", "")
-        detail = _html.escape(str(a.get("detail", "")))
+        vol = int(a.get("volume", 0))
+        oi = int(a.get("open_interest", 0))
+        notional = float(a.get("notional", 0))
+        price = float(a.get("underlying_last", 0))
+        moneyness = a.get("moneyness", "")
+        vol_oi = float(a.get("vol_oi_ratio", 0))
+
+        # Directional lean — naive read: CALL=bullish, PUT=bearish
+        dir_icon = "📈" if side == "CALL" else "📉"
+        side_label = side.upper() if side else "?"
 
         if a.get("alert_type") == "PC_SKEW":
-            lines.append(f"{icon} <b>${tk}</b> [{atype}]")
+            lean = "Bullish" if side == "CALL" else "Bearish"
+            lines.append(f"{icon} <b>${tk}</b> {dir_icon} {lean} [{atype}]")
+            detail = _html.escape(str(a.get("detail", "")))
+            lines.append(f"    {detail}")
         else:
+            # Clear format: "🚨 $PLTR 📉 PUT $350 · Jun 18 · ITM · @$136.88"
+            # Show side explicitly, strike, expiry, moneyness, underlying
             strike_str = f"${strike:.0f}" if strike > 0 else ""
+            price_str = f"@${price:.2f}" if price > 0 else ""
+            money_str = f" · {moneyness}" if moneyness else ""
+
             lines.append(
-                f"{icon} <b>${tk}</b> {strike_str}{side[0] if side else ''} "
-                f"{expiry} [{atype}]"
+                f"{icon} <b>${tk}</b> {dir_icon} {side_label} {strike_str} · "
+                f"{expiry}{money_str} · {price_str} [{atype}]"
             )
-        lines.append(f"    {detail}")
+
+            # Detail line: explicit contract count with side label
+            notional_str = (
+                f"${notional / 1_000_000:.1f}M" if notional >= 1_000_000
+                else f"${notional / 1_000:.0f}K" if notional >= 1_000
+                else f"${notional:.0f}"
+            )
+            oi_str = f" vs {oi:,} OI" if oi > 0 else " (new position)"
+            vol_oi_str = f" · {vol_oi:.1f}x Vol/OI" if vol_oi >= 3 else ""
+            lines.append(
+                f"    {vol:,} {side_label}S{oi_str} · "
+                f"{notional_str} notional{vol_oi_str}"
+            )
         lines.append("")
 
     if pwa_url:
-        lines.append(f'📱 <a href="{_html.escape(pwa_url)}">Full alerts in PWA</a>')
+        lines.append(f'📱 <a href="{_html.escape(pwa_url)}">Full alerts in PWA → Flow tab</a>')
 
     return send(
         "\n".join(lines),

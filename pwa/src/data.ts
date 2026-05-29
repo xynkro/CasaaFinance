@@ -843,6 +843,30 @@ export interface IvSurfaceScanRow {
   earnings_before_expiry?: string;
 }
 
+/**
+ * Unusual Options Activity alert — one row per alert per day.
+ * Scanner flags Vol/OI spikes, strike concentration, far-OTM flow,
+ * and put/call skew across the watchlist universe.
+ */
+export interface UoaAlertRow {
+  date: string;
+  ticker: string;
+  alert_type: string;      // "VOL_OI_SPIKE" | "STRIKE_CONC" | "OTM_FLOW" | "PC_SKEW"
+  side: string;            // "CALL" | "PUT"
+  strike: string;
+  expiry: string;          // "YYYY-MM-DD"
+  dte: string;
+  volume: string;
+  open_interest: string;
+  vol_oi_ratio: string;
+  implied_vol: string;     // 0-1 scale
+  notional: string;        // dollar value of flow
+  moneyness: string;       // "ITM" | "ATM" | "OTM" | "FAR_OTM"
+  underlying_last: string;
+  severity: string;        // "1" | "2" | "3"
+  detail: string;
+}
+
 export interface CongressTradeRow {
   audit_ts: string;
   filing_id: string;
@@ -1207,6 +1231,7 @@ export interface DashboardData {
   apiUsage: ApiUsageRow[];               // raw rows; Settings panel aggregates
   govConfluence: GovConfluenceRow[];     // today's gov confluence signals (score ≥ 10)
   congressTrades: CongressTradeRow[];    // recent politician trades (last 7 days)
+  uoaAlerts: UoaAlertRow[];              // unusual options activity (latest day)
   harvestScan: HarvestScanRow[];        // premium harvest picks (today)
   scanResults: ScanResultRow[];         // all strategy candidates (today) — CSP/CC/PCS/CCS/IC/PMCC/LONG_CALL
   ivSurfaceScan: IvSurfaceScanRow[];
@@ -1282,6 +1307,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       apiUsageRows,
       govConfRows,
       congressRows,
+      uoaRows,
       harvestScanRows,
       scanResultRows,
       ivSurfaceScanRows,
@@ -1297,6 +1323,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTab<ApiUsageRow>("api_usage").catch(() => [] as ApiUsageRow[]),
       fetchTab<GovConfluenceRow>("gov_confluence_signals").catch(() => [] as GovConfluenceRow[]),
       fetchTab<CongressTradeRow>("congress_trades").catch(() => [] as CongressTradeRow[]),
+      fetchTabByName<UoaAlertRow>("uoa_alerts").catch(() => [] as UoaAlertRow[]),
       fetchTab<HarvestScanRow>("harvest_scan").catch(() => [] as HarvestScanRow[]),
       fetchTabByName<ScanResultRow>("scan_results").catch(() => [] as ScanResultRow[]),
       fetchTab<IvSurfaceScanRow>("iv_surface_scan").catch(() => [] as IvSurfaceScanRow[]),
@@ -1375,6 +1402,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
           .filter((r) => (r.transaction_date || r.filing_date || "") >= sevenDaysAgo && r.ticker)
           .sort((a, b) => (b.transaction_date || b.filing_date || "").localeCompare(a.transaction_date || a.filing_date || ""));
       })(),
+      uoaAlerts: latestGroup(uoaRows),
       harvestScan: latestGroup(harvestScanRows),
       scanResults: latestGroup(scanResultRows),
       ivSurfaceScan: ivSurfaceScanRows,
@@ -1409,6 +1437,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       apiUsage: [],
       govConfluence: [],
       congressTrades: [],
+      uoaAlerts: [],
       harvestScan: [],
       scanResults: [],
       ivSurfaceScan: [],

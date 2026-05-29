@@ -8,15 +8,17 @@ import type {
   OptionsDefenseRow,
   HarvestScanRow,
   ScanResultRow,
+  UoaAlertRow,
 } from "../data";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
+import { UoaFlowCard } from "../cards/UoaFlowCard";
 import { HarvestContent } from "./HarvestPage";
 import { StickyTabs } from "../components/StickyTabs";
-import { Shield, Briefcase, Wheat } from "lucide-react";
+import { Shield, Briefcase, Wheat, Activity } from "lucide-react";
 
-type Subtab = "defense" | "book" | "harvest";
+type Subtab = "defense" | "book" | "harvest" | "flow";
 const LAST_KEY = "casaa_options_subtab";
 
 export function OptionsPage({
@@ -29,6 +31,7 @@ export function OptionsPage({
   sarahPositions,
   harvestScan,
   scanResults,
+  uoaAlerts,
   loading,
 }: {
   options: OptionRow[];
@@ -40,12 +43,13 @@ export function OptionsPage({
   sarahPositions: PositionRow[];
   harvestScan: HarvestScanRow[];
   scanResults: ScanResultRow[];
+  uoaAlerts: UoaAlertRow[];
   loading: boolean;
 }) {
   const [sub, setSub] = useState<Subtab>(() => {
     try {
       const saved = localStorage.getItem(LAST_KEY) as Subtab | null;
-      if (saved === "defense" || saved === "book" || saved === "harvest") return saved;
+      if (saved === "defense" || saved === "book" || saved === "harvest" || saved === "flow") return saved;
     } catch {
       // ignore
     }
@@ -66,10 +70,11 @@ export function OptionsPage({
   ).length;
   const openPositions = options.length;
   const harvestCount = harvestScan.filter((r) => r.strategy !== "HALTED").length + scanResults.length;
+  const extremeFlow = uoaAlerts.filter((a) => Number(a.severity) >= 3).length;
 
   return (
     <div className="flex flex-col px-4 pb-4">
-      {/* Sticky subtab selector — Defense first so urgent alerts are 1 tap away */}
+      {/* Sticky subtab selector */}
       <StickyTabs
         active={sub}
         onChange={handleChange}
@@ -77,6 +82,7 @@ export function OptionsPage({
           { key: "defense", label: "Defense", icon: Shield,    badge: urgentDefense },
           { key: "book",    label: "Book",    icon: Briefcase, badge: openPositions },
           { key: "harvest", label: "Harvest", icon: Wheat,     badge: harvestCount },
+          { key: "flow",    label: "Flow",    icon: Activity,  badge: extremeFlow },
         ]}
       />
 
@@ -106,6 +112,12 @@ export function OptionsPage({
 
       {sub === "harvest" && (
         <HarvestContent harvestScan={harvestScan} scanResults={scanResults} options={options} loading={loading} />
+      )}
+
+      {sub === "flow" && (
+        <div className="fade-up fade-up-1 mt-3">
+          <UoaFlowCard alerts={uoaAlerts} />
+        </div>
       )}
     </div>
   );

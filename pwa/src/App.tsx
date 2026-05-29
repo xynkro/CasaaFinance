@@ -114,6 +114,7 @@ function Dashboard() {
             sarahPositions={data?.sarahPositions ?? []}
             harvestScan={data?.harvestScan ?? []}
             scanResults={data?.scanResults ?? []}
+            uoaAlerts={data?.uoaAlerts ?? []}
             loading={loading && !data}
           />
         );
