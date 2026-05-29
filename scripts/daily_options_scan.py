@@ -37,8 +37,10 @@ sys.path.insert(0, str(ROOT))
 CSP_DTE_RANGE   = (15, 50)
 CC_DTE_RANGE    = (15, 50)
 TARGET_DTE      = 35
-CSP_OTM_RANGE   = (0.02, 0.18)   # 2%-18% OTM
-CC_OTM_RANGE    = (0.01, 0.10)   # 1%-10% OTM
+CSP_OTM_RANGE   = (0.02, 0.18)   # 2%-18% OTM (coarse pre-filter; delta is the real gate)
+CC_OTM_RANGE    = (0.01, 0.10)   # 1%-10% OTM (coarse pre-filter; delta is the real gate)
+CSP_DELTA_RANGE = (0.15, 0.35)   # short-put |Δ| — PRIMARY strike gate (assignment prob)
+CC_DELTA_RANGE  = (0.15, 0.35)   # short-call |Δ| — PRIMARY strike gate
 MIN_OI          = 50
 MIN_MID         = 0.15       # min option mid-price — $0.05 was letting penny options through
 MIN_CSP_YIELD   = 12.0    # annualised %
@@ -71,7 +73,8 @@ IC_MIN_QUALITY  = 30
 # CREDIT SPREADS — directional plays, tastytrade criteria
 CS_DTE_RANGE    = (25, 50)
 CS_TARGET_DTE   = 42
-CS_OTM_RANGE    = (0.04, 0.12)   # 4-12% OTM ≈ ~20-35Δ
+CS_OTM_RANGE    = (0.04, 0.12)   # 4-12% OTM (coarse pre-filter; delta is the real gate)
+CS_SHORT_DELTA_RANGE = (0.18, 0.35)  # short-leg |Δ| target for PCS/CCS (tastytrade 20-30Δ)
 CS_WING_WIDTHS  = [5, 10]
 CS_MIN_CREDIT_RATIO = 0.28       # ~1/3 width credit
 CS_MIN_IVR      = 25             # lower bar than IC
@@ -386,8 +389,15 @@ def _bsm_delta(S: float, K: float, T: float, sigma: float,
 def _implied_vol(price: float, S: float, K: float, T: float,
                  right: str = "P", r: float = _RISK_FREE,
                  tol: float = 1e-5, max_iter: int = 50) -> float:
-    """Newton-Raphson IV solver. Returns annualised vol (e.g. 0.35 = 35%).
-    Falls back to 0.0 if unsolvable."""
+    """Implied-vol solver. Returns annualised vol (e.g. 0.35 = 35%), 0.0 if
+    unsolvable.
+
+    Newton-Raphson fast path, verified by round-trip price. Newton's
+    Brenner-Subrahmanyam seed is an ATM approximation that DIVERGES on cheap
+    OTM options (it would silently return 0 or a wrong low vol, which then
+    degenerates delta to 0 and drops the strike from any delta gate). So when
+    Newton fails to round-trip, fall back to bisection, which is bulletproof
+    for any arbitrage-free price."""
     if price <= 0 or T <= 0 or S <= 0 or K <= 0:
         return 0.0
     # Intrinsic value check
@@ -407,7 +417,25 @@ def _implied_vol(price: float, S: float, K: float, T: float,
         sigma = max(0.001, min(sigma, 10.0))
         if abs(bp - price) < tol:
             break
-    return sigma if 0.001 < sigma < 10.0 else 0.0
+    # Accept Newton only if it actually round-trips the price.
+    if 0.001 < sigma < 10.0 and abs(_bsm_price(S, K, T, sigma, right, r) - price) < 1e-3:
+        return sigma
+    # Bisection fallback — guaranteed convergence for arbitrage-free prices.
+    lo, hi = 1e-4, 10.0
+    plo = _bsm_price(S, K, T, lo, right, r) - price
+    phi = _bsm_price(S, K, T, hi, right, r) - price
+    if plo * phi > 0:
+        return 0.0  # price not bracketable within [0.0001, 10] vol
+    for _ in range(100):
+        mid_s = 0.5 * (lo + hi)
+        pm = _bsm_price(S, K, T, mid_s, right, r) - price
+        if abs(pm) < tol:
+            return mid_s
+        if plo * pm < 0:
+            hi = mid_s
+        else:
+            lo, plo = mid_s, pm
+    return 0.5 * (lo + hi)
 
 def _compute_greeks(row, price: float, dte: int, right: str = "P") -> tuple[float, float]:
     """Compute (delta, iv_pct) for an option row using BSM.
@@ -871,9 +899,20 @@ def scan_ticker(
 
             puts = puts[(puts["strike"] >= price * (1 - _otm_max)) &
                         (puts["strike"] <= price * (1 - _otm_min))]
-            # Kill impractical picks: if the best put at the vol-adjusted
-            # distance has < $0.30 premium, the stock isn't CSP-able.
-            # (CLSK $9P on $17 stock → $0.10 premium → skip entirely)
+            # PRIMARY GATE: short-put delta band. OTM-% is not vol-normalized
+            # — a 10%-OTM put is ~0.05Δ on a low-vol name but ~0.35Δ on a
+            # high-vol one — so we gate on assignment probability directly.
+            # Delta is solved from the real mid via BSM; unsolvable/garbage
+            # strikes resolve to ~0Δ and fall out of the band.
+            if not puts.empty:
+                puts = puts.copy()
+                puts["abs_delta"] = puts.apply(
+                    lambda row: abs(_compute_greeks(row, price, dte, "P")[0]), axis=1
+                )
+                puts = puts[(puts["abs_delta"] >= CSP_DELTA_RANGE[0]) &
+                            (puts["abs_delta"] <= CSP_DELTA_RANGE[1])]
+            # Tradeability floor: even at the right delta, a sub-$0.30 premium
+            # isn't worth selling after commission + slippage.
             puts = puts[puts["mid"] >= CSP_MIN_PREMIUM]
             puts = puts.copy()
             puts["ann_yield"] = puts["mid"] / puts["strike"] * (365 / dte) * 100
@@ -981,9 +1020,19 @@ def scan_ticker(
         calls = calls[calls["openInterest"] >= MIN_OI]
         calls["mid"] = calls.apply(_option_mid, axis=1)
         calls = calls[calls["mid"] >= MIN_MID]
-        # Strike 1-10% OTM (above price)
+        # Strike 1-10% OTM (above price) — coarse pre-filter
         calls = calls[(calls["strike"] >= price * (1 + CC_OTM_RANGE[0])) &
                       (calls["strike"] <= price * (1 + CC_OTM_RANGE[1]))]
+        # PRIMARY GATE: short-call delta band (see CSP note). Keeps us from
+        # selling calls so near-the-money that assignment is a coin flip and
+        # we cap upside for little premium.
+        if not calls.empty:
+            calls = calls.copy()
+            calls["abs_delta"] = calls.apply(
+                lambda row: abs(_compute_greeks(row, price, dte, "C")[0]), axis=1
+            )
+            calls = calls[(calls["abs_delta"] >= CC_DELTA_RANGE[0]) &
+                          (calls["abs_delta"] <= CC_DELTA_RANGE[1])]
         calls = calls.copy()
         calls["ann_yield"] = calls["mid"] / price * (365 / dte) * 100
         calls = calls[calls["ann_yield"] >= MIN_CC_YIELD]
@@ -1327,7 +1376,18 @@ def scan_ticker(
                     (cs_puts["strike"] <= price * (1 - CS_OTM_RANGE[0]))
                 ]
                 if not sp_cands.empty:
-                    short_put = sp_cands.sort_values("mid", ascending=False).iloc[0]
+                    # Constrain short leg to the target delta band, then take
+                    # the richest premium within it (was: richest in the whole
+                    # OTM band, which biased toward the near-money/high-delta edge).
+                    sp_cands = sp_cands.copy()
+                    sp_cands["abs_delta"] = sp_cands.apply(
+                        lambda row: abs(_compute_greeks(row, price, cs_dte, "P")[0]), axis=1
+                    )
+                    sp_band = sp_cands[(sp_cands["abs_delta"] >= CS_SHORT_DELTA_RANGE[0]) &
+                                       (sp_cands["abs_delta"] <= CS_SHORT_DELTA_RANGE[1])]
+                    if sp_band.empty:
+                        sp_band = sp_cands  # greeks unsolvable — fall back (spread is defined-risk)
+                    short_put = sp_band.sort_values("mid", ascending=False).iloc[0]
                     sp_strike = float(short_put["strike"])
                     sp_mid = float(short_put["mid"])
 
@@ -1412,7 +1472,17 @@ def scan_ticker(
                     (ccs_calls["strike"] <= price * (1 + CS_OTM_RANGE[1]))
                 ]
                 if not sc_cands.empty:
-                    short_call = sc_cands.sort_values("mid", ascending=False).iloc[0]
+                    # Constrain short leg to the target delta band, then take
+                    # the richest premium within it.
+                    sc_cands = sc_cands.copy()
+                    sc_cands["abs_delta"] = sc_cands.apply(
+                        lambda row: abs(_compute_greeks(row, price, ccs_dte, "C")[0]), axis=1
+                    )
+                    sc_band = sc_cands[(sc_cands["abs_delta"] >= CS_SHORT_DELTA_RANGE[0]) &
+                                       (sc_cands["abs_delta"] <= CS_SHORT_DELTA_RANGE[1])]
+                    if sc_band.empty:
+                        sc_band = sc_cands  # greeks unsolvable — fall back (spread is defined-risk)
+                    short_call = sc_band.sort_values("mid", ascending=False).iloc[0]
                     sc_strike = float(short_call["strike"])
                     sc_mid = float(short_call["mid"])
 
