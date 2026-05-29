@@ -453,18 +453,28 @@ def _compute_greeks(row, price: float, dte: int, right: str = "P") -> tuple[floa
     return (round(delta, 4), round(iv * 100, 1))
 
 
-def _estimate_ivr(iv_pct: float, hv30_pct: float) -> float:
-    """IV Rank proxy. Delegates to robust IV rank when history available,
-    falls back to IV/HV ratio heuristic.
+def _estimate_ivr(iv_pct: float, hv30_pct: float, iv_history: list[float] | None = None) -> float:
+    """IV positioning score, 0-100.
 
-    Without 252-day IV history (expensive per-scan fetch), falls back to
-    the ratio heuristic: ratio 1.0 → IVR ≈ 50, ratio 1.5 → IVR ≈ 75,
-    ratio 0.7 → IVR ≈ 35. Real compute_iv_rank() from src.iv_rank is
-    available when a caller can supply iv_history.
+    PREFERRED — true IV percentile: % of trailing days where ATM IV was below
+    today's, computed from `iv_history` (a series of PAST ATM IVs). This is the
+    real "is IV historically elevated" signal. It requires accumulating daily
+    IV — there is no free historical-IV feed — so callers can only supply it
+    once an iv_history store has been built up.
+
+    FALLBACK — IV/HV ratio mapped to 0-100 (ratio 1.0→50, 1.5→75, 0.7→35).
+    IMPORTANT: this is a VOLATILITY-RISK-PREMIUM richness score (is IV rich vs
+    *realised* vol), NOT a percentile/rank — a name can score high here while
+    sitting low in its own IV range. Do NOT build an "IV percentile" from a
+    realised-vol history: IV structurally exceeds RV, so that pegs near 100 and
+    is useless. The IC/CS IVR gates operate on THIS score; treat their
+    thresholds as ratio-score units, not true percentiles.
     """
-    # noqa: F401 — import kept for future callers that supply history
-    from src.iv_rank import compute_iv_rank  # noqa: F401
-
+    if iv_history:
+        from src.iv_rank import compute_iv_percentile
+        pct = compute_iv_percentile(iv_pct, iv_history)
+        if pct >= 0:   # -1 = insufficient history
+            return pct
     if hv30_pct <= 0:
         return 50.0
     ratio = iv_pct / hv30_pct
