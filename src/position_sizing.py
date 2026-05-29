@@ -160,15 +160,19 @@ def size_candidate(
     group_name_count: int = 0,
     vix: float = 0.0,
     spx_above_200dma: bool = True,
+    bpr_override: float | None = None,
 ) -> SizingResult:
     """Recommend a contract count for one candidate under a profile + account state.
 
     deployed_bpr        — short BPR already committed across the whole book
     group_deployed_bpr  — short BPR already committed in this name's correlated group
     group_name_count     — distinct names already open in this correlated group
+    bpr_override         — use this per-contract BPR instead of estimating (e.g. a
+                           defined-risk spread's exact max loss, already on the candidate)
     """
     p = PROFILES.get(profile_name, PROFILES["balanced"])
-    bpr = estimate_bpr_per_contract(strategy, strike, underlying, premium, width, is_margin)
+    bpr = bpr_override if (bpr_override is not None and bpr_override > 0) \
+        else estimate_bpr_per_contract(strategy, strike, underlying, premium, width, is_margin)
     mult = regime_multiplier(vix, spx_above_200dma, profile_name)
 
     if nlv <= 0 or bpr <= 0:

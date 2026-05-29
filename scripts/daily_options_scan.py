@@ -1695,6 +1695,85 @@ def scan_ticker(
     return out
 
 
+# ── Position sizing (Tranche 1b) ───────────────────────────────────────────
+
+def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
+    """Read latest NLV per account from snapshot tabs → per-account sizing state.
+
+    Returns {account: {nlv (USD), is_margin, profile}} for FUNDED accounts only.
+    Caspar = USD margin / aggressive; Sarah = SGD cash / balanced (NLV → USD).
+    Excess-liquidity isn't in the snapshot sheet yet, so the margin liquidity
+    floor is NOT enforced here (it's enforced in the account-aware daily_tracker
+    path); per-name + correlated-group + regime caps use NLV alone.
+    """
+    states: dict[str, dict] = {}
+
+    usd_sgd = 1.30
+    try:
+        mrows = ss.worksheet("macro").get_all_values()
+        if len(mrows) > 1:
+            hdr = mrows[0]
+            last = dict(zip(hdr, mrows[-1]))
+            usd_sgd = float(last.get("usd_sgd") or 1.30) or 1.30
+    except Exception:
+        pass
+
+    # Caspar — snapshot_caspar headers: date, net_liq_usd, cash, upl, upl_pct
+    try:
+        rows = ss.worksheet("snapshot_caspar").get_all_values()
+        if len(rows) > 1:
+            nlv = float(rows[-1][1] or 0)
+            if nlv > 0:
+                states["caspar"] = {"nlv": nlv, "is_margin": True, "profile": "aggressive"}
+    except Exception as e:
+        logger.debug(f"  sizing: snapshot_caspar read failed: {e}")
+
+    # Sarah — snapshot_sarah headers: date, net_liq_sgd, cash_sgd, upl_sgd, upl_pct
+    try:
+        rows = ss.worksheet("snapshot_sarah").get_all_values()
+        if len(rows) > 1:
+            nlv_sgd = float(rows[-1][1] or 0)
+            if nlv_sgd > 0:
+                states["sarah"] = {"nlv": nlv_sgd / usd_sgd, "is_margin": False, "profile": "balanced"}
+    except Exception as e:
+        logger.debug(f"  sizing: snapshot_sarah read failed: {e}")
+
+    return states
+
+
+_DEFINED_OR_DEBIT = {"PCS", "CCS", "IC", "PMCC", "LONG_CALL", "LONG_PUT"}
+
+
+def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
+    """Per-account recommended contract count for a candidate under each profile.
+    Annotation only (does not drop) — accounts are shared, so each person reads
+    the count that applies to them. e.g. 'size C:1x B:3x'."""
+    if not states:
+        return ""
+    from src.position_sizing import size_candidate
+    strat = "CSP" if c.get("strategy") == "HARVEST_CSP" else c.get("strategy", "")
+    vix = macro.get("vix", 0) or 0
+    spx_ok = macro.get("spx_above_200sma", True)
+    # Defined-risk/debit: capital-at-risk per contract IS cash_required (max loss
+    # / net debit). Naked CSP/CC: let the module estimate Reg-T (margin) or
+    # cash-secured (cash) from strike/underlying.
+    override = float(c.get("cash_required", 0)) if strat.upper() in _DEFINED_OR_DEBIT else None
+    parts = []
+    for acct, st in states.items():
+        try:
+            sr = size_candidate(
+                strategy=strat, strike=float(c.get("strike", 0)),
+                underlying=float(c.get("underlying_last", 0)),
+                premium=float(c.get("premium", 0)),
+                profile_name=st["profile"], nlv=st["nlv"], is_margin=st["is_margin"],
+                bpr_override=override, vix=float(vix), spx_above_200dma=spx_ok,
+            )
+            parts.append(f"{acct[0].upper()}:{sr.recommended_contracts}x")
+        except Exception:
+            continue
+    return ("size " + " ".join(parts)) if parts else ""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry", action="store_true", help="Print, no sheet write")
@@ -1749,6 +1828,12 @@ def main() -> int:
     load_env()
     client = sh.authenticate()
     ss = sh._open_sheet(client)
+
+    # Per-account sizing state (NLV per account → recommended contracts per profile)
+    account_states = _read_account_states(ss, logger)
+    if account_states:
+        logger.info("  sizing: " + ", ".join(
+            f"{a}=${st['nlv']:,.0f} {st['profile']}" for a, st in account_states.items()))
 
     # Gov confluence signals (for catalyst tagging + LONG_CALL trigger)
     gov_data: dict[str, dict] = {}
@@ -1943,6 +2028,11 @@ def main() -> int:
     for c in other_picks + harvest_picks[:MAX_HARVEST_PICKS]:
         # Normalize HARVEST_CSP → CSP for scan_results (one canonical strategy name)
         strat = "CSP" if c["strategy"] == "HARVEST_CSP" else c["strategy"]
+        # Append per-account recommended contract count (sizing annotation).
+        _sz = _sizing_note(c, account_states, macro)
+        _notes = c.get("notes", "")
+        if _sz:
+            _notes = f"{_notes} | {_sz}" if _notes else _sz
         row = S.ScanResultRow(
             date=today_iso,
             ticker=c["ticker"],
@@ -1965,7 +2055,7 @@ def main() -> int:
             technical_score=c["technical_score"],
             composite_score=c["composite_score"],
             catalyst_flag=c["catalyst_flag"],
-            notes=c.get("notes", ""),
+            notes=_notes,
             signals_json=c.get("signals_json", ""),
         )
         scan_rows.append(row.to_row())
