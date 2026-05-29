@@ -1045,6 +1045,7 @@ def ping_unusual_options(
         oi = int(a.get("open_interest", 0))
         notional = float(a.get("notional", 0))
         price = float(a.get("underlying_last", 0))
+        opt_price = float(a.get("option_price", 0))
         moneyness = a.get("moneyness", "")
         vol_oi = float(a.get("vol_oi_ratio", 0))
 
@@ -1062,10 +1063,11 @@ def ping_unusual_options(
             # Show side explicitly, strike, expiry, moneyness, underlying
             strike_str = f"${strike:.0f}" if strike > 0 else ""
             price_str = f"@${price:.2f}" if price > 0 else ""
+            opt_str = f" · 💰${opt_price:.2f}" if opt_price > 0 else ""
             money_str = f" · {moneyness}" if moneyness else ""
 
             lines.append(
-                f"{icon} <b>${tk}</b> {dir_icon} {side_label} {strike_str} · "
+                f"{icon} <b>${tk}</b> {dir_icon} {side_label} {strike_str}{opt_str} · "
                 f"{expiry}{money_str} · {price_str} [{atype}]"
             )
 

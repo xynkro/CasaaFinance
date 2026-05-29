@@ -70,6 +70,7 @@ function AlertRow({ alert }: { alert: UoaAlertRow }) {
   const notional = numeric(alert.notional);
   const strike = numeric(alert.strike);
   const price = numeric(alert.underlying_last);
+  const optPrice = numeric(alert.option_price);
   const iv = numeric(alert.implied_vol);
   const dte = numeric(alert.dte);
   const side = (alert.side || "").toUpperCase();
@@ -121,6 +122,12 @@ function AlertRow({ alert }: { alert: UoaAlertRow }) {
         {!isPcSkew && (
           <>
             <span className="font-mono text-white">${strike.toFixed(0)}{isCall ? "C" : "P"}</span>
+            {optPrice > 0 && (
+              <>
+                <span>·</span>
+                <span className="font-mono text-emerald-300">${optPrice < 1 ? optPrice.toFixed(2) : optPrice.toFixed(1)}</span>
+              </>
+            )}
             <span>·</span>
             <span>{fmtExpiry(alert.expiry)}</span>
             <span>·</span>
@@ -168,6 +175,9 @@ function AlertRow({ alert }: { alert: UoaAlertRow }) {
           {!isPcSkew && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-400">
               <span>Underlying: <span className="text-white font-mono">${price.toFixed(2)}</span></span>
+              {optPrice > 0 && (
+                <span>Premium: <span className="text-emerald-300 font-mono">${optPrice < 1 ? optPrice.toFixed(2) : optPrice.toFixed(2)}/sh</span></span>
+              )}
               <span>IV: <span className="text-white font-mono">{(iv * 100).toFixed(0)}%</span></span>
               <span>Volume: <span className="text-white font-mono">{vol.toLocaleString()}</span></span>
               <span>Open Int: <span className="text-white font-mono">{oi.toLocaleString()}</span></span>

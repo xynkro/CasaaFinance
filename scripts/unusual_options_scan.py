@@ -93,6 +93,7 @@ class UoaAlert:
     notional: float        # dollar value of flow
     moneyness: str         # ITM | ATM | OTM | FAR_OTM
     underlying_last: float
+    option_price: float    # mid price per share (bid+ask)/2
     detail: str            # human-readable explanation
     severity: int          # 1-3 (1=notable, 2=significant, 3=extreme)
 
@@ -107,6 +108,7 @@ class UoaAlert:
             "notional": round(self.notional),
             "moneyness": self.moneyness,
             "underlying_last": round(self.underlying_last, 2),
+            "option_price": round(self.option_price, 2),
             "detail": self.detail, "severity": self.severity,
         }
 
@@ -228,7 +230,7 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                         dte=dte, volume=vol, open_interest=oi,
                         vol_oi_ratio=vol_oi, implied_vol=iv,
                         notional=notional, moneyness=moneyness,
-                        underlying_last=price,
+                        underlying_last=price, option_price=mid,
                         detail=f"Vol/OI {vol_oi:.1f}x — {vol:,} contracts vs {oi:,} OI "
                                f"(${notional:,.0f} notional)",
                         severity=sev,
@@ -243,7 +245,7 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                         dte=dte, volume=vol, open_interest=oi,
                         vol_oi_ratio=vol_oi, implied_vol=iv,
                         notional=notional, moneyness=moneyness,
-                        underlying_last=price,
+                        underlying_last=price, option_price=mid,
                         detail=f"{conc_pct:.0f}% of {exp_str} {side_name.lower()} volume "
                                f"on ${strike:.0f} strike ({vol:,} of {total_exp_vol:,})",
                         severity=sev,
@@ -258,7 +260,7 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                         dte=dte, volume=vol, open_interest=oi,
                         vol_oi_ratio=vol_oi, implied_vol=iv,
                         notional=notional, moneyness=moneyness,
-                        underlying_last=price,
+                        underlying_last=price, option_price=mid,
                         detail=f"Far-OTM ({otm_pct:.1f}% away) {side_name.lower()} — "
                                f"{vol:,} contracts, ${notional:,.0f} notional",
                         severity=sev,
@@ -275,7 +277,7 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                 dte=0, volume=total_put_vol, open_interest=0,
                 vol_oi_ratio=0, implied_vol=0,
                 notional=0, moneyness="",
-                underlying_last=price,
+                underlying_last=price, option_price=0,
                 detail=f"Put/Call ratio {pc_ratio:.1f}x — {total_put_vol:,} puts vs "
                        f"{total_call_vol:,} calls. Heavy downside positioning.",
                 severity=2 if pc_ratio >= 5 else 1,
@@ -287,7 +289,7 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                 dte=0, volume=total_call_vol, open_interest=0,
                 vol_oi_ratio=0, implied_vol=0,
                 notional=0, moneyness="",
-                underlying_last=price,
+                underlying_last=price, option_price=0,
                 detail=f"Call/Put ratio {cp_ratio:.1f}x — {total_call_vol:,} calls vs "
                        f"{total_put_vol:,} puts. Heavy upside positioning.",
                 severity=2 if cp_ratio >= 5 else 1,
@@ -377,6 +379,7 @@ def main() -> int:
                 notional=a.notional,
                 moneyness=a.moneyness,
                 underlying_last=a.underlying_last,
+                option_price=a.option_price,
                 severity=a.severity,
                 detail=a.detail,
             )

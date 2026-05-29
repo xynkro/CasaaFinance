@@ -863,6 +863,7 @@ export interface UoaAlertRow {
   notional: string;        // dollar value of flow
   moneyness: string;       // "ITM" | "ATM" | "OTM" | "FAR_OTM"
   underlying_last: string;
+  option_price: string;    // mid price per share (0 for PC_SKEW aggregates)
   severity: string;        // "1" | "2" | "3"
   detail: string;
 }

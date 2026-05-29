@@ -2287,7 +2287,8 @@ class UoaAlertRow:
     HEADERS = [
         "date", "ticker", "alert_type", "side", "strike", "expiry", "dte",
         "volume", "open_interest", "vol_oi_ratio", "implied_vol",
-        "notional", "moneyness", "underlying_last", "severity", "detail",
+        "notional", "moneyness", "underlying_last", "option_price",
+        "severity", "detail",
     ]
 
     date: str
@@ -2304,6 +2305,7 @@ class UoaAlertRow:
     notional: float         # dollar value of flow
     moneyness: str          # ITM | ATM | OTM | FAR_OTM
     underlying_last: float
+    option_price: float     # mid price per share (bid+ask)/2
     severity: int           # 1=notable, 2=significant, 3=extreme
     detail: str             # human-readable explanation
 
@@ -2314,6 +2316,6 @@ class UoaAlertRow:
             str(self.volume), str(self.open_interest),
             _num(self.vol_oi_ratio, 1), _num(self.implied_vol, 4),
             _num(self.notional, 0), self.moneyness,
-            _num(self.underlying_last, 2), str(self.severity),
-            self.detail,
+            _num(self.underlying_last, 2), _num(self.option_price, 2),
+            str(self.severity), self.detail,
         ]
