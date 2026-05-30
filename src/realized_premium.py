@@ -14,6 +14,9 @@ CONSERVATIVE BY DESIGN — read this before changing anything:
       never credit premium from a prior, already-exited position;
     * exclude currently-OPEN legs (daily_tracker already credits those via the
       live grab) — avoids double counting;
+    * count only legs OPENED short (sell-to-open) — a long/directional leg's
+      gain is not wheel premium, and crediting it would over-count;
+    * net commissions out of every leg — premium is what you actually keep;
     * if the net is negative (bought back for more than collected) return 0 —
       this function only ever LOWERS basis, never raises it.
   Under-counting just leaves basis higher (more conservative CC gate); that is
@@ -92,38 +95,77 @@ def realized_option_premium_per_share(
     if shares <= 0:
         return 0.0
     open_keys = open_option_keys or set()
-    sym = [t for t in trades if str(t.get("symbol", "")) == ticker]
+    sym_trades = [t for t in trades if str(t.get("symbol", "")) == ticker]
 
     # Current holding period: on/after the most recent stock purchase. Premium
     # from before that belongs to a prior position and must NOT reduce this basis.
     stk_buy_times = [
-        str(t.get("time", "")) for t in sym
+        str(t.get("time", "")) for t in sym_trades
         if str(t.get("sec_type", "")) == "STK" and str(t.get("side", "")) == "BOT"
         and t.get("time")
     ]
     since = max(stk_buy_times) if stk_buy_times else ""
 
-    net = 0.0
-    for t in sym:
+    # Group in-window option fills by contract leg so we can require the leg was
+    # OPENED short (sell-to-open) before crediting it. A leg whose first fill is a
+    # BUY is a long/directional position (or an orphaned close whose opening sell
+    # predates the ledger) — its P&L is not realized wheel premium, and crediting
+    # it would OVER-count: the one direction this module must never go.
+    legs: dict[tuple, list[dict]] = {}
+    for t in sym_trades:
         if str(t.get("sec_type", "")) != "OPT":
             continue
         if since and str(t.get("time", "")) < since:
             continue
-        if option_key(t.get("right", ""), t.get("strike", ""), t.get("expiry", "")) in open_keys:
+        key = option_key(t.get("right", ""), t.get("strike", ""), t.get("expiry", ""))
+        if key in open_keys:
             continue  # still open — credited elsewhere by daily_tracker's ticker_credits
-        try:
-            mult = float(t.get("multiplier", 100) or 100)
-            qty = abs(float(t.get("qty", 0) or 0))
-            price = float(t.get("price", 0) or 0)
-        except (TypeError, ValueError):
-            continue
-        flow = price * qty * mult
-        side = str(t.get("side", ""))
-        if side == "SLD":
-            net += flow       # credit received
-        elif side == "BOT":
-            net -= flow       # debit paid (buyback)
+        legs.setdefault(key, []).append(t)
+
+    net = 0.0
+    for leg_trades in legs.values():
+        leg_trades.sort(key=lambda t: str(t.get("time", "")))
+        if str(leg_trades[0].get("side", "")) != "SLD":
+            continue  # not opened short → not wheel premium (see comment above)
+        for t in leg_trades:
+            try:
+                mult = float(t.get("multiplier", 100) or 100)
+                qty = abs(float(t.get("qty", 0) or 0))
+                price = float(t.get("price", 0) or 0)
+                commission = abs(float(t.get("commission", 0) or 0))
+            except (TypeError, ValueError):
+                continue
+            flow = price * qty * mult
+            side = str(t.get("side", ""))
+            if side == "SLD":
+                net += flow       # credit received
+            elif side == "BOT":
+                net -= flow       # debit paid (buyback)
+            net -= commission     # fees always reduce realized premium
 
     if net <= 0:
         return 0.0
     return net / shares
+
+
+def adjusted_basis(
+    avg_cost: float,
+    open_leg_credit_per_share: float,
+    realized_premium_per_share: float,
+) -> float:
+    """Effective wheel cost basis per share, floored at 0.
+
+    Subtracts BOTH premium sources from the raw stock cost:
+      * `open_leg_credit_per_share` — premium on currently-open short legs
+        (daily_tracker's ticker_credits, from the live grab);
+      * `realized_premium_per_share` — premium from CLOSED cycles
+        (:func:`realized_option_premium_per_share`).
+    The two are disjoint (the realized calc excludes open legs), so they add.
+
+    Floored at 0: cumulative premium can take the effective basis down to
+    break-even but never negative. A negative basis would corrupt the
+    downstream covered-call gate — trading_rules.cc_allowed() multiplies the
+    basis by 1.15, so a negative basis yields a negative strike floor and would
+    wave through a loss-locking CC.
+    """
+    return max(0.0, avg_cost - open_leg_credit_per_share - realized_premium_per_share)
