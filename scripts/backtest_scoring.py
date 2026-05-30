@@ -27,6 +27,60 @@ sys.path.insert(0, str(ROOT))
 from src.indicators import compute_indicators
 from src.technical_score import compute_scores, score_label
 
+import math
+
+# ── Realistic option P&L (replaces the old flat ~2% premium proxy) ──────────
+_RF = 0.04          # risk-free
+_RT_COST = 0.02     # round-trip commission + slippage, $/share
+
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def _bsm_put(S: float, K: float, T: float, sigma: float, r: float = _RF) -> float:
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return max(0.0, K - S)
+    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+    return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+
+
+def _bsm_call(S: float, K: float, T: float, sigma: float, r: float = _RF) -> float:
+    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
+        return max(0.0, S - K)
+    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+    return S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
+
+
+def _csp_pnl_pct(entry: float, exit_price: float, sigma: float, hold_days: int) -> float:
+    """CSP P&L as % of cash-secured notional (strike). Sells a ~0.25Δ put
+    (≈0.67σ OTM over the hold), prices it via BSM from the realized-vol proxy,
+    settles at expiry: keep premium if OTM, else premium − assignment loss.
+    Round-trip cost netted. This is an underlying-driven approximation (no IV
+    smile, no early assignment) but real option economics, not a flat 2%."""
+    T = max(hold_days / 365.0, 1e-6)
+    sigma = sigma if sigma > 0 else 0.4
+    otm = 0.67 * sigma * math.sqrt(T)
+    strike = entry * (1 - otm)
+    prem = _bsm_put(entry, strike, T, sigma)
+    pnl = (prem - _RT_COST) if exit_price >= strike else (prem - (strike - exit_price) - _RT_COST)
+    return pnl / strike * 100 if strike > 0 else 0.0
+
+
+def _cc_pnl_pct(entry: float, exit_price: float, sigma: float, hold_days: int) -> float:
+    """Covered-call P&L as % of shares cost (entry). Sells a ~0.25Δ call;
+    P&L = stock move (capped at the strike when called away) + premium − cost."""
+    T = max(hold_days / 365.0, 1e-6)
+    sigma = sigma if sigma > 0 else 0.4
+    otm = 0.67 * sigma * math.sqrt(T)
+    strike = entry * (1 + otm)
+    prem = _bsm_call(entry, strike, T, sigma)
+    capped_exit = min(exit_price, strike)   # shares called away above the strike
+    pnl = (capped_exit - entry) + prem - _RT_COST
+    return pnl / entry * 100 if entry > 0 else 0.0
+
 
 # ── Default universe for backtesting ────────────────────────────────────────
 DEFAULT_TICKERS = [
@@ -136,10 +190,12 @@ def _run_backtest(
         exit_price = float(df.loc[exit_date, "Close"])
         pct_move = (exit_price - entry_price) / entry_price * 100
 
-        # CSP: win if price didn't crash (stayed above -5%)
+        sigma_entry = float(ind.get("volatility_annual", 0) or 0)
+
+        # CSP: real option P&L — keep premium if put expires OTM, else premium
+        # minus assignment loss (win = positive net P&L, not "stayed above -5%").
         csp_score = scores.get("CSP", 0)
         if csp_score >= threshold:
-            csp_win = pct_move > -5  # 5% OTM cushion
             trades.append(Trade(
                 ticker=ticker, strategy="CSP",
                 entry_date=str(entry_date.date()),
@@ -147,14 +203,12 @@ def _run_backtest(
                 score=csp_score,
                 exit_date=str(exit_date.date()),
                 exit_price=exit_price,
-                # CSP P&L: premium collected (proxy ~2%) minus loss if assigned
-                pnl_pct=2.0 if csp_win else pct_move + 2.0,
+                pnl_pct=round(_csp_pnl_pct(entry_price, exit_price, sigma_entry, hold_days), 3),
             ))
 
-        # CC: win if price didn't blast through +5%
+        # CC: real covered-call P&L — stock move capped at the strike + premium.
         cc_score = scores.get("CC", 0)
         if cc_score >= threshold:
-            cc_win = pct_move < 5  # call stays OTM
             trades.append(Trade(
                 ticker=ticker, strategy="CC",
                 entry_date=str(entry_date.date()),
@@ -162,8 +216,7 @@ def _run_backtest(
                 score=cc_score,
                 exit_date=str(exit_date.date()),
                 exit_price=exit_price,
-                # CC P&L: premium + stock move, capped if called away
-                pnl_pct=min(pct_move + 1.5, 6.5) if not cc_win else pct_move + 1.5,
+                pnl_pct=round(_cc_pnl_pct(entry_price, exit_price, sigma_entry, hold_days), 3),
             ))
 
         # BUY: win if price went up
