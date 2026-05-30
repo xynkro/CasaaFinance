@@ -1175,12 +1175,28 @@ def main():
             acct_name = opt.account.lower() if hasattr(opt, "account") else "caspar"
             short_counts[acct_name] = short_counts.get(acct_name, 0) + 1
     vix_val = macro.get("vix", 0) or 0
+    # Realized signal outcomes → per-strategy Kelly sizing (shrunk to prior).
+    # Read the full signal_outcomes history; thin/missing history falls back to
+    # the prior inside scan_watchlist. Guarded — never block the scan on it.
+    outcome_rows: list[dict] = []
+    try:
+        from src import schema as S, sheets as sh
+        ss_out = sh._open_sheet(sh.authenticate())
+        vals = ss_out.worksheet(S.SignalOutcomeRow.TAB_NAME).get_all_values()
+        if len(vals) >= 2:
+            hdr = vals[0]
+            outcome_rows = [dict(zip(hdr, r)) for r in vals[1:] if any(r)]
+        print(f"  signal_outcomes: {len(outcome_rows)} rows for Kelly calibration")
+    except Exception as e:
+        print(f"  signal_outcomes read skipped ({e}) — Kelly uses prior")
+        outcome_rows = []
     try:
         scan_results = scan_watchlist(
             list(indicator_tickers), indicators, technical_scores,
             SGX_TICKERS, available_cash, today,
             current_short_count_by_account=short_counts,
             vix=float(vix_val),
+            outcome_rows=outcome_rows,
         )
     except Exception as e:
         print(f"  scanner error: {e}")

@@ -323,6 +323,77 @@ def _fractional_kelly_size(
 _half_kelly_size = _fractional_kelly_size
 
 
+# ── Realized-stat Kelly inputs ───────────────────────────────────────────────
+# Prior (tastytrade-style managed shorts): used when there isn't enough
+# realized history. win_rate is unitless; avg_win/avg_loss encode the payoff
+# RATIO only (the Kelly formula uses avg_win/avg_loss solely through their
+# ratio b = avg_win/avg_loss).
+KELLY_PRIOR_WIN_RATE = 0.70
+KELLY_PRIOR_AVG_WIN = 0.50
+KELLY_PRIOR_AVG_LOSS = 1.50
+KELLY_MIN_SAMPLES = 20    # need this many closed W+L before trusting realized
+KELLY_SHRINK_K = 20       # shrinkage constant: measured weight = n / (n + k)
+
+
+def realized_kelly_inputs(
+    strategy: str,
+    outcome_rows: list[dict] | None,
+    *,
+    prior: tuple[float, float, float] = (
+        KELLY_PRIOR_WIN_RATE, KELLY_PRIOR_AVG_WIN, KELLY_PRIOR_AVG_LOSS),
+    min_samples: int = KELLY_MIN_SAMPLES,
+    shrink_k: int = KELLY_SHRINK_K,
+) -> tuple[float, float, float, int, str]:
+    """
+    Derive (win_rate, avg_win, avg_loss) for a strategy from realized
+    signal_outcomes rows, shrunk toward `prior` by sample size.
+
+    Each row needs keys: strategy, strategy_outcome (WIN/LOSS/SCRATCH),
+    outcome_pnl_pct. SCRATCH rows are excluded from both win rate and payoff.
+
+    Why shrinkage: 12 trades of luck shouldn't swing sizing. Measured stats get
+    weight n/(n+k); the prior holds the rest. Below `min_samples` closed trades
+    (or with no wins/losses to form a ratio) we return the prior unchanged.
+
+    win_rate is unitless. avg_win/avg_loss are returned encoding the blended
+    payoff RATIO only (avg_loss normalised to 1.0 in the realized branch), since
+    _fractional_kelly_size uses them solely via their ratio — this sidesteps the
+    unit mismatch between the prior's credit-fraction scale and the rows'
+    %-of-notional P&L.
+
+    Returns (win_rate, avg_win, avg_loss, n_closed, source) where source is
+    "realized" or "prior".
+    """
+    pw, paw, pal = prior
+    wins: list[float] = []
+    losses: list[float] = []
+    for r in outcome_rows or []:
+        if str(r.get("strategy", "")).upper() != strategy.upper():
+            continue
+        outcome = str(r.get("strategy_outcome", "")).upper()
+        try:
+            pnl = float(r.get("outcome_pnl_pct", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if outcome == "WIN":
+            wins.append(pnl)
+        elif outcome == "LOSS":
+            losses.append(abs(pnl))
+
+    n = len(wins) + len(losses)
+    if n < min_samples or not wins or not losses:
+        return (pw, paw, pal, n, "prior")
+
+    measured_wr = len(wins) / n
+    measured_b = (sum(wins) / len(wins)) / (sum(losses) / len(losses))  # payoff ratio
+    prior_b = paw / pal if pal > 0 else 0.333
+    w = n / (n + shrink_k)
+    win_rate = w * measured_wr + (1 - w) * pw
+    payoff_b = w * measured_b + (1 - w) * prior_b
+    # Encode the blended ratio as (avg_win=payoff_b, avg_loss=1.0).
+    return (round(win_rate, 4), round(payoff_b, 4), 1.0, n, "realized")
+
+
 def scan_watchlist(
     tickers: list[str],
     indicators: dict[str, dict],
@@ -332,6 +403,7 @@ def scan_watchlist(
     today: str,
     current_short_count_by_account: dict[str, int] | None = None,
     vix: float = 0.0,
+    outcome_rows: list[dict] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Scan every ticker for CSP + CC candidates.
@@ -342,10 +414,15 @@ def scan_watchlist(
       CC:  0.10-0.16 delta (BXM construction — lower call-away risk)
 
     Includes:
-      - Half-Kelly sizing recommendation and max concurrent guard
+      - Fractional-Kelly sizing (per-strategy realized stats when available)
       - IV Rank Gate: skip/penalize low-IV-rank entries, boost high-IV-rank
       - VIX Regime Switching: mechanical adjustments per VIX level
       - Post-Earnings IV Crush: boost recently-reported tickers with IV collapse
+
+    outcome_rows: optional signal_outcomes rows (dicts with strategy,
+      strategy_outcome, outcome_pnl_pct). When supplied, per-strategy Kelly
+      inputs are derived from realized results (shrunk to prior); otherwise the
+      tastytrade-style prior is used for both CSP and CC.
     """
     results = []
 
@@ -355,13 +432,16 @@ def scan_watchlist(
 
     # Estimate total account value for Kelly sizing (sum of all accounts)
     total_account_value = sum(available_cash_by_account.values()) if available_cash_by_account else 0
-    # Default win rate / avg win/loss for short premium (Tastytrade empirical)
-    default_win_rate = 0.70   # 70% win rate at 25-30 delta, 45 DTE
-    default_avg_win = 0.50    # avg win = 50% of credit (profit target)
-    default_avg_loss = 1.50   # avg loss = 1.5× credit
 
-    kelly_max = _half_kelly_size(
-        default_win_rate, default_avg_win, default_avg_loss, total_account_value,
+    # Per-strategy Kelly inputs from realized outcomes (shrunk to prior).
+    # Falls back to the tastytrade-style prior when history is thin.
+    csp_wr, csp_aw, csp_al, csp_n, csp_src = realized_kelly_inputs("CSP", outcome_rows)
+    cc_wr, cc_aw, cc_al, cc_n, cc_src = realized_kelly_inputs("CC", outcome_rows)
+    kelly_max_csp = _fractional_kelly_size(
+        csp_wr, csp_aw, csp_al, total_account_value,
+    ) if total_account_value > 0 else 0
+    kelly_max_cc = _fractional_kelly_size(
+        cc_wr, cc_aw, cc_al, total_account_value,
     ) if total_account_value > 0 else 0
 
     # Max concurrent guard
@@ -456,7 +536,7 @@ def scan_watchlist(
             composite = max(0.0, min(100.0, composite))
 
             # Half-Kelly sizing recommendation (scaled by VIX regime)
-            effective_kelly = kelly_max * vix_rules["size_mult"]
+            effective_kelly = kelly_max_csp * vix_rules["size_mult"]
             sizing_note = ""
             if effective_kelly > 0 and csp["cash_required"] > effective_kelly:
                 sizing_note = f"OVERSIZED: ${csp['cash_required']:.0f} > Kelly-10% ${effective_kelly:.0f}"
@@ -546,7 +626,7 @@ def scan_watchlist(
 
             composite = max(0.0, min(100.0, composite))
 
-            effective_kelly = kelly_max * vix_rules["size_mult"]
+            effective_kelly = kelly_max_cc * vix_rules["size_mult"]
             sizing_note = ""
             if effective_kelly > 0 and cc["cash_required"] > effective_kelly:
                 sizing_note = f"OVERSIZED: ${cc['cash_required']:.0f} > Kelly-10% ${effective_kelly:.0f}"
