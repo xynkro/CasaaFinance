@@ -1333,6 +1333,55 @@ def main():
         print(f"  defense brief error: {e}")
         defense_alerts = []
 
+    # ── Book-level Greek aggregation (net vega/theta + VIX-shock P&L) ─────────
+    # A short-vol book's real risk is net vega: a market-wide IV spike hits
+    # every short at once. Surface it as a defense alert through the existing
+    # rail (no new schema). Escalates only when the shock is large vs net liq.
+    try:
+        from src.portfolio_greeks import aggregate_book_greeks
+        book_opts = [{
+            "ticker": o.ticker, "right": o.right, "strike": o.strike,
+            "qty": o.qty, "underlying_last": o.underlying_last, "last": o.last,
+            "volatility_annual": o.volatility_annual, "dte": o.dte,
+            "expiry": o.expiry,
+        } for o in option_rows]
+        book = aggregate_book_greeks(book_opts, vix_shock_pts=5.0)
+        if book["n_valued"] > 0:
+            net_liq = float(getattr(snap_c, "net_liq_usd", 0) or 0)
+            shock = book["vix_shock_pnl"]
+            shock_pct = (abs(shock) / net_liq * 100) if net_liq > 0 else 0.0
+            if shock_pct >= 8 or (net_liq == 0 and abs(shock) >= 8000):
+                sev = "HIGH"
+            elif shock_pct >= 4 or (net_liq == 0 and abs(shock) >= 4000):
+                sev = "MEDIUM"
+            else:
+                sev = "INFO"
+            pct_txt = f" ({shock_pct:.1f}% of net liq)" if net_liq > 0 else ""
+            defense_alerts.insert(0, {
+                "severity": sev,
+                "account": "caspar",
+                "ticker": "BOOK",
+                "right": "",
+                "strike": 0.0,
+                "title": f"Book vega risk: VIX +5 ≈ ${shock:,.0f}{pct_txt}",
+                "description": (
+                    f"Net vega ${book['net_vega']:,.0f}/pt · "
+                    f"net theta ${book['net_theta']:,.0f}/day · "
+                    f"{book['n_valued']} option legs"
+                ),
+                "action": (
+                    "Trim or hedge short vega if a vol spike P&L this size is "
+                    "unacceptable" if sev != "INFO"
+                    else "Monitor — book vega within tolerance"
+                ),
+                "delta_info": f"VIX+5 ${shock:,.0f}",
+            })
+            print(f"  Book Greeks: net_vega=${book['net_vega']:,.0f}/pt  "
+                  f"net_theta=${book['net_theta']:,.0f}/day  "
+                  f"VIX+5 P&L=${shock:,.0f}  ({book['n_valued']} legs, sev={sev})")
+    except Exception as e:
+        print(f"  book greeks error: {e}")
+
     defense_rows = []
     for a in defense_alerts:
         defense_rows.append(S.OptionsDefenseRow(
