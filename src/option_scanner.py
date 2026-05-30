@@ -331,8 +331,10 @@ _half_kelly_size = _fractional_kelly_size
 KELLY_PRIOR_WIN_RATE = 0.70
 KELLY_PRIOR_AVG_WIN = 0.50
 KELLY_PRIOR_AVG_LOSS = 1.50
-KELLY_MIN_SAMPLES = 20    # need this many closed W+L before trusting realized
+KELLY_MIN_SAMPLES = 20    # need this many closed gains+losses before trusting
+KELLY_MIN_LOSSES = 5      # ...and at least this many LOSSES (fat tails need them)
 KELLY_SHRINK_K = 20       # shrinkage constant: measured weight = n / (n + k)
+KELLY_SCRATCH_EPS = 0.1   # |pnl%| below this is treated as scratch (breakeven)
 
 
 def realized_kelly_inputs(
@@ -342,22 +344,34 @@ def realized_kelly_inputs(
     prior: tuple[float, float, float] = (
         KELLY_PRIOR_WIN_RATE, KELLY_PRIOR_AVG_WIN, KELLY_PRIOR_AVG_LOSS),
     min_samples: int = KELLY_MIN_SAMPLES,
+    min_losses: int = KELLY_MIN_LOSSES,
     shrink_k: int = KELLY_SHRINK_K,
 ) -> tuple[float, float, float, int, str]:
     """
     Derive (win_rate, avg_win, avg_loss) for a strategy from realized
     signal_outcomes rows, shrunk toward `prior` by sample size.
 
-    Each row needs keys: strategy, strategy_outcome (WIN/LOSS/SCRATCH),
-    outcome_pnl_pct. SCRATCH rows are excluded from both win rate and payoff.
+    Each row needs keys: strategy, outcome_pnl_pct.
 
-    Why shrinkage: 12 trades of luck shouldn't swing sizing. Measured stats get
-    weight n/(n+k); the prior holds the rest. Below `min_samples` closed trades
-    (or with no wins/losses to form a ratio) we return the prior unchanged.
+    CRITICAL — partition by P&L SIGN, not the upstream WIN/LOSS label. A
+    strategy's "win" label is NOT the same as a profitable trade: signal_feedback
+    labels a covered call a WIN when the call expires OTM, but stores the stock's
+    forward return, which is NEGATIVE whenever the stock fell while staying below
+    the strike (the common sideways-down CC win). Feeding such a negative number
+    into the win bucket would make the payoff ratio negative and trip the
+    avg_win<=0 guard in _fractional_kelly_size — returning the MAXIMUM size on a
+    LOSING history. Partitioning by sign makes the payoff ratio positive by
+    construction. Near-zero P&L (|pnl| < eps) is treated as scratch and dropped.
 
-    win_rate is unitless. avg_win/avg_loss are returned encoding the blended
-    payoff RATIO only (avg_loss normalised to 1.0 in the realized branch), since
-    _fractional_kelly_size uses them solely via their ratio — this sidesteps the
+    Why shrinkage: a handful of lucky trades shouldn't swing sizing. Measured
+    stats get weight n/(n+k); the prior holds the rest. Below `min_samples`
+    closed trades, or fewer than `min_losses` losses (the payoff ratio is
+    untrustworthy without loss samples in a fat-tailed strategy), we return the
+    prior unchanged.
+
+    win_rate is unitless. avg_win/avg_loss encode the blended payoff RATIO only
+    (avg_loss normalised to 1.0 in the realized branch), since
+    _fractional_kelly_size uses them solely via their ratio — sidestepping the
     unit mismatch between the prior's credit-fraction scale and the rows'
     %-of-notional P&L.
 
@@ -365,27 +379,31 @@ def realized_kelly_inputs(
     "realized" or "prior".
     """
     pw, paw, pal = prior
-    wins: list[float] = []
+    gains: list[float] = []
     losses: list[float] = []
     for r in outcome_rows or []:
         if str(r.get("strategy", "")).upper() != strategy.upper():
             continue
-        outcome = str(r.get("strategy_outcome", "")).upper()
         try:
             pnl = float(r.get("outcome_pnl_pct", 0) or 0)
         except (TypeError, ValueError):
             continue
-        if outcome == "WIN":
-            wins.append(pnl)
-        elif outcome == "LOSS":
-            losses.append(abs(pnl))
+        if pnl > KELLY_SCRATCH_EPS:
+            gains.append(pnl)
+        elif pnl < -KELLY_SCRATCH_EPS:
+            losses.append(-pnl)        # store loss magnitude (positive)
+        # else: scratch / breakeven — excluded from both buckets
 
-    n = len(wins) + len(losses)
-    if n < min_samples or not wins or not losses:
+    n = len(gains) + len(losses)
+    if n < min_samples or len(gains) == 0 or len(losses) < min_losses:
         return (pw, paw, pal, n, "prior")
 
-    measured_wr = len(wins) / n
-    measured_b = (sum(wins) / len(wins)) / (sum(losses) / len(losses))  # payoff ratio
+    measured_wr = len(gains) / n
+    avg_gain = sum(gains) / len(gains)            # > 0 by construction
+    avg_loss = sum(losses) / len(losses)          # > 0 by construction
+    measured_b = avg_gain / avg_loss              # payoff ratio, always > 0
+    if measured_b <= 0:                           # defensive; unreachable above
+        return (pw, paw, pal, n, "prior")
     prior_b = paw / pal if pal > 0 else 0.333
     w = n / (n + shrink_k)
     win_rate = w * measured_wr + (1 - w) * pw

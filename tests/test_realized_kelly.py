@@ -53,11 +53,57 @@ def test_realized_when_enough_samples():
 def test_shrinkage_pulls_toward_prior():
     """More samples → closer to the measured value; fewer → closer to prior."""
     from src.option_scanner import realized_kelly_inputs
-    small = realized_kelly_inputs("CSP", _rows("CSP", 16, 4))   # n=20, measured wr 0.80
-    large = realized_kelly_inputs("CSP", _rows("CSP", 160, 40)) # n=200, measured wr 0.80
+    small = realized_kelly_inputs("CSP", _rows("CSP", 40, 10))    # n=50, measured wr 0.80
+    large = realized_kelly_inputs("CSP", _rows("CSP", 400, 100))  # n=500, measured wr 0.80
+    assert small[4] == "realized" and large[4] == "realized"
     # Both measured at 0.80; large sample should be closer to 0.80 than small
     assert large[0] > small[0]
     assert small[0] >= 0.70  # never below prior when measured is above it
+
+
+def test_requires_minimum_losses():
+    """Plenty of gains but < min_losses → untrustworthy ratio → prior."""
+    from src.option_scanner import realized_kelly_inputs
+    # 40 gains, only 3 losses → below KELLY_MIN_LOSSES (5)
+    wr, aw, al, n, src = realized_kelly_inputs("CSP", _rows("CSP", 40, 3))
+    assert src == "prior"
+
+
+def test_cc_negative_win_pnl_does_not_inflate_size():
+    """C1 regression: CC 'WIN' rows carrying NEGATIVE pnl (stock fell, call
+    expired OTM) must be partitioned as losses by sign — never inflate Kelly."""
+    from src.option_scanner import realized_kelly_inputs, _fractional_kelly_size
+    # All 28 'WIN'-labelled rows actually lost money (negative fwd return).
+    rows = [{"strategy": "CC", "strategy_outcome": "WIN", "outcome_pnl_pct": -1.5}
+            for _ in range(20)]
+    rows += [{"strategy": "CC", "strategy_outcome": "WIN", "outcome_pnl_pct": -9.0}
+             for _ in range(8)]
+    wr, aw, al, n, src = realized_kelly_inputs("CC", rows)
+    # Zero positive-pnl trades → no gains → cannot form a ratio → prior.
+    assert src == "prior"
+    assert aw > 0  # never a negative avg_win that trips the max-size guard
+    size = _fractional_kelly_size(wr, aw, al, 100_000.0)
+    # Prior is a negative-edge bet → Kelly clamps to 0, NOT the 5% max.
+    assert size == 0.0
+
+
+def test_cc_mixed_outcomes_size_sanely():
+    """Mixed CC history (some real gains, many label-wins that lost) should
+    yield a LOW win rate and a small—not inflated—size."""
+    from src.option_scanner import realized_kelly_inputs, _fractional_kelly_size
+    rows = [{"strategy": "CC", "strategy_outcome": "WIN", "outcome_pnl_pct": 2.0}
+            for _ in range(15)]                                   # genuine gains
+    rows += [{"strategy": "CC", "strategy_outcome": "WIN", "outcome_pnl_pct": -1.5}
+             for _ in range(10)]                                  # label-win, lost
+    rows += [{"strategy": "CC", "strategy_outcome": "LOSS", "outcome_pnl_pct": -9.0}
+             for _ in range(8)]                                   # real losses
+    wr, aw, al, n, src = realized_kelly_inputs("CC", rows)
+    assert src == "realized"
+    assert n == 33
+    assert aw > 0                       # payoff ratio strictly positive
+    assert wr < 0.55                    # only 15/33 trades actually profitable
+    size = _fractional_kelly_size(wr, aw, al, 100_000.0)
+    assert size <= 100_000 * 0.05       # never exceeds the hard cap
 
 
 def test_strategy_filter():
