@@ -1001,7 +1001,11 @@ def scan_ticker(
                     "spread_pct": round(spread_pct, 2),
                     "underlying_last": round(price, 2),
                     "technical_score": round(csp_score_raw, 1),
-                    "composite_score": round(conviction, 1) if is_discovery else round(float(r["ann_yield"]), 2),
+                    # composite_score is a 0-100 conviction for EVERY strategy
+                    # (was raw yield % for watchlist CSP — incomparable to the
+                    # 0-100 scores used by spreads/IC/PMCC). Yield lives in
+                    # annual_yield_pct; this is the cross-strategy quality badge.
+                    "composite_score": round(conviction, 1),
                     "catalyst_flag": False,
                     "hv30": round(hv30, 1),
                     "notes": "",
@@ -1085,6 +1089,9 @@ def scan_ticker(
                 spread_pct = (ask - bid) / mid * 100
             cc_delta, cc_iv = _compute_greeks(r, price, dte, "C")
             cc_ivr = _estimate_ivr(cc_iv, hv30)
+            # 0-100 conviction (same mapping as CSP) so composite_score is one
+            # comparable scale across all strategies; yield stays in annual_yield_pct.
+            cc_conviction = max(0, min(100, int((scores.get("CC", 0) + 100) / 2)))
             out.append({
                 "ticker": ticker,
                 "strategy": "CC",
@@ -1104,7 +1111,7 @@ def scan_ticker(
                 "spread_pct": round(spread_pct, 2),
                 "underlying_last": round(price, 2),
                 "technical_score": round(scores.get("CC", 0), 1),
-                "composite_score": round(float(r["ann_yield"]), 2),
+                "composite_score": round(cc_conviction, 1),
                 "catalyst_flag": False,
                 "hv30": round(hv30, 1),
                 "notes": "",
