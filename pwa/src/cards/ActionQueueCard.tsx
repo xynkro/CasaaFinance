@@ -31,6 +31,7 @@ const WHEEL_STATUS_RANK: Record<string, number> = {
 
 const EXIT_STATUS_RANK: Record<string, number> = {
   STOP_TRIGGERED: 0,
+  STOP_ROLL: 0,
   T1_HIT: 1,
   T2_HIT: 2,
   TIME_STOP: 2,

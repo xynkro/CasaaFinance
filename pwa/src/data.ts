@@ -268,7 +268,7 @@ export interface ExitPlanRow {
   days_held: string;
   profit_capture_pct: string;  // option: % of credit captured
   target_close_at: string;     // option: target close price
-  status: string;              // HEALTHY/WARNING/STOP_TRIGGERED/T1_HIT/T2_HIT/BAG/TIME_STOP/PROFIT_TARGET_HIT/ROLL_OR_ASSIGN/LET_EXPIRE/BREACH_WARNING/CATALYST_WARNING
+  status: string;              // HEALTHY/WARNING/STOP_TRIGGERED/T1_HIT/T2_HIT/BAG/TIME_STOP/PROFIT_TARGET_HIT/ROLL_OR_ASSIGN/STOP_ROLL/LET_EXPIRE/BREACH_WARNING/CATALYST_WARNING
   recommendation: string;
   reasoning: string;
 }

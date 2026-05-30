@@ -963,6 +963,7 @@ def ping_options_defense(
             "MECHANICAL_CLOSE": "⏰",
             "ROLL_OR_CLOSE": "🔄",
             "ROLL_OR_ASSIGN": "🔄",
+            "STOP_ROLL": "🛑",
             "BREACH_WARNING": "⚠",
             "CATALYST_WARNING": "⚡",
             "WARNING": "🟡",

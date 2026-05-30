@@ -75,6 +75,13 @@ export const STATUS_META: Record<string, {
     text: "text-amber-400",
     icon: AlertTriangle,
   },
+  STOP_ROLL: {
+    label: "Stop Rolling",
+    bg: "bg-red-500/15",
+    border: "border-red-500/30",
+    text: "text-red-400",
+    icon: AlertTriangle,
+  },
   LET_EXPIRE: {
     label: "Let Expire",
     bg: "bg-slate-500/10",

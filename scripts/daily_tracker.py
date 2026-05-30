@@ -1034,6 +1034,10 @@ def main():
                 "dte": matching.dte,
                 "moneyness": matching.moneyness,
                 "confidence_pct": matching.confidence_pct,
+                # For the live-underlying intrinsic floor (Tranche 3 / F2):
+                "strike": matching.strike,
+                "underlying_last": matching.underlying_last,
+                "right": right,
             }
             try:
                 plan = compute_option_exit_plan(opt_dict, ind)

@@ -271,6 +271,14 @@ def compute_stock_exit_plan(
     }
 
 
+# Deep-loser guard (Tranche 3 / F1): there is no roll counter in the system, so
+# instead of "after N rolls accept assignment" we gate on the LOSS itself. A
+# short option whose buyback cost has reached 2× the credit received (profit
+# capture = -1.0, i.e. down 1× credit) is a position rolling can't fix — it just
+# defers the loss and ties up capital. Standard premium-selling stop.
+ROLL_GIVEUP_PROFIT_CAPTURE = -1.0
+
+
 def compute_option_exit_plan(
     option: dict[str, Any],
     indicators: dict[str, Any],
@@ -290,6 +298,22 @@ def compute_option_exit_plan(
     moneyness = option.get("moneyness", "?")
     confidence = int(option.get("confidence_pct", 0))
     ticker = option.get("ticker", "")
+
+    # Live-underlying intrinsic floor (Tranche 3 / F2). The option `last` is from
+    # the morning grab and can be hours/a day stale; the underlying is refreshed
+    # live. A SHORT option's buyback cost can NEVER be below its intrinsic value,
+    # so floor current_price at intrinsic from the LIVE underlying. This catches
+    # exactly the case the stale mark hides — the underlying gapped through the
+    # strike since the grab, so the real loss is larger than `last` implies.
+    # No IV guesswork; intrinsic is a hard lower bound, so this only corrects
+    # understated losses, never invents them.
+    strike = float(option.get("strike", 0) or 0)
+    underlying_live = float(option.get("underlying_last", 0) or 0)
+    right = (option.get("right", "") or "").upper()
+    if strike > 0 and underlying_live > 0 and right in ("P", "C"):
+        intrinsic = (max(0.0, strike - underlying_live) if right == "P"
+                     else max(0.0, underlying_live - strike))
+        current_price = max(current_price, intrinsic)
 
     if credit <= 0:
         return {
@@ -316,6 +340,15 @@ def compute_option_exit_plan(
         status = "PROFIT_TARGET_HIT"
         recommendation = f"CLOSE — {profit_capture * 100:.0f}% profit captured. Redeploy capital."
         parts.append("50% target achieved")
+    elif profit_capture <= ROLL_GIVEUP_PROFIT_CAPTURE:
+        status = "STOP_ROLL"
+        recommendation = (
+            f"STOP ROLLING — down {abs(profit_capture) * 100:.0f}% of credit "
+            f"(buyback ${current_price:.2f} vs ${credit:.2f} collected). "
+            f"Accept assignment or close for the loss; rolling a position this "
+            f"deep just defers the loss and ties up capital."
+        )
+        parts.append("Loss ≥ 1× credit — rolling defers, doesn't fix")
     elif moneyness == "ITM" and dte <= 7:
         status = "ROLL_OR_ASSIGN"
         recommendation = f"ROLL or ACCEPT assignment — ITM with {dte}d DTE"

@@ -616,7 +616,7 @@ class ExitPlanRow:
     days_held: int            # 0 if unknown
     profit_capture_pct: float # For options; 0 for stocks
     target_close_at: float    # Option target close price; 0 for stocks
-    status: str               # HEALTHY/WARNING/STOP_TRIGGERED/T1_HIT/T2_HIT/TIME_STOP/ROLL_OR_ASSIGN/PROFIT_TARGET_HIT/LET_EXPIRE/BREACH_WARNING/CATALYST_WARNING
+    status: str               # HEALTHY/WARNING/STOP_TRIGGERED/T1_HIT/T2_HIT/TIME_STOP/ROLL_OR_ASSIGN/STOP_ROLL/PROFIT_TARGET_HIT/LET_EXPIRE/BREACH_WARNING/CATALYST_WARNING
     recommendation: str
     reasoning: str
 
