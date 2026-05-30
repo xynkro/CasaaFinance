@@ -500,6 +500,45 @@ def calc_trend_risk(right: str, strike: float, underlying: float, momentum_5d: f
             return "SAFE"
 
 
+# ── Trades ledger (Tranche 3 / F3) ─────────────────────────────────────────
+
+def extract_grab_trades(grab: dict, today: str) -> list[dict]:
+    """Flatten the grab's per-account fills into ledger dicts (one per fill)."""
+    out: list[dict] = []
+    for acct in ("caspar", "sarah"):
+        for t in grab.get("accounts", {}).get(acct, {}).get("trades", []) or []:
+            out.append({
+                "date": today, "time": str(t.get("time", "")), "account": acct,
+                "symbol": t.get("symbol", ""), "sec_type": t.get("sec_type", ""),
+                "right": t.get("right", "") or "", "strike": t.get("strike", "") or "",
+                "expiry": t.get("expiry", "") or "", "side": t.get("side", ""),
+                "qty": t.get("qty", 0), "price": t.get("price", 0),
+                "commission": t.get("commission", 0), "realized_pnl": t.get("realized_pnl", 0),
+                "multiplier": t.get("multiplier", 100),
+            })
+    return out
+
+
+def load_trades_ledger() -> list[dict]:
+    """Read the persistent `trades` sheet tab as header-keyed dicts. Empty on any
+    failure (sizing/basis then just falls back to open-leg credits only — safe)."""
+    try:
+        from src.sync import load_env
+        from src import sheets as sh
+        from src import schema as S
+        load_env()
+        client = sh.authenticate()
+        ss = sh._open_sheet(client)
+        rows = ss.worksheet(S.TradeRow.TAB_NAME).get_all_values()
+        if len(rows) < 2:
+            return []
+        hdr = rows[0]
+        return [dict(zip(hdr, r)) for r in rows[1:] if any(r)]
+    except Exception as e:
+        print(f"  trades ledger read skipped: {e}")
+        return []
+
+
 def build_options(
     grab: dict,
     prices: dict[str, float],
@@ -507,9 +546,11 @@ def build_options(
     technical_scores: dict[str, dict[str, float]],
     macro: dict[str, float],
     today: str,
+    ledger_trades: list[dict] | None = None,
 ):
     """Build option rows with moneyness, wheel stage, and adjusted cost basis."""
     from src import schema as S
+    from src.realized_premium import realized_option_premium_per_share, option_key
 
     option_rows = []
 
@@ -541,6 +582,17 @@ def build_options(
             credit_per_share = credit / mult if mult else credit / 100
             if opt.get("qty", 0) < 0:  # short = sold = credit received
                 ticker_credits[sym] = ticker_credits.get(sym, 0) + credit_per_share
+
+        # Realized premium from CLOSED option cycles (Tranche 3 / F3). ledger
+        # holds the full execution history; we credit basis with net premium on
+        # the ticker since the most recent stock buy, EXCLUDING currently-open
+        # legs (already in ticker_credits above). Conservative — see
+        # src/realized_premium.py. Empty ledger → 0 → old behavior (safe).
+        acct_ledger = [t for t in (ledger_trades or []) if t.get("account") == acct_key]
+        open_keys = {
+            option_key(o.get("right", ""), o.get("strike", ""), o.get("expiry", ""))
+            for o in options_raw if float(o.get("qty", 0) or 0) < 0
+        }
 
         for opt in options_raw:
             sym = opt.get("symbol", "")
@@ -615,7 +667,10 @@ def build_options(
             stock_info = stock_map.get(sym)
             if stock_info and stock_info["qty"] > 0:
                 total_credit_per_share = ticker_credits.get(sym, 0)
-                adj_cost_basis = stock_info["avg_cost"] - total_credit_per_share
+                realized_prem = realized_option_premium_per_share(
+                    acct_ledger, sym, stock_info["qty"], open_keys,
+                ) if acct_ledger else 0.0
+                adj_cost_basis = stock_info["avg_cost"] - total_credit_per_share - realized_prem
             else:
                 adj_cost_basis = 0.0
 
@@ -656,6 +711,29 @@ def push_to_sheet(results: dict):
     from src.sync import load_env
     load_env()
     client = sh.authenticate()
+
+    # Append today's new fills to the trades ledger (Tranche 3 / F3).
+    trades_to_persist = results.get("trades_to_persist", [])
+    if trades_to_persist:
+        try:
+            sh.ensure_headers(client, S.TradeRow.TAB_NAME, S.TradeRow.HEADERS)
+            rows = [
+                S.TradeRow(
+                    date=t.get("date", ""), time=str(t.get("time", "")),
+                    account=t.get("account", ""), symbol=t.get("symbol", ""),
+                    sec_type=t.get("sec_type", ""), right=t.get("right", "") or "",
+                    strike=float(t.get("strike", 0) or 0), expiry=t.get("expiry", "") or "",
+                    side=t.get("side", ""), qty=float(t.get("qty", 0) or 0),
+                    price=float(t.get("price", 0) or 0),
+                    commission=float(t.get("commission", 0) or 0),
+                    realized_pnl=float(t.get("realized_pnl", 0) or 0),
+                ).to_row()
+                for t in trades_to_persist
+            ]
+            sh.append_rows(client, S.TradeRow.TAB_NAME, rows)
+            print(f"  ✓ Appended {len(rows)} fills to trades ledger")
+        except Exception as e:
+            print(f"  trades ledger write failed: {e}")
 
     snap_c = results["snap_caspar"]
     sh.ensure_headers(client, S.SnapshotCaspar.TAB_NAME, S.SnapshotCaspar.HEADERS)
@@ -848,9 +926,21 @@ def main():
         ))
     results["technical_scores"] = tech_rows
 
-    # Build options (with technical score blending)
+    # Trades ledger (Tranche 3 / F3): merge persisted history with today's grab
+    # fills (deduped) so adjusted cost basis can credit realized premium from
+    # closed cycles, and stash the new fills to append to the ledger on push.
+    from src.realized_premium import new_trades as _new_trades
+    existing_ledger = load_trades_ledger()
+    grab_trades = extract_grab_trades(grab, today)
+    trades_to_persist = _new_trades(existing_ledger, grab_trades)
+    full_ledger = existing_ledger + trades_to_persist
+    results["trades_to_persist"] = trades_to_persist
+    print(f"  trades ledger: {len(existing_ledger)} persisted + {len(trades_to_persist)} new")
+
+    # Build options (with technical score blending + realized-premium basis)
     print("Building options...")
-    option_rows = build_options(grab, prices, indicators, technical_scores, macro, today)
+    option_rows = build_options(grab, prices, indicators, technical_scores, macro, today,
+                                ledger_trades=full_ledger)
     results["options"] = option_rows
     for opt in option_rows:
         exp_fmt = f"{opt.expiry[:4]}-{opt.expiry[4:6]}-{opt.expiry[6:]}" if len(opt.expiry) == 8 else opt.expiry
