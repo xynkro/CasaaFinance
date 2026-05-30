@@ -259,12 +259,77 @@ def _baseline_stats(
     }
 
 
+def _vol_rank_series(df: pd.DataFrame, lookback: int = 252) -> pd.Series:
+    """
+    IV-rank PROXY per date: percentile of the current 30d realized vol within
+    its trailing `lookback`-day range. 0-100. Used to drive the dumb-heuristic
+    CSP arm (enter when vol is in the top half of its own range).
+
+    yfinance gives no historical IV, so realized vol is the honest stand-in —
+    same limitation the live IVR proxy carries.
+    """
+    closes = df["Close"].astype(float)
+    log_ret = (closes / closes.shift(1)).apply(lambda x: math.log(x) if x and x > 0 else 0.0)
+    rv30 = log_ret.rolling(30).std() * math.sqrt(252)
+    # Rolling percentile-rank of the latest value within the trailing window.
+    def _pct_rank(window: pd.Series) -> float:
+        cur = window.iloc[-1]
+        prior = window.iloc[:-1].dropna()
+        if len(prior) < 30 or pd.isna(cur):
+            return float("nan")
+        below = (prior < cur).sum()
+        return below / len(prior) * 100.0
+    return rv30.rolling(lookback, min_periods=31).apply(_pct_rank, raw=False)
+
+
+def _heuristic_csp_trades(
+    ticker: str,
+    df: pd.DataFrame,
+    hold_days: int,
+    ivr_gate: float = 50.0,
+    min_window: int = 250,
+) -> list[Trade]:
+    """
+    Dumb-rule baseline: sell a ~30Δ / hold-day CSP every date where the
+    IV-rank proxy exceeds `ivr_gate` — NO technical scoring at all. Same
+    strike construction and P&L model as the scored CSP arm, so the only
+    difference is signal selection. If the composite arm can't beat this,
+    the 16-signal engine is complexity without edge.
+    """
+    trades: list[Trade] = []
+    dates = df.index.tolist()
+    ivr = _vol_rank_series(df)
+    for i in range(min_window, len(dates) - hold_days):
+        d = dates[i]
+        rank = ivr.get(d, float("nan"))
+        if pd.isna(rank) or rank < ivr_gate:
+            continue
+        entry_price = float(df.loc[d, "Close"])
+        if entry_price <= 0:
+            continue
+        exit_date = dates[i + hold_days]
+        exit_price = float(df.loc[exit_date, "Close"])
+        # Realized-vol proxy for the BSM premium, matching the scored arm.
+        window = df.iloc[max(0, i - min_window):i + 1]
+        sigma = float(compute_indicators(window).get("volatility_annual", 0) or 0)
+        trades.append(Trade(
+            ticker=ticker, strategy="CSP_IVR",
+            entry_date=str(d.date()), entry_price=entry_price,
+            score=rank,
+            exit_date=str(exit_date.date()), exit_price=exit_price,
+            pnl_pct=round(_csp_pnl_pct(entry_price, exit_price, sigma, hold_days), 3),
+        ))
+    return trades
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Backtest technical scoring")
     ap.add_argument("--tickers", nargs="+", default=DEFAULT_TICKERS)
     ap.add_argument("--period", default="1y", help="yfinance period (1y, 2y)")
     ap.add_argument("--threshold", type=int, default=30, help="Score threshold")
     ap.add_argument("--hold", type=int, default=35, help="Hold period in days")
+    ap.add_argument("--ivr-gate", type=float, default=50.0,
+                    help="IV-rank proxy gate for the dumb-heuristic CSP baseline")
     args = ap.parse_args()
 
     print(f"Backtest: {len(args.tickers)} tickers, period={args.period}, "
@@ -283,6 +348,8 @@ def main() -> int:
     baselines: list[dict] = []
     for ticker, df in data.items():
         trades = _run_backtest(ticker, df, args.threshold, args.hold)
+        # Dumb-rule CSP arm (IVR-gated, no scoring) — the baseline that matters
+        trades.extend(_heuristic_csp_trades(ticker, df, args.hold, args.ivr_gate))
         all_trades.extend(trades)
         bl = _baseline_stats(df, args.hold)
         baselines.append(bl)
@@ -318,7 +385,7 @@ def main() -> int:
           f"{'MAX WIN':>9} {'MAX LOSS':>10} {'EDGE':>7}")
     print("=" * 70)
 
-    for name in ["BUY", "CSP", "CC"]:
+    for name in ["BUY", "CSP", "CSP_IVR", "CC"]:
         ss = by_strat.get(name)
         if not ss:
             print(f"{name:10} {'0':>8} {'—':>7} {'—':>9} {'—':>9} {'—':>10} {'—':>7}")
@@ -327,7 +394,7 @@ def main() -> int:
         # For CSP/CC, edge = win rate minus baseline up/down %
         if name == "BUY":
             edge = ss.avg_pnl - avg_move
-        elif name == "CSP":
+        elif name in ("CSP", "CSP_IVR"):
             edge = ss.win_rate - avg_up  # CSP wins when stock doesn't crash
         else:  # CC
             edge = ss.win_rate - (100 - avg_up)  # CC wins when stock doesn't blast up
@@ -336,7 +403,29 @@ def main() -> int:
               f"{ss.max_win:>+8.2f}% {ss.max_loss:>+9.2f}% {edge:>+6.1f}%")
 
     print("=" * 70)
-    print(f"{'BASELINE':10} {'':>8} {avg_up:>6.1f}% {avg_move:>+8.2f}%")
+    print(f"{'RANDOM':10} {'':>8} {avg_up:>6.1f}% {avg_move:>+8.2f}%  (random-entry floor)")
+    print()
+
+    # ── The verdict that matters: composite CSP vs the dumb IVR rule ──────────
+    # If the 16-signal engine can't beat "sell when IVR>gate", it's complexity
+    # without edge. Compares avg P&L on the SAME P&L model and strike.
+    comp = by_strat.get("CSP")
+    dumb = by_strat.get("CSP_IVR")
+    print("VERDICT — does the scored CSP beat the dumb IVR>{:.0f} rule?".format(args.ivr_gate))
+    print("-" * 70)
+    if comp and dumb and comp.total and dumb.total:
+        d_pnl = comp.avg_pnl - dumb.avg_pnl
+        d_win = comp.win_rate - dumb.win_rate
+        verdict = "✓ composite ADDS edge" if d_pnl > 0 else "✗ composite does NOT beat the dumb rule"
+        print(f"  scored CSP : {comp.total:>4} trades  win {comp.win_rate:5.1f}%  avgP&L {comp.avg_pnl:+.2f}%")
+        print(f"  dumb  CSP  : {dumb.total:>4} trades  win {dumb.win_rate:5.1f}%  avgP&L {dumb.avg_pnl:+.2f}%")
+        print(f"  Δ          : win {d_win:+.1f}pp   avgP&L {d_pnl:+.2f}pp   → {verdict}")
+        print("  NOTE: backtest has no option chain, so the heaviest CSP signals")
+        print("        (iv_rv_ratio, term_structure) are INACTIVE here — this tests")
+        print("        the price-technical portion of the score only.")
+    else:
+        print(f"  insufficient data (scored={comp.total if comp else 0}, "
+              f"dumb={dumb.total if dumb else 0}) — widen --period or lower --threshold")
     print()
 
     # Score-bucketed analysis
