@@ -13,6 +13,7 @@ export interface Settings {
   safeAreaBottom: number;    // 0-60px, manual bottom padding
   tabBarHeight: number;      // 48-80px
   accentColor: "bloomberg" | "terminal_green" | "indigo" | "emerald" | "amber" | "pink" | "cyan";  // NEW — accent hue
+  githubToken?: string;      // fine-grained PAT (Actions: write, this repo) for the cron-trigger buttons; on-device only
 }
 
 const DEFAULTS: Settings = {
@@ -27,6 +28,7 @@ const DEFAULTS: Settings = {
   safeAreaBottom: 8,
   tabBarHeight: 60,
   accentColor: "bloomberg",
+  githubToken: "",
 };
 
 const KEY = "casaa_settings_v2";

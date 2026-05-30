@@ -599,6 +599,128 @@ function DecisionStatusGlossary() {
   );
 }
 
+/**
+ * Run a Job — force-trigger a GitHub Actions workflow on demand instead of
+ * waiting for its cron. Curated to SELF-CONTAINED jobs that are safe to run
+ * anytime; dependent/aggregation jobs (WSR, signal-feedback, execute-decisions,
+ * deploy) are deliberately excluded so nothing fails out of order.
+ *
+ * Trigger path: with a token set → POST to the workflow_dispatch API (one tap).
+ * Without a token → open GitHub's "Run workflow" page (safe, no token needed).
+ * The token (fine-grained PAT, Actions:write, this repo) lives only in this
+ * device's localStorage, behind the PIN gate.
+ */
+const CRON_REPO = "xynkro/CasaaFinance";
+const SAFE_WORKFLOWS: { file: string; label: string }[] = [
+  { file: "daily-options-scan.yml", label: "Options Scan" },
+  { file: "market-scan.yml", label: "Market Scan" },
+  { file: "options-yield.yml", label: "Yield Screener" },
+  { file: "unusual-options-scan.yml", label: "Unusual Options" },
+  { file: "iv-surface-scan.yml", label: "IV Surface" },
+  { file: "screen-candidates.yml", label: "Stock Screener" },
+  { file: "tv-signals.yml", label: "TV Signals" },
+  { file: "regime-signals.yml", label: "Regime Signals" },
+  { file: "macro-grab.yml", label: "Macro Grab" },
+  { file: "risk-parity-audit.yml", label: "Risk Parity" },
+  { file: "fetch-congress-trades.yml", label: "Congress Trades" },
+  { file: "fetch-gov-contracts.yml", label: "Gov Contracts" },
+  { file: "finnhub-calendars.yml", label: "Calendars" },
+  { file: "options-refresh.yml", label: "Live Prices" },
+];
+
+type RunState = "idle" | "running" | "ok" | "fail";
+
+function CronTriggers({
+  settings,
+  onUpdate,
+}: {
+  settings: Settings;
+  onUpdate: (patch: Partial<Settings>) => void;
+}) {
+  const [state, setState] = useState<Record<string, RunState>>({});
+  const token = (settings.githubToken || "").trim();
+
+  const run = async (file: string) => {
+    if (!token) {
+      window.open(`https://github.com/${CRON_REPO}/actions/workflows/${file}`, "_blank", "noopener");
+      return;
+    }
+    setState((s) => ({ ...s, [file]: "running" }));
+    let ok = false;
+    try {
+      const r = await fetch(
+        `https://api.github.com/repos/${CRON_REPO}/actions/workflows/${file}/dispatches`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+          },
+          body: JSON.stringify({ ref: "main" }),
+        },
+      );
+      ok = r.status === 204;
+    } catch {
+      ok = false;
+    }
+    setState((s) => ({ ...s, [file]: ok ? "ok" : "fail" }));
+    window.setTimeout(() => setState((s) => ({ ...s, [file]: "idle" })), 4000);
+  };
+
+  return (
+    <div className="glass rounded-2xl p-5">
+      <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-1">Run a Job</h3>
+      <p className="text-[length:var(--t-2xs)] text-slate-500 mb-3 leading-relaxed">
+        Force a cloud job to run now. Only the self-contained scans are listed — dependent
+        jobs (WSR, feedback, decisions, deploy) are left out so nothing fails out of order.
+      </p>
+
+      <div className="mb-3">
+        <input
+          type="password"
+          value={settings.githubToken || ""}
+          onChange={(e) => onUpdate({ githubToken: e.target.value })}
+          placeholder="GitHub token — fine-grained, Actions: write, this repo"
+          autoComplete="off"
+          spellCheck={false}
+          className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[length:var(--t-xs)] text-slate-200 font-mono placeholder:text-slate-600 focus:border-white/25 outline-none"
+        />
+        <p className="text-[length:var(--t-2xs)] mt-1 text-slate-600">
+          {token
+            ? "Stored on this device only. One tap dispatches the job."
+            : "No token → buttons open GitHub's “Run workflow” page instead."}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {SAFE_WORKFLOWS.map((w) => {
+          const st = state[w.file] || "idle";
+          return (
+            <button
+              key={w.file}
+              onClick={() => run(w.file)}
+              disabled={st === "running"}
+              className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl bg-white/[0.03] border border-white/8 hover:border-white/20 active:scale-[0.97] transition-all disabled:opacity-50"
+            >
+              <span className="text-[length:var(--t-xs)] font-medium text-slate-200 truncate">{w.label}</span>
+              {st === "running" ? (
+                <Hourglass size={13} className="text-amber-400 animate-pulse shrink-0" />
+              ) : st === "ok" ? (
+                <CheckCircle size={13} className="text-emerald-400 shrink-0" />
+              ) : st === "fail" ? (
+                <XCircle size={13} className="text-red-400 shrink-0" />
+              ) : (
+                <Zap size={13} className="text-slate-500 shrink-0" />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsPage({
   settings,
   onUpdate,
@@ -612,6 +734,9 @@ export function SettingsPage({
 }) {
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
+      {/* Run a cloud job on demand */}
+      <CronTriggers settings={settings} onUpdate={onUpdate} />
+
       {/* Accent color */}
       <div className="glass rounded-2xl p-5">
         <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-3">Accent Color</h3>
