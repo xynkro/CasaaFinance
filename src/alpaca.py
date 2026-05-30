@@ -157,6 +157,137 @@ def submit_order(
     return _post("orders", body)
 
 
+# ────────────────────────────────────────────────────────────────────
+# Options — OCC symbols, single-leg + multi-leg (mleg) orders
+# ────────────────────────────────────────────────────────────────────
+
+PositionIntent = Literal["buy_to_open", "buy_to_close", "sell_to_open", "sell_to_close"]
+
+
+def occ_symbol(underlying: str, expiry: str, right: str, strike: float) -> str:
+    """Build an OCC option symbol, e.g. ('NVDA','2026-01-16','P',100) → NVDA260116P00100000.
+
+    OCC = ROOT + YYMMDD + C/P + strike×1000 zero-padded to 8 digits.
+    `expiry` accepts 'YYYY-MM-DD' or 'YYYYMMDD'. `right` accepts C/P/call/put.
+    """
+    e = str(expiry).replace("-", "")
+    if len(e) != 8:
+        raise ValueError(f"expiry must be YYYY-MM-DD or YYYYMMDD, got {expiry!r}")
+    yymmdd = e[2:]
+    r = "C" if str(right).upper().startswith("C") else "P"
+    strike_milli = int(round(float(strike) * 1000))
+    if strike_milli <= 0:
+        raise ValueError(f"strike must be positive, got {strike!r}")
+    return f"{underlying.upper()}{yymmdd}{r}{strike_milli:08d}"
+
+
+def parse_occ_symbol(occ: str) -> dict:
+    """Inverse of occ_symbol → {underlying, expiry (YYYY-MM-DD), right, strike}."""
+    # strike = last 8 digits, right = char before that, date = 6 before that
+    strike = int(occ[-8:]) / 1000.0
+    right = occ[-9]
+    yymmdd = occ[-15:-9]
+    underlying = occ[:-15]
+    expiry = f"20{yymmdd[:2]}-{yymmdd[2:4]}-{yymmdd[4:6]}"
+    return {"underlying": underlying, "expiry": expiry, "right": right, "strike": strike}
+
+
+def _option_order_body(
+    symbol: str, qty: int, side: OrderSide,
+    limit_price: float | None, time_in_force: TimeInForce,
+    client_order_id: str | None,
+) -> dict:
+    """Pure builder for a single-leg option order body (unit-testable)."""
+    body: dict = {
+        "symbol": symbol.upper(),
+        "qty": str(int(qty)),
+        "side": side,
+        "type": "limit" if limit_price is not None else "market",
+        "time_in_force": time_in_force,
+    }
+    if limit_price is not None:
+        body["limit_price"] = str(round(limit_price, 2))
+    if client_order_id:
+        body["client_order_id"] = client_order_id[:48]
+    return body
+
+
+def submit_option_order(
+    symbol: str,
+    qty: int,
+    side: OrderSide,
+    limit_price: float | None = None,
+    time_in_force: TimeInForce = "day",
+    client_order_id: str | None = None,
+) -> dict:
+    """Submit a SINGLE-LEG option order (OCC symbol, qty in contracts).
+
+    side: "buy" (to open a long / close a short) or "sell" (to open a short /
+    close a long). Use a limit_price for safety — options market orders fill
+    through wide spreads. Idempotent if client_order_id is supplied.
+    """
+    return _post("orders", _option_order_body(
+        symbol, qty, side, limit_price, time_in_force, client_order_id))
+
+
+def _mleg_order_body(
+    legs: list[dict], qty: int, limit_price: float | None,
+    time_in_force: TimeInForce, client_order_id: str | None,
+) -> dict:
+    """Pure builder for a multi-leg (mleg) order body (unit-testable).
+
+    Each leg: {"symbol": OCC, "position_intent": <PositionIntent>, "ratio_qty": int}.
+    `limit_price` is the NET combo price (positive); for a credit spread it's the
+    net credit you want to collect. `qty` multiplies the whole combo.
+    """
+    if not (2 <= len(legs) <= 4):
+        raise ValueError(f"mleg needs 2-4 legs, got {len(legs)}")
+    body: dict = {
+        "order_class": "mleg",
+        "qty": str(int(qty)),
+        "type": "limit" if limit_price is not None else "market",
+        "time_in_force": time_in_force,
+        "legs": [
+            {
+                "symbol": leg["symbol"].upper(),
+                "position_intent": leg["position_intent"],
+                "ratio_qty": str(int(leg.get("ratio_qty", 1))),
+                "side": "buy" if "buy" in leg["position_intent"] else "sell",
+            }
+            for leg in legs
+        ],
+    }
+    if limit_price is not None:
+        body["limit_price"] = str(round(abs(limit_price), 2))
+    if client_order_id:
+        body["client_order_id"] = client_order_id[:48]
+    return body
+
+
+def submit_mleg_order(
+    legs: list[dict],
+    qty: int = 1,
+    limit_price: float | None = None,
+    time_in_force: TimeInForce = "day",
+    client_order_id: str | None = None,
+) -> dict:
+    """Submit a MULTI-LEG option order (vertical spread / iron condor / diagonal).
+
+    legs: list of {"symbol": OCC, "position_intent": sell_to_open|buy_to_open|...,
+                   "ratio_qty": 1}. 2 legs = vertical, 4 = iron condor.
+    limit_price: net combo price (credit for credit spreads). NOTE: Alpaca's net
+    debit/credit sign handling for mleg should be verified on paper before trusting
+    fills — that's exactly what the paper run is for.
+    """
+    return _post("orders", _mleg_order_body(
+        legs, qty, limit_price, time_in_force, client_order_id))
+
+
+def get_option_positions() -> list[dict]:
+    """Open positions that are options (asset_class == 'us_option')."""
+    return [p for p in get_positions() if p.get("asset_class") == "us_option"]
+
+
 def cancel_order(order_id: str) -> None:
     """Cancel an open order by ID."""
     _delete(f"orders/{order_id}")
