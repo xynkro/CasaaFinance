@@ -11,6 +11,7 @@ import { ConcentrationCard } from "../cards/ConcentrationCard";
 import { GovConfluenceCard } from "../cards/GovConfluenceCard";
 import { CongressTradesCard } from "../cards/CongressTradesCard";
 import { TldrTodayCard } from "../cards/TldrTodayCard";
+import { PaperStatusCard } from "../cards/PaperStatusCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
 import { Activity } from "lucide-react";
@@ -74,6 +75,11 @@ export function HomePage({
   // Tab indices: Decisions=3, Options=2 (matches TAB_TITLES in App.tsx).
   const jumpDecisions = () => onJumpTab?.(3);
   const jumpOptions = () => onJumpTab?.(2);
+  // Portfolio is tab 1; sub-tab index 2 = Paper (see PortfolioPage SwipeTabs).
+  const jumpPaper = () => {
+    try { localStorage.setItem("casaa_portfolio_subtab", "2"); } catch { /* ignore */ }
+    onJumpTab?.(1);
+  };
 
   return (
     <>
@@ -141,6 +147,16 @@ export function HomePage({
 
         <div className="fade-up fade-up-2 mt-4">
           <RiskPulseCard macro={data?.macro ?? null} />
+        </div>
+
+        {/* Paper auto-trader — clearly separated from real money; renders only
+            once the bot is active. Taps through to Portfolio → Paper. */}
+        <div className="fade-up fade-up-2 mt-3">
+          <PaperStatusCard
+            snapshot={data?.alpaca ?? null}
+            positions={data?.alpacaPositions ?? []}
+            onOpen={jumpPaper}
+          />
         </div>
 
         {/* Concentration alert — single-ticker over-exposure. Only renders
