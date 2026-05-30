@@ -757,7 +757,7 @@ export interface AlpacaSnapshotRow {
 
 export interface AlpacaPositionRow {
   date: string;
-  ticker: string;
+  ticker: string;       // equity symbol OR an OCC option symbol (NVDA260116P00100000)
   qty: string;
   avg_cost: string;
   last: string;
@@ -765,6 +765,33 @@ export interface AlpacaPositionRow {
   upl: string;
   upl_pct: string;
   side: string;
+}
+
+/** Parsed OCC option contract. */
+export interface ParsedOcc {
+  underlying: string;
+  expiry: string;       // "YYYY-MM-DD"
+  right: "C" | "P";
+  strike: number;
+}
+
+const OCC_RE = /^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/;
+
+/** Parse an OCC option symbol → contract, or null if it's not an option. */
+export function parseOcc(symbol: string): ParsedOcc | null {
+  const m = OCC_RE.exec((symbol || "").toUpperCase());
+  if (!m) return null;
+  const [, root, yymmdd, right, strikeMilli] = m;
+  return {
+    underlying: root,
+    expiry: `20${yymmdd.slice(0, 2)}-${yymmdd.slice(2, 4)}-${yymmdd.slice(4, 6)}`,
+    right: right as "C" | "P",
+    strike: Number(strikeMilli) / 1000,
+  };
+}
+
+export function isOccOption(symbol: string): boolean {
+  return OCC_RE.test((symbol || "").toUpperCase());
 }
 
 export interface HarvestScanRow {

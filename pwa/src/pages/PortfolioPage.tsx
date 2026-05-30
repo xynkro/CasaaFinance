@@ -8,7 +8,7 @@ import type {
   AlpacaPositionRow,
 } from "../data";
 import { PnlCard } from "../cards/PnlCard";
-import { AlpacaPaperCard } from "../cards/AlpacaPaperCard";
+import { PaperTradingView } from "../cards/PaperTradingView";
 import { PositionsTable } from "../components/PositionsTable";
 import { SwipeTabs } from "../components/SwipeTabs";
 
@@ -123,7 +123,7 @@ export function PortfolioPage({
   const AlpacaPanel = (
     <div className="flex flex-col gap-4 px-4 pb-4">
       <div className="fade-up fade-up-1">
-        <AlpacaPaperCard
+        <PaperTradingView
           snapshot={alpacaSnapshot}
           positions={alpacaPositions}
           loading={loading}
