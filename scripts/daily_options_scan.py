@@ -343,6 +343,29 @@ def _best_expiry(expiries: tuple[str, ...], dte_range: tuple[int, int] = (15, 50
     return best
 
 
+def _longer_expiry(expiries: tuple[str, ...], near_dte: int,
+                   gap_min: int = 20, target: int = 65) -> str | None:
+    """Find an expiry meaningfully longer than the near one for term-structure
+    slope. Picks the expiry closest to `target` DTE that sits at least
+    near_dte + gap_min days out (so short and long legs are well separated)."""
+    today = date.today()
+    best: str | None = None
+    best_diff = 9999
+    floor = near_dte + gap_min
+    for exp_str in expiries:
+        try:
+            exp = datetime.strptime(exp_str, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        dte = (exp - today).days
+        if dte >= floor:
+            diff = abs(dte - target)
+            if diff < best_diff:
+                best_diff = diff
+                best = exp_str
+    return best
+
+
 def _option_mid(row) -> float:
     bid = float(row.get("bid", 0) or 0)
     ask = float(row.get("ask", 0) or 0)
@@ -873,6 +896,26 @@ def scan_ticker(
     atm_iv_pct = _atm_iv(chain.puts, chain.calls, price, dte)
     if atm_iv_pct > 0:
         ind["iv_annual"] = atm_iv_pct / 100  # % → decimal
+
+        # Term-structure slope: peek a longer expiry's ATM IV (one extra chain
+        # fetch per ticker). Contango (long IV > short IV) favors short vol;
+        # backwardation warns of stress. Feeds the term_structure signal
+        # (CSP +4 / CC +3), which was dead weight because nothing wrote ts_slope.
+        long_exp = _longer_expiry(expiries, dte)
+        if long_exp:
+            try:
+                long_chain = yt.option_chain(long_exp)
+                long_dte = (datetime.strptime(long_exp, "%Y-%m-%d").date() - today).days
+                long_iv_pct = _atm_iv(long_chain.puts, long_chain.calls, price, long_dte)
+                if long_iv_pct > 0:
+                    from src.term_structure import compute_ts_slope
+                    ind["ts_slope"] = compute_ts_slope(
+                        iv_short=atm_iv_pct / 100, iv_long=long_iv_pct / 100,
+                        dte_short=dte, dte_long=long_dte,
+                    )
+            except Exception:
+                pass  # term structure is a bonus signal; never block a scan on it
+
         from src.technical_score import compute_scores as _recompute
         scores = _recompute(ind)
     else:
