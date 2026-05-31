@@ -32,7 +32,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 TOP_N = 10              # candidates written to screen_candidates
-TOP_DECISIONS = 3       # top growth ideas seeded into decision_queue
 MIN_GROWTH_SCORE = 45.0 # 0-100 floor to be surfaced
 
 # Broad growth/momentum field — used when the FinViz screen is unavailable.
@@ -188,28 +187,10 @@ def main() -> int:
     sh.ensure_headers(client, S.ScreenCandidateRow.TAB_NAME, S.ScreenCandidateRow.HEADERS)
     sh.append_rows(client, S.ScreenCandidateRow.TAB_NAME, [r.to_row() for r in sc_rows])
     logger.info(f"✓ Wrote {len(sc_rows)} momentum candidates to screen_candidates")
-
-    # Seed the top few as BUY ideas in decision_queue.
-    dq_rows = []
-    for r in ranked[:TOP_DECISIONS]:
-        dq_rows.append(S.DecisionRow(
-            date=today, account="caspar", ticker=r["ticker"], bucket="quality_growth",
-            thesis_1liner=f"Momentum growth: 3mo {r['mom_3m']:+.0f}%, Stage-2 uptrend",
-            conv=3 if r["score"] < 65 else 4, entry=r["close"], target=0.0, status="watching",
-            strategy="BUY_DIP", right="", strike=0.0, expiry="", premium_per_share=0.0,
-            delta=0.0, annual_yield_pct=0.0, breakeven=round(r["sma50"], 2),
-            cash_required=0.0, iv_rank=0.0, thesis_confidence=r["score"] / 100.0,
-            thesis=f"Broad-universe momentum discovery (not the watchlist). 3-month return "
-                   f"{r['mom_3m']:+.0f}%, RSI {r['rsi']:.0f}, price above a rising 50/200 dma. "
-                   f"Growth offense for the all-rounded book; manage with the 50dma as the stop.",
-            source="growth_scan", qty=0,
-            accumulation_plan=f"Buy {r['ticker']} on a pullback toward the 50dma "
-                              f"(~${r['sma50']:.2f}); cut below it.",
-            gates="",
-        ))
-    if dq_rows:
-        sh.append_rows(client, S.DecisionRow.TAB_NAME, [r.to_row() for r in dq_rows])
-        logger.info(f"✓ Seeded {len(dq_rows)} growth ideas into decision_queue")
+    # NOTE: we deliberately do NOT auto-seed decision_queue. screen_candidates is
+    # the candidate surface the PWA Scanner + the WSR brain both read; the brain
+    # promotes the worthy ones to decisions. Auto-seeding would bypass that and
+    # pile up duplicate BUY rows on every run.
     return 0
 
 
