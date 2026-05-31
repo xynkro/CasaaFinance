@@ -87,26 +87,29 @@ VOL_BY_CLASS: dict[str, float] = {
 
 # --- targets loader --------------------------------------------------------
 
+# GROWTH-TILTED, all-rounded (revamped 2026-05-30) — kept in sync with
+# config/risk_parity_targets.yaml. Growth-dominant, capped protector (bonds
+# leaned to IEF over TLT), real hedge sleeve. See the YAML header for rationale.
 DEFAULT_TARGETS: dict[str, dict[str, float]] = {
     "caspar": {
-        "equity_us": 50.0,
+        "equity_us": 64.0,
         "equity_us_dividend": 5.0,
         "equity_intl": 5.0,
-        "bond_long": 15.0,
-        "bond_intermediate": 8.0,
-        "gold": 6.0,
-        "commodities_broad": 6.0,
+        "bond_long": 6.0,            # TLT — capped (was 15): a rate bet, not protection
+        "bond_intermediate": 7.0,    # IEF — the justified protector bond
+        "gold": 5.0,
+        "commodities_broad": 3.0,
         "vol_long": 5.0,
     },
     "sarah": {
-        "equity_us": 45.0,
+        "equity_us": 46.0,
         "equity_us_dividend": 15.0,
-        "equity_intl": 8.0,
-        "bond_long": 12.0,
+        "equity_intl": 7.0,
+        "bond_long": 8.0,            # capped (was 12)
         "bond_intermediate": 8.0,
         "gold": 6.0,
-        "commodities_broad": 4.0,
-        "vol_long": 2.0,
+        "commodities_broad": 3.0,
+        "vol_long": 7.0,
     },
 }
 

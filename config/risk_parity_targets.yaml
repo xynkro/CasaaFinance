@@ -1,39 +1,43 @@
-# Risk Parity LITE targets — wheel-strategy-friendly, NOT pure 30/40/15/7.5/7.5.
+# Risk Parity LITE targets — GROWTH-TILTED, all-rounded (revamped 2026-05-30).
 #
-# Both accounts trade equity-anchored wheel strategies (CSP / CC) with options
-# on US single names. Pure Risk Parity (long bonds-dominant) doesn't fit. This
-# config keeps EQUITY DOMINANT but enforces a non-zero bond/gold/vol floor as a
-# diversification hygiene check.
+# Philosophy (deliberate, after the "why am I being fed bonds?" review):
+#   These are SMALL, growth-oriented accounts, not large portfolios being
+#   preserved. So the book is GROWTH-DOMINANT, with a CAPPED protector sleeve
+#   and a real (convex) hedge — not an all-weather risk-parity allocation.
 #
-# Each account's targets sum to 100. Read by `scripts/risk_parity_audit.py`
-# which writes per-(account, asset_class) rebalance suggestions to the
-# `risk_parity_audit` Google Sheet tab.
+#   Three jobs, kept distinct:
+#     • GROWTH (offense)    — equity_us + intl + dividend ~= 68-74%. Where wealth
+#       is actually built; the CSP/CC wheel overlays this (income lowers basis).
+#     • PROTECTOR (ballast) — bonds + gold + commodities ~= 21-25%. Cushions
+#       ORDINARY dips + funds rebalancing. Bonds are tilted to INTERMEDIATE
+#       (IEF) over LONG (TLT): bond_long is now SMALL because TLT is a leveraged
+#       rate bet, not protection. Gold covers the inflation case bonds miss.
+#     • HEDGE (convex)      — vol_long ~= 5-7% as a passive long-vol ballast,
+#       COMPLEMENTED by the active, regime-gated put-spread hedge in
+#       scripts/tail_hedge_run.py (the real tail insurance).
 #
-# Asset class values must match the 8 canonical labels in
-# `src/watchlist.CANONICAL_ASSET_CLASSES` (kept in sync via the YAML's
-# `asset_classes:` map).
+# Each account sums to 100. Asset classes must match the 8 canonical labels in
+# src/watchlist.CANONICAL_ASSET_CLASSES. Read by scripts/risk_parity_audit.py.
 #
-# Tweak strategy:
-#   - Caspar: smaller account ($7.4k NLV), more aggressive equity tilt
-#   - Sarah: larger account (S$59k NLV), more balanced — SCHD anchor pulls
-#     equity_us_dividend higher
+#   - Caspar: small (~$8-9k), AGGRESSIVE growth tilt (74% growth).
+#   - Sarah:  larger (~S$59k), BALANCED (68% growth, SCHD-anchored).
 
 caspar:
-  equity_us: 50          # primary risk asset
+  equity_us: 64          # primary risk asset — the growth engine (SPY/QQQ + names)
   equity_us_dividend: 5
-  equity_intl: 5         # SGX C6L / G3B currently here
-  bond_long: 15          # TLT / EDV (currently 0% — biggest underweight)
-  bond_intermediate: 8   # IEF
-  gold: 6                # GLDM / GLD (currently 0% — underweight)
-  commodities_broad: 6   # DBC / USO / SLV
-  vol_long: 5            # UVXY / VIXM (insurance, never zero)
+  equity_intl: 5
+  bond_long: 6           # TLT/EDV — CAPPED (was 15): high-duration rate bet, not protection
+  bond_intermediate: 7   # IEF — the justified protector bond (recession ballast, low rate risk)
+  gold: 5                # GLDM/GLD — inflation/crisis protector
+  commodities_broad: 3   # DBC/USO/SLV — trimmed
+  vol_long: 5            # VIXM — passive long-vol ballast (active hedge layer adds convexity)
 
 sarah:
-  equity_us: 45
+  equity_us: 46
   equity_us_dividend: 15  # SCHD-anchored
-  equity_intl: 8
-  bond_long: 12
-  bond_intermediate: 8
+  equity_intl: 7
+  bond_long: 8            # CAPPED (was 12) — lean to IEF, less TLT
+  bond_intermediate: 8    # IEF
   gold: 6
-  commodities_broad: 4
-  vol_long: 2
+  commodities_broad: 3
+  vol_long: 7
