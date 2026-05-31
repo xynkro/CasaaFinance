@@ -143,6 +143,47 @@ def read_confluence(logger: logging.Logger) -> dict:
         return {}
 
 
+# Per-name growth allocation by account: Caspar runs concentrated/aggressive,
+# Sarah runs a smaller, more diversified growth slice on top of her SCHD anchor.
+GROWTH_SIZE_PCT = {"caspar": 0.10, "sarah": 0.05}
+
+
+def read_account_nlvs(logger: logging.Logger) -> dict:
+    """{'caspar': nlv_usd, 'sarah': nlv_usd} (best-effort; {} on failure)."""
+    out: dict[str, float] = {}
+    try:
+        from src.sync import load_env
+        from src import sheets as sh
+        load_env()
+        ss = sh._open_sheet(sh.authenticate())
+
+        def last(tab):
+            r = ss.worksheet(tab).get_all_values()
+            return dict(zip(r[0], r[-1])) if len(r) > 1 else {}
+
+        usd_sgd = _f(last("macro").get("usd_sgd")) or 1.30
+        c = _f(last("snapshot_caspar").get("net_liq_usd"))
+        if c > 0:
+            out["caspar"] = c
+        s = _f(last("snapshot_sarah").get("net_liq_sgd"))
+        if s > 0:
+            out["sarah"] = s / usd_sgd
+    except Exception as e:
+        logger.debug(f"  nlv read skipped: {e}")
+    return out
+
+
+def sizing_note(nlvs: dict) -> str:
+    """Per-account dollar size for a growth name (same $ for every name — it's a
+    % of NLV, not price-dependent). e.g. 'Size: Caspar ~$900 (10%) · Sarah ~$2,250 (5%)'."""
+    parts = []
+    for acct, pct in GROWTH_SIZE_PCT.items():
+        nlv = nlvs.get(acct)
+        if nlv:
+            parts.append(f"{acct.capitalize()} ~${pct * nlv:,.0f} ({pct*100:.0f}%)")
+    return ("Size: " + " · ".join(parts)) if parts else ""
+
+
 # ──────────────────── Universe + scoring I/O ────────────────────────────────
 
 def discover_universe(logger: logging.Logger, top_n: int = 150) -> list[str]:
@@ -241,7 +282,9 @@ def main() -> int:
         logger.info(f"  vetoed (smart money selling): {', '.join(vetoed)}")
 
     ranked = rank_candidates(scored)[:TOP_N]
-    logger.info(f"\nTop {len(ranked)} growth candidates:")
+    nlvs = read_account_nlvs(logger)
+    size_note = sizing_note(nlvs)
+    logger.info(f"\nTop {len(ranked)} growth candidates" + (f"  ({size_note})" if size_note else "") + ":")
     for r in ranked:
         tag = f"  [{r['conf_tag']}]" if r.get("conf_tag") else ""
         logger.info(f"  {r['ticker']:6} score {r['score']:5.1f}  3mo {r['mom_3m']:+6.1f}%  "
@@ -264,7 +307,8 @@ def main() -> int:
             score=r["score"], trigger_price=r["close"], stop_price=round(r["sma50"], 2),
             rationale=(f"Momentum: 3mo {r['mom_3m']:+.0f}%, RSI {r['rsi']:.0f}, Stage-2 uptrend "
                        f"(>50>200dma). Stop ~50dma ${r['sma50']:.2f}."
-                       + (f" + {r['conf_tag']}." if r.get("conf_tag") else "")),
+                       + (f" + {r['conf_tag']}." if r.get("conf_tag") else "")
+                       + (f" {size_note}." if size_note else "")),
         )
         for r in ranked
     ]

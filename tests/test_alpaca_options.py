@@ -91,6 +91,13 @@ def test_mleg_rejects_bad_leg_count():
         alpaca._mleg_order_body(one, 1, 1.0, "day", None)
 
 
+def test_notional_order_body():
+    b = alpaca._notional_order_body("MU", 900.0, "buy", "casaa-GROWTH-MU")
+    assert b["symbol"] == "MU" and b["notional"] == "900.0"
+    assert b["type"] == "market" and b["time_in_force"] == "day"
+    assert "qty" not in b and b["client_order_id"] == "casaa-GROWTH-MU"
+
+
 def test_mleg_limit_price_uses_absolute():
     legs = [
         {"symbol": "X260116P00095000", "position_intent": "sell_to_open"},

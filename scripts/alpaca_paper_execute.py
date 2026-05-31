@@ -175,19 +175,20 @@ def select_growth_picks(rows: list[dict], today: str, top_n: int = GROWTH_TOP_N)
 
 
 def stock_order_spec(pick: dict, nlv: float) -> tuple[dict | None, str]:
-    """Map a momentum screen_candidate → an Alpaca equity BUY spec, or (None, reason)."""
+    """Map a momentum screen_candidate → an Alpaca equity BUY spec (NOTIONAL /
+    fractional, so no name is priced out of a small account), or (None, reason)."""
     tk = str(pick.get("ticker", "")).upper()
     price = _f(pick.get("trigger_price"))
-    if not tk or price <= 0:
-        return None, "missing ticker/price"
+    if not tk:
+        return None, "missing ticker"
     if nlv <= 0:
         return None, "no NLV"
-    qty = int((GROWTH_PER_NAME_PCT * nlv) // price)
-    if qty < 1:
-        return None, f"1 share (${price:.0f}) > {GROWTH_PER_NAME_PCT*100:.0f}%-NLV budget"
-    return {"kind": "equity", "symbol": tk, "side": "buy", "qty": qty,
-            "limit_price": round(price, 2),
-            "label": f"BUY {tk} {qty}sh @{price:.2f}"}, ""
+    notional = round(GROWTH_PER_NAME_PCT * nlv, 2)
+    if notional < 1:
+        return None, "budget < $1"
+    approx = (notional / price) if price > 0 else 0.0
+    return {"kind": "equity", "symbol": tk, "side": "buy", "notional": notional,
+            "label": f"BUY {tk} ${notional:.0f} (~{approx:.2f}sh @{price:.2f})"}, ""
 
 
 def _read_picks_and_account():
@@ -268,7 +269,7 @@ def main() -> int:
             print(f"  SKIP GROWTH    {str(g.get('ticker','')):6} — {reason}")
             continue
         coid = f"casaa-{today}-GROWTH-{str(g.get('ticker',''))}"[:48]
-        plan.append((spec, spec["qty"], coid))
+        plan.append((spec, 0, coid))   # qty unused for notional equity
         print(f"  PLAN {spec['label']}  [equity]  id={coid}")
 
     if not args.execute:
@@ -284,8 +285,8 @@ def main() -> int:
             continue
         try:
             if spec["kind"] == "equity":
-                alpaca.submit_order(spec["symbol"], qty, "buy", order_type="limit",
-                                    limit_price=spec["limit_price"], client_order_id=coid)
+                alpaca.submit_notional_order(spec["symbol"], spec["notional"], "buy",
+                                             client_order_id=coid)
             elif spec["kind"] == "single":
                 alpaca.submit_option_order(spec["occ"], qty, spec["side"],
                                            limit_price=spec["limit_price"], client_order_id=coid)

@@ -157,6 +157,32 @@ def submit_order(
     return _post("orders", body)
 
 
+def _notional_order_body(symbol: str, notional: float, side: OrderSide,
+                         client_order_id: str | None) -> dict:
+    """Pure builder for a notional (dollar-amount, fractional) order.
+
+    Buy/sell $N of a stock — Alpaca fills a fractional quantity. Fractional/
+    notional orders MUST be market + day (Alpaca constraint), so no limit price.
+    This is what lets a small account own a slice of a $900 share.
+    """
+    body: dict = {
+        "symbol": symbol.upper(),
+        "notional": str(round(notional, 2)),
+        "side": side,
+        "type": "market",
+        "time_in_force": "day",
+    }
+    if client_order_id:
+        body["client_order_id"] = client_order_id[:48]
+    return body
+
+
+def submit_notional_order(symbol: str, notional: float, side: OrderSide = "buy",
+                          client_order_id: str | None = None) -> dict:
+    """Buy/sell a DOLLAR AMOUNT of a stock (fractional shares). Market + day."""
+    return _post("orders", _notional_order_body(symbol, notional, side, client_order_id))
+
+
 # ────────────────────────────────────────────────────────────────────
 # Options — OCC symbols, single-leg + multi-leg (mleg) orders
 # ────────────────────────────────────────────────────────────────────

@@ -122,16 +122,18 @@ def test_select_growth_picks_filters_and_ranks():
     assert [r["ticker"] for r in out] == ["B", "A"]          # momentum + today, score desc
 
 
-def test_stock_order_spec_sizes_to_10pct_nlv():
+def test_stock_order_spec_is_notional_10pct_nlv():
     spec, reason = ex.stock_order_spec(_gpick(ticker="NVDA", trigger_price="120"), nlv=9000)
-    # 10% of 9000 = $900; $900 // $120 = 7 shares
-    assert spec["kind"] == "equity" and spec["symbol"] == "NVDA" and spec["qty"] == 7
-    assert spec["side"] == "buy" and spec["limit_price"] == 120.0
+    # 10% of 9000 = $900 notional (fractional), not integer shares
+    assert spec["kind"] == "equity" and spec["symbol"] == "NVDA"
+    assert spec["notional"] == 900.0 and spec["side"] == "buy"
+    assert "qty" not in spec
 
 
-def test_stock_order_spec_skips_when_one_share_exceeds_budget():
-    spec, reason = ex.stock_order_spec(_gpick(ticker="X", trigger_price="1000"), nlv=9000)
-    assert spec is None and "budget" in reason
+def test_stock_order_spec_buys_pricey_name_fractionally_no_skip():
+    # A $1000 share is NOT skipped — notional buys ~0.9 sh of it.
+    spec, reason = ex.stock_order_spec(_gpick(ticker="MU", trigger_price="1000"), nlv=9000)
+    assert spec is not None and spec["notional"] == 900.0
 
 
 def test_client_order_id_deterministic_and_bounded():

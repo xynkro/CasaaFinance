@@ -68,6 +68,16 @@ def test_confluence_modest_boost_no_tier():
     assert a["veto"] is False
 
 
+def test_sizing_note_per_account():
+    note = gs.sizing_note({"caspar": 9000, "sarah": 45000})
+    assert "Caspar ~$900 (10%)" in note and "Sarah ~$2,250 (5%)" in note
+
+
+def test_sizing_note_handles_missing_account():
+    assert gs.sizing_note({"caspar": 9000}).count("·") == 0   # only one account
+    assert gs.sizing_note({}) == ""
+
+
 def test_screen_candidate_row_constructs():
     from src import schema as S
     row = S.ScreenCandidateRow(
