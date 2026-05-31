@@ -618,6 +618,7 @@ const SAFE_WORKFLOWS: { file: string; label: string }[] = [
   { file: "unusual-options-scan.yml", label: "Unusual Options" },
   { file: "iv-surface-scan.yml", label: "IV Surface" },
   { file: "screen-candidates.yml", label: "Stock Screener" },
+  { file: "growth-scan.yml", label: "Growth Scan" },
   { file: "tv-signals.yml", label: "TV Signals" },
   { file: "regime-signals.yml", label: "Regime Signals" },
   { file: "macro-grab.yml", label: "Macro Grab" },

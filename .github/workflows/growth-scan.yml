@@ -1,0 +1,55 @@
+name: Growth Discovery — Momentum Scan
+
+# The GROWTH-OFFENSE leg of the all-rounded book. Discovers fresh momentum/
+# growth names from a BROAD universe (FinViz momentum screen → curated fallback),
+# ranks them on real momentum (Stage-2 uptrend + 3-month return + technical BUY
+# score), and writes the top names to the `screen_candidates` tab
+# (source="momentum") + seeds the strongest as BUY ideas in decision_queue.
+#
+# Fixes the audit gap where vcp/canslim only RATED the ~80-name watchlist, so
+# fresh growth never surfaced and the defensive rebalancer filled the vacuum.
+#
+# Twice-weekly (Mon + Thu): fresh enough to catch new momentum, not so frequent
+# it churns. yfinance + finvizfinance; no FMP. Recommendation only.
+
+on:
+  schedule:
+    # 12:30 UTC Mon & Thu = 20:30 SGT — after the US session.
+    - cron: "30 12 * * 1,4"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: growth-scan
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Run growth_scan
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/growth_scan.py $ARGS
