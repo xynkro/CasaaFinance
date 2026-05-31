@@ -2091,6 +2091,37 @@ class AlpacaPositionRow:
 
 
 @dataclass
+class PaperBenchmarkRow:
+    """'Did this pick beat just holding SPY?' — per open paper position + a TOTAL
+    row. Compares each position's P&L to the P&L the SAME entry capital would
+    have made in SPY over the SAME holding window, isolating the picks' edge from
+    the paper account's idle cash. The honest answer to 'does the active book
+    beat the index'."""
+    TAB_NAME = "paper_benchmark"
+    HEADERS = [
+        "date", "ticker", "entry_date", "days_held", "cost_basis",
+        "position_pl", "spy_return_pct", "spy_equiv_pl", "alpha_pl", "beat_spy",
+    ]
+
+    date: str
+    ticker: str
+    entry_date: str
+    days_held: int
+    cost_basis: float
+    position_pl: float
+    spy_return_pct: float
+    spy_equiv_pl: float
+    alpha_pl: float
+    beat_spy: bool
+
+    def to_row(self) -> List[str]:
+        return [self.date, self.ticker, self.entry_date, str(self.days_held),
+                _num(self.cost_basis, 2), _num(self.position_pl, 2),
+                _num(self.spy_return_pct, 2), _num(self.spy_equiv_pl, 2),
+                _num(self.alpha_pl, 2), "TRUE" if self.beat_spy else ""]
+
+
+@dataclass
 class HarvestScanRow:
     """Premium Harvest scanner output — one row per candidate per day.
 
@@ -2197,6 +2228,18 @@ class IvSurfaceScanRow:
         ]
 
 
+# ── outcome_pnl_pct semantics version ────────────────────────────────────────
+# The premium-inclusive P&L fix (settles at the strike, nets the credit) changed
+# what outcome_pnl_pct MEANS. Rows written before the fix carry the old raw/
+# capped stock-return proxy and an empty/absent pnl_model; rows written after are
+# stamped PNL_MODEL_PREMIUM. Downstream consumers (option_scanner.realized_kelly_inputs,
+# the Phase-2 weight regression) filter to PNL_MODEL_PREMIUM so the two semantics
+# are never blended. signal_feedback appends (no UPSERT), so the historical rows
+# are versioned in place rather than destructively backfilled.
+PNL_MODEL_PREMIUM = "premium_v2"      # premium-inclusive, settles at the strike
+PNL_MODEL_LEGACY = "stock_proxy_v1"   # pre-fix raw/capped stock-return proxy (historical only)
+
+
 @dataclass
 class SignalOutcomeRow:
     """Per-pick signal outcome — matches scan picks to forward price action.
@@ -2231,6 +2274,9 @@ class SignalOutcomeRow:
         "sig_volume_spike", "sig_divergence", "sig_candle",
         "sig_fib_support", "sig_volatility", "sig_vol_regime",
         "sig_iv_rv_ratio", "sig_term_structure",
+        # outcome_pnl_pct semantics version (see PNL_MODEL_* above). Appended
+        # LAST so legacy 30-col rows stay positionally aligned on read-back.
+        "pnl_model",
     ]
 
     scan_date: str
@@ -2264,6 +2310,7 @@ class SignalOutcomeRow:
     sig_vol_regime: float = 0.0
     sig_iv_rv_ratio: float = 0.0
     sig_term_structure: float = 0.0
+    pnl_model: str = PNL_MODEL_PREMIUM   # semantics of outcome_pnl_pct (see PNL_MODEL_* above)
 
     def to_row(self) -> List[str]:
         return [
@@ -2281,6 +2328,7 @@ class SignalOutcomeRow:
             _num(self.sig_candle, 3), _num(self.sig_fib_support, 3),
             _num(self.sig_volatility, 3), _num(self.sig_vol_regime, 3),
             _num(self.sig_iv_rv_ratio, 3), _num(self.sig_term_structure, 3),
+            self.pnl_model,
         ]
 
 

@@ -767,6 +767,19 @@ export interface AlpacaPositionRow {
   side: string;
 }
 
+export interface PaperBenchmarkRow {
+  date: string;
+  ticker: string;          // a position symbol, or "TOTAL"
+  entry_date: string;
+  days_held: string;
+  cost_basis: string;      // capital base (deployed) for the SPY-equivalent
+  position_pl: string;
+  spy_return_pct: string;
+  spy_equiv_pl: string;    // what the same capital would have made in SPY
+  alpha_pl: string;        // position_pl − spy_equiv_pl
+  beat_spy: string;        // "TRUE" | ""
+}
+
 /** Parsed OCC option contract. */
 export interface ParsedOcc {
   underlying: string;
@@ -1265,6 +1278,7 @@ export interface DashboardData {
   ivSurfaceScan: IvSurfaceScanRow[];
   alpaca: AlpacaSnapshotRow | null;
   alpacaPositions: AlpacaPositionRow[];
+  paperBenchmark: PaperBenchmarkRow[];   // "did each pick beat SPY?" (latest day, incl. a TOTAL row)
   error: string | null;
 }
 
@@ -1341,6 +1355,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       ivSurfaceScanRows,
       alpacaSnapRaw,
       alpacaPosRows,
+      paperBenchmarkRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -1357,6 +1372,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTab<IvSurfaceScanRow>("iv_surface_scan").catch(() => [] as IvSurfaceScanRow[]),
       fetchTab<Record<string, string>>("snapshot_alpaca").catch(() => [] as Record<string, string>[]),
       fetchTab<AlpacaPositionRow>("positions_alpaca").catch(() => [] as AlpacaPositionRow[]),
+      fetchTabByName<PaperBenchmarkRow>("paper_benchmark").catch(() => [] as PaperBenchmarkRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -1439,6 +1455,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
         return rows.length ? rows.reduce((a, b) => (a.date > b.date ? a : b)) : null;
       })(),
       alpacaPositions: latestGroup(alpacaPosRows),
+      paperBenchmark: latestGroup(paperBenchmarkRows),
       error: null,
     };
   } catch (e) {
@@ -1471,6 +1488,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       ivSurfaceScan: [],
       alpaca: null,
       alpacaPositions: [],
+      paperBenchmark: [],
       error: String(e),
     };
   }

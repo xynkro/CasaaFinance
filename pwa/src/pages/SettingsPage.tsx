@@ -613,6 +613,7 @@ function DecisionStatusGlossary() {
 const CRON_REPO = "xynkro/CasaaFinance";
 const SAFE_WORKFLOWS: { file: string; label: string }[] = [
   { file: "alpaca-paper-execute.yml", label: "Paper Executor" },
+  { file: "paper-benchmark.yml", label: "Paper vs SPY" },
   { file: "daily-options-scan.yml", label: "Options Scan" },
   { file: "market-scan.yml", label: "Market Scan" },
   { file: "options-yield.yml", label: "Yield Screener" },

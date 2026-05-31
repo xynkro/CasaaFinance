@@ -6,6 +6,7 @@ import type {
   LivePriceRow,
   AlpacaSnapshotRow,
   AlpacaPositionRow,
+  PaperBenchmarkRow,
 } from "../data";
 import { PnlCard } from "../cards/PnlCard";
 import { PaperTradingView } from "../cards/PaperTradingView";
@@ -46,6 +47,7 @@ export function PortfolioPage({
   usdSgd,
   alpacaSnapshot,
   alpacaPositions,
+  paperBenchmark,
   loading,
 }: {
   casparSnapshot: SnapshotRow | null;
@@ -60,6 +62,7 @@ export function PortfolioPage({
   usdSgd: number;
   alpacaSnapshot: AlpacaSnapshotRow | null;
   alpacaPositions: AlpacaPositionRow[];
+  paperBenchmark: PaperBenchmarkRow[];
   loading: boolean;
 }) {
   const CasparPanel = (
@@ -126,6 +129,7 @@ export function PortfolioPage({
         <PaperTradingView
           snapshot={alpacaSnapshot}
           positions={alpacaPositions}
+          benchmark={paperBenchmark}
           loading={loading}
         />
       </div>

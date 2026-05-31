@@ -1,7 +1,7 @@
-import type { AlpacaSnapshotRow, AlpacaPositionRow, ParsedOcc } from "../data";
+import type { AlpacaSnapshotRow, AlpacaPositionRow, ParsedOcc, PaperBenchmarkRow } from "../data";
 import { parseOcc } from "../data";
 import { Card } from "./Card";
-import { FlaskConical, TrendingUp, TrendingDown, Bot } from "lucide-react";
+import { FlaskConical, TrendingUp, TrendingDown, Bot, Swords } from "lucide-react";
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
 
@@ -159,13 +159,59 @@ function GroupRow({ g }: { g: PosGroup }) {
 
 /* ── main view ───────────────────────────────────────────────────────── */
 
+/* ── SPY benchmark strip — the honest "are we beating the index?" line ── */
+
+function BenchmarkStrip({ benchmark }: { benchmark: PaperBenchmarkRow[] }) {
+  const total = benchmark.find((b) => b.ticker === "TOTAL");
+  if (!total) return null;
+  const bookPl = num(total.position_pl);
+  const spyPl = num(total.spy_equiv_pl);
+  const alpha = num(total.alpha_pl);
+  const beating = alpha >= 0;
+  const legs = benchmark.filter((b) => b.ticker !== "TOTAL");
+  const won = legs.filter((b) => (b.beat_spy || "").toUpperCase() === "TRUE").length;
+
+  return (
+    <div className={`rounded-2xl border px-3.5 py-3 ${beating ? "border-emerald-500/30 bg-emerald-500/[0.07]" : "border-red-500/30 bg-red-500/[0.07]"}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <Swords size={14} className={beating ? "text-emerald-400" : "text-red-400"} />
+        <h3 className="text-[length:var(--t-xs)] font-bold text-slate-200">vs Buy-and-Hold SPY</h3>
+        <span className={`ml-auto text-[length:var(--t-2xs)] font-bold px-1.5 py-0.5 rounded ${beating ? "text-emerald-300 bg-emerald-500/15" : "text-red-300 bg-red-500/15"}`}>
+          {beating ? "BEATING" : "LAGGING"}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <div className="text-[length:var(--t-2xs)] text-slate-600">Book P&L</div>
+          <div className="text-[length:var(--t-sm)] font-bold text-white tabular-nums">{bookPl >= 0 ? "+" : ""}{money(bookPl, 0)}</div>
+        </div>
+        <div>
+          <div className="text-[length:var(--t-2xs)] text-slate-600">SPY would've</div>
+          <div className="text-[length:var(--t-sm)] text-slate-300 tabular-nums">{spyPl >= 0 ? "+" : ""}{money(spyPl, 0)}</div>
+        </div>
+        <div>
+          <div className="text-[length:var(--t-2xs)] text-slate-600">Alpha</div>
+          <div className={`text-[length:var(--t-sm)] font-bold tabular-nums ${beating ? "text-emerald-400" : "text-red-400"}`}>
+            {alpha >= 0 ? "+" : ""}{money(alpha, 0)}
+          </div>
+        </div>
+      </div>
+      <div className="text-[length:var(--t-2xs)] text-slate-500 mt-1.5">
+        {won}/{legs.length} positions beat SPY over their hold · the burden of proof is on the active book.
+      </div>
+    </div>
+  );
+}
+
 export function PaperTradingView({
   snapshot,
   positions,
+  benchmark,
   loading,
 }: {
   snapshot: AlpacaSnapshotRow | null;
   positions: AlpacaPositionRow[];
+  benchmark: PaperBenchmarkRow[];
   loading: boolean;
 }) {
   const groups = groupPositions(positions);
@@ -188,6 +234,9 @@ export function PaperTradingView({
           </div>
         </div>
       </div>
+
+      {/* The honest scoreboard — is the active book beating the index? */}
+      <BenchmarkStrip benchmark={benchmark} />
 
       {/* Paper account summary */}
       <Card variant="accent">

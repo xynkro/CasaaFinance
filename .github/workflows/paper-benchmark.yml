@@ -1,0 +1,51 @@
+name: Paper Benchmark vs SPY — Daily
+
+# The honest scoreboard: for every paper position the auto-trader holds, compare
+# its P&L to what the SAME capital would have made in SPY over the SAME window,
+# and sum it to a book-level alpha. Answers "does the active book beat the index?"
+# empirically instead of by faith. Read-only against Alpaca + yfinance; writes
+# the paper_benchmark tab (per-position + a TOTAL row).
+
+on:
+  schedule:
+    # 21:30 UTC = ~30m after the US close. Mon-Fri.
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-benchmark
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OAUTH_TOKEN_JSON:      ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:             ${{ secrets.SHEET_ID }}
+      ALPACA_API_KEY_ID:    ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      ALPACA_BASE_URL:      ${{ secrets.ALPACA_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Run paper_benchmark
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/paper_benchmark.py $ARGS

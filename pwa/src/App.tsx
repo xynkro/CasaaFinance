@@ -99,6 +99,7 @@ function Dashboard() {
             usdSgd={Number(data?.macro?.usd_sgd) || 1.30}
             alpacaSnapshot={data?.alpaca ?? null}
             alpacaPositions={data?.alpacaPositions ?? []}
+            paperBenchmark={data?.paperBenchmark ?? []}
             loading={loading && !data}
           />
         );
