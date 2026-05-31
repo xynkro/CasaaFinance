@@ -104,6 +104,36 @@ def test_map_unparseable_spread_skipped():
     assert spec is None and "unparseable" in reason
 
 
+def _gpick(**kw):
+    base = {"date": "2026-05-30", "source": "momentum", "ticker": "NVDA",
+            "score": "70", "trigger_price": "120"}
+    base.update(kw)
+    return base
+
+
+def test_select_growth_picks_filters_and_ranks():
+    rows = [
+        _gpick(ticker="A", score="60"),
+        _gpick(ticker="B", score="90"),
+        _gpick(ticker="C", score="80", source="vcp"),       # wrong source
+        _gpick(ticker="D", score="95", date="2026-05-29"),  # wrong day
+    ]
+    out = ex.select_growth_picks(rows, "2026-05-30", top_n=5)
+    assert [r["ticker"] for r in out] == ["B", "A"]          # momentum + today, score desc
+
+
+def test_stock_order_spec_sizes_to_10pct_nlv():
+    spec, reason = ex.stock_order_spec(_gpick(ticker="NVDA", trigger_price="120"), nlv=9000)
+    # 10% of 9000 = $900; $900 // $120 = 7 shares
+    assert spec["kind"] == "equity" and spec["symbol"] == "NVDA" and spec["qty"] == 7
+    assert spec["side"] == "buy" and spec["limit_price"] == 120.0
+
+
+def test_stock_order_spec_skips_when_one_share_exceeds_budget():
+    spec, reason = ex.stock_order_spec(_gpick(ticker="X", trigger_price="1000"), nlv=9000)
+    assert spec is None and "budget" in reason
+
+
 def test_client_order_id_deterministic_and_bounded():
     p = _pick(strategy="CSP", ticker="NVDA")
     cid = ex.client_order_id("2026-05-30", p)

@@ -43,6 +43,31 @@ def test_rank_filters_and_sorts():
     assert [c["ticker"] for c in ranked] == ["B", "A"]
 
 
+def test_confluence_no_signal_is_neutral():
+    a = gs.apply_confluence(70.0, None)
+    assert a["score"] == 70.0 and a["veto"] is False and a["tag"] == ""
+
+
+def test_confluence_vetoes_smart_money_selling():
+    a = gs.apply_confluence(80.0, {"recommended_strategy": "TRIM"})
+    assert a["veto"] is True and "SELLING" in a["tag"]
+
+
+def test_confluence_boosts_tier_a_with_congress_and_insiders():
+    a = gs.apply_confluence(70.0, {
+        "tier": "A", "confluence_score": "80",
+        "congress_score": "30", "insider_score": "25", "contract_score": "5"})
+    assert a["score"] == 95.0           # 70 + 15 (Tier A) + 10 (cap)
+    assert "Tier A" in a["tag"] and "Congress" in a["tag"] and "insiders" in a["tag"]
+    assert "gov contracts" not in a["tag"]   # contract_score 5 < 20
+
+
+def test_confluence_modest_boost_no_tier():
+    a = gs.apply_confluence(70.0, {"tier": "", "confluence_score": "40"})
+    assert a["score"] == 75.0           # 70 + min(10, 40/8=5)
+    assert a["veto"] is False
+
+
 def test_screen_candidate_row_constructs():
     from src import schema as S
     row = S.ScreenCandidateRow(

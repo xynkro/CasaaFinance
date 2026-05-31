@@ -157,6 +157,39 @@ def contracts_for(pick: dict, nlv: float, excess_liq: float | None,
 
 # ──────────────────── I/O + main ────────────────────────────────────────────
 
+# ──────────────────── Growth stock picks (momentum + confluence) ────────────
+
+GROWTH_PER_NAME_PCT = 0.10   # cap each growth stock at 10% of (mirrored) NLV
+GROWTH_TOP_N = 5             # momentum names to buy per run
+
+
+def select_growth_picks(rows: list[dict], today: str, top_n: int = GROWTH_TOP_N) -> list[dict]:
+    """Top momentum stock candidates for `today` from screen_candidates
+    (source='momentum' — written by growth_scan, confluence-adjusted)."""
+    today = today[:10]
+    cands = [r for r in rows
+             if str(r.get("source", "")).lower() == "momentum"
+             and str(r.get("date", ""))[:10] == today]
+    cands.sort(key=lambda r: _f(r.get("score")), reverse=True)
+    return cands[:top_n]
+
+
+def stock_order_spec(pick: dict, nlv: float) -> tuple[dict | None, str]:
+    """Map a momentum screen_candidate → an Alpaca equity BUY spec, or (None, reason)."""
+    tk = str(pick.get("ticker", "")).upper()
+    price = _f(pick.get("trigger_price"))
+    if not tk or price <= 0:
+        return None, "missing ticker/price"
+    if nlv <= 0:
+        return None, "no NLV"
+    qty = int((GROWTH_PER_NAME_PCT * nlv) // price)
+    if qty < 1:
+        return None, f"1 share (${price:.0f}) > {GROWTH_PER_NAME_PCT*100:.0f}%-NLV budget"
+    return {"kind": "equity", "symbol": tk, "side": "buy", "qty": qty,
+            "limit_price": round(price, 2),
+            "label": f"BUY {tk} {qty}sh @{price:.2f}"}, ""
+
+
 def _read_picks_and_account():
     from src.sync import load_env
     from src import sheets as sh
@@ -165,10 +198,14 @@ def _read_picks_and_account():
     ss = sh._open_sheet(client)
 
     def latest(tab):
-        rows = ss.worksheet(tab).get_all_values()
-        return [dict(zip(rows[0], r)) for r in rows[1:] if any(r)] if len(rows) > 1 else []
+        try:
+            rows = ss.worksheet(tab).get_all_values()
+            return [dict(zip(rows[0], r)) for r in rows[1:] if any(r)] if len(rows) > 1 else []
+        except Exception:
+            return []
 
     picks = latest("scan_results")
+    growth = latest("screen_candidates")
     acct = {"nlv": 0.0, "excess_liq": None}
     try:
         c = latest("snapshot_caspar")[-1]
@@ -181,7 +218,7 @@ def _read_picks_and_account():
         macro = latest("macro")[-1]
     except IndexError:
         pass
-    return picks, acct, macro
+    return picks, growth, acct, macro
 
 
 def main() -> int:
@@ -198,17 +235,19 @@ def main() -> int:
         return 2
 
     today = date.today().isoformat()
-    picks, acct, macro = _read_picks_and_account()
+    picks, growth, acct, macro = _read_picks_and_account()
     vix = _f(macro.get("vix"), 16.0)
     spx_ok = str(macro.get("spx_above_200sma", "True")).lower() not in ("false", "0", "")
 
     top = select_top_per_strategy(picks, today)
+    growth_top = select_growth_picks(growth, today)
     print(f"=== Alpaca paper executor · {today} · NLV ${acct['nlv']:,.0f} "
           f"excess ${acct['excess_liq'] or 0:,.0f} · VIX {vix} ===")
-    print(f"{len(top)} top-per-strategy picks for today\n")
+    print(f"{len(top)} option picks + {len(growth_top)} growth stock picks for today\n")
 
     from src import alpaca
     plan = []
+    # Options (top per strategy)
     for p in top:
         spec, reason = pick_to_order(p)
         if spec is None:
@@ -222,6 +261,16 @@ def main() -> int:
         plan.append((spec, qty, coid))
         print(f"  PLAN {spec['label']}  ×{qty}  [{spec['kind']}]  id={coid}")
 
+    # Growth stocks (momentum + confluence) — the offense leg, as paper equity buys
+    for g in growth_top:
+        spec, reason = stock_order_spec(g, acct["nlv"])
+        if spec is None:
+            print(f"  SKIP GROWTH    {str(g.get('ticker','')):6} — {reason}")
+            continue
+        coid = f"casaa-{today}-GROWTH-{str(g.get('ticker',''))}"[:48]
+        plan.append((spec, spec["qty"], coid))
+        print(f"  PLAN {spec['label']}  [equity]  id={coid}")
+
     if not args.execute:
         print(f"\n[DRY-RUN] {len(plan)} orders planned. Re-run with --execute to place on PAPER.")
         return 0
@@ -234,7 +283,10 @@ def main() -> int:
             print(f"  ALREADY PLACED {coid} — skip")
             continue
         try:
-            if spec["kind"] == "single":
+            if spec["kind"] == "equity":
+                alpaca.submit_order(spec["symbol"], qty, "buy", order_type="limit",
+                                    limit_price=spec["limit_price"], client_order_id=coid)
+            elif spec["kind"] == "single":
                 alpaca.submit_option_order(spec["occ"], qty, spec["side"],
                                            limit_price=spec["limit_price"], client_order_id=coid)
             else:

@@ -77,6 +77,72 @@ def rank_candidates(cands: list[dict]) -> list[dict]:
     return sorted(keep, key=lambda c: c["score"], reverse=True)
 
 
+def _f(x, d: float = 0.0) -> float:
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return d
+
+
+def apply_confluence(score: float, conf: dict | None) -> dict:
+    """Adjust a momentum score by the gov/insider 'smart money' confluence signal.
+
+    BOOST when contracts / Congress / insiders confirm the move (Tier A/B get the
+    most); VETO when the confluence call is TRIM (smart money selling into the
+    rip — momentum we should NOT chase). Turns 'price momentum' into 'momentum
+    the insiders and Congress are already in'. Returns {score, tag, veto}.
+    """
+    if not conf:
+        return {"score": score, "tag": "", "veto": False}
+    strat = str(conf.get("recommended_strategy") or "").upper()
+    if "TRIM" in strat or "SELL" in strat:
+        return {"score": score, "tag": "gov/insider SELLING", "veto": True}
+    tier = str(conf.get("tier") or "").upper()
+    boost = 0.0
+    parts: list[str] = []
+    if tier == "A":
+        boost += 15.0
+        parts.append("Tier A")
+    elif tier == "B":
+        boost += 12.0
+        parts.append("Tier B")
+    boost += min(10.0, _f(conf.get("confluence_score")) / 8.0)
+    if _f(conf.get("congress_score")) >= 20:
+        parts.append("Congress")
+    if _f(conf.get("insider_score")) >= 20:
+        parts.append("insiders")
+    if _f(conf.get("contract_score")) >= 20:
+        parts.append("gov contracts")
+    tag = ("smart money: " + " + ".join(parts)) if parts else ""
+    return {"score": round(min(100.0, score + boost), 1), "tag": tag, "veto": False}
+
+
+def read_confluence(logger: logging.Logger) -> dict:
+    """Latest gov_confluence_signals row per ticker (best-effort; {} on failure)."""
+    try:
+        from src.sync import load_env
+        from src import sheets as sh
+        from src import schema as S
+        load_env()
+        ss = sh._open_sheet(sh.authenticate())
+        rows = ss.worksheet(S.GovConfluenceSignalRow.TAB_NAME).get_all_values()
+        if len(rows) < 2:
+            return {}
+        hdr = rows[0]
+        out: dict[str, dict] = {}
+        for r in rows[1:]:
+            if not any(r):
+                continue
+            d = dict(zip(hdr, r))
+            tk = str(d.get("ticker") or "").upper()
+            if tk:
+                out[tk] = d   # append-only → last row per ticker is the latest
+        return out
+    except Exception as e:
+        logger.debug(f"  confluence read skipped: {e}")
+        return {}
+
+
 # ──────────────────── Universe + scoring I/O ────────────────────────────────
 
 def discover_universe(logger: logging.Logger, top_n: int = 150) -> list[str]:
@@ -158,11 +224,28 @@ def main() -> int:
         if (i + 1) % 20 == 0:
             logger.info(f"  …{i + 1}/{len(universe)}")
 
+    # Fuse the gov/insider 'smart money' confluence: boost confirmed names,
+    # veto the ones smart money is selling into.
+    conf = read_confluence(logger)
+    if conf:
+        logger.info(f"  confluence: {len(conf)} gov/insider signals loaded")
+    vetoed = []
+    for r in scored:
+        adj = apply_confluence(r["score"], conf.get(r["ticker"].upper()))
+        r["score"] = adj["score"]
+        r["conf_tag"] = adj["tag"]
+        if adj["veto"]:
+            vetoed.append(r["ticker"])
+    scored = [r for r in scored if r["ticker"] not in vetoed]
+    if vetoed:
+        logger.info(f"  vetoed (smart money selling): {', '.join(vetoed)}")
+
     ranked = rank_candidates(scored)[:TOP_N]
     logger.info(f"\nTop {len(ranked)} growth candidates:")
     for r in ranked:
+        tag = f"  [{r['conf_tag']}]" if r.get("conf_tag") else ""
         logger.info(f"  {r['ticker']:6} score {r['score']:5.1f}  3mo {r['mom_3m']:+6.1f}%  "
-                    f"RSI {r['rsi']:.0f}  ${r['close']:.2f}")
+                    f"RSI {r['rsi']:.0f}  ${r['close']:.2f}{tag}")
 
     if args.dry or not ranked:
         logger.info(f"\n[{'DRY' if args.dry else 'NO-OP'}] {len(ranked)} candidates.")
@@ -179,8 +262,9 @@ def main() -> int:
         S.ScreenCandidateRow(
             date=today, source="momentum", ticker=r["ticker"], sector=r.get("sector", ""),
             score=r["score"], trigger_price=r["close"], stop_price=round(r["sma50"], 2),
-            rationale=f"Momentum: 3mo {r['mom_3m']:+.0f}%, RSI {r['rsi']:.0f}, Stage-2 uptrend "
-                      f"(>50>200dma). Stop ~50dma ${r['sma50']:.2f}.",
+            rationale=(f"Momentum: 3mo {r['mom_3m']:+.0f}%, RSI {r['rsi']:.0f}, Stage-2 uptrend "
+                       f"(>50>200dma). Stop ~50dma ${r['sma50']:.2f}."
+                       + (f" + {r['conf_tag']}." if r.get("conf_tag") else "")),
         )
         for r in ranked
     ]
