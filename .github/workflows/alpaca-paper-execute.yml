@@ -1,0 +1,62 @@
+name: Alpaca Paper Executor — Daily
+
+# Places the day's scanner picks on the Alpaca PAPER account so we build a
+# real-fill forward track record of the system's recommendations:
+#   • top option pick per strategy (scan_results), and
+#   • top momentum stock picks (screen_candidates), as fractional/notional buys.
+# Idempotent (deterministic client_order_ids), hard-guarded to PAPER only.
+#
+# Runs weekday mornings ET so orders place during market hours. PAPER money —
+# the real IBKR accounts are never touched by this.
+
+on:
+  schedule:
+    # 14:30 UTC = 10:30 ET, ~1h after the US open. Mon-Fri.
+    - cron: "30 14 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: "Actually place orders (unchecked = dry-run)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alpaca-paper-execute
+  cancel-in-progress: true
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OAUTH_TOKEN_JSON:      ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:             ${{ secrets.SHEET_ID }}
+      ALPACA_API_KEY_ID:    ${{ secrets.ALPACA_API_KEY_ID }}
+      ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
+      # Defaults to the paper endpoint; the script ALSO hard-refuses any
+      # non-paper base URL, so a misconfigured secret can't place real orders.
+      ALPACA_BASE_URL:      ${{ secrets.ALPACA_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Run paper executor
+        run: |
+          ARGS=""
+          # default true on schedule; respect the dispatch toggle
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.execute }}" != "true" ]; then
+            ARGS=""   # dry-run
+          else
+            ARGS="--execute"
+          fi
+          python scripts/alpaca_paper_execute.py $ARGS
