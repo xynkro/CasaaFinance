@@ -1,0 +1,54 @@
+name: Tail Hedge — Weekly
+
+# The convex hedge leg of the all-rounded book. Reads each account's NLV +
+# the macro regime (SPY≈spx/10, VIX, exposure posture) and writes ONE hedge
+# recommendation per account to decision_queue (bucket=hedge):
+#   • a defined-risk SPY put-spread when the budget fits a contract, or
+#   • a fractional VIXM long-vol sleeve on small accounts.
+# Sizing is regime-gated (lean in as the regime sours, don't chase a vol spike,
+# hard-capped at 2% of NLV). Recommendation only — the user executes.
+#
+# Weekly: a tail hedge is a slow-moving allocation, not a daily trade.
+# No FMP needed; pure portfolio math + a BSM cost estimate.
+
+on:
+  schedule:
+    # 23:15 UTC Monday = 07:15 SGT Tuesday — after the daily snapshots/macro.
+    - cron: "15 23 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tail-hedge
+  cancel-in-progress: true
+
+jobs:
+  hedge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+      DRIVE_FOLDER_ID:  ${{ secrets.DRIVE_FOLDER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Run tail_hedge
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/tail_hedge_run.py $ARGS
