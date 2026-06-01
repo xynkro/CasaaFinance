@@ -73,6 +73,22 @@ def test_company_size_echoed_for_pwa():
     assert m["ttm_revenue"] == 2e9
 
 
+def test_sanitize_rejects_revenue_equal_to_market_cap():
+    """The PSN bug: yfinance returned rev == cap. Drop the revenue so the
+    contract is sized vs market cap instead of a fabricated 1:1 ratio."""
+    from scripts.screen_gov_confluence import _sanitize_fundamentals
+    rev, cap = _sanitize_fundamentals(6.3e9, 6.3e9)
+    assert rev is None          # bogus revenue dropped
+    assert cap == 6.3e9         # market cap kept
+
+
+def test_sanitize_drops_nonpositive_and_keeps_good():
+    from scripts.screen_gov_confluence import _sanitize_fundamentals
+    assert _sanitize_fundamentals(0, 5e9) == (None, 5e9)
+    assert _sanitize_fundamentals(-1, -1) == (None, None)
+    assert _sanitize_fundamentals(2e9, 6e9) == (2e9, 6e9)   # distinct → both kept
+
+
 def test_contract_present_but_no_denominator():
     """Contract exists but neither revenue nor cap known → no false label."""
     from scripts.screen_gov_confluence import compute_materiality

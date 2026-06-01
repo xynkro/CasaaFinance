@@ -45,9 +45,59 @@ log = logging.getLogger(__name__)
 _fundamentals_cache: dict[str, tuple[float | None, float | None]] = {}
 
 
+_FH_BASE = "https://finnhub.io/api/v1"
+
+
+def _sanitize_fundamentals(
+    rev: float | None, cap: float | None,
+) -> tuple[float | None, float | None]:
+    """Drop garbage values so materiality never divides by a bad denominator.
+
+    yfinance's scraped .info occasionally returns revenue == market cap, or
+    zero/negative. Treat non-positive as missing, and reject a revenue that
+    exactly equals market cap (a known bad-data signature, e.g. PSN) so the
+    contract falls back to the market-cap yardstick instead of a fake ratio.
+    """
+    r = float(rev) if (rev and rev > 0) else None
+    c = float(cap) if (cap and cap > 0) else None
+    if r is not None and c is not None and abs(r - c) < 1.0:
+        r = None
+    return r, c
+
+
+def _finnhub_market_cap(ticker: str) -> float | None:
+    """Market cap (USD) via Finnhub profile2 — clean units (reported in
+    millions). Returns None for ETFs/unknown symbols or when the key is unset,
+    so a fund's AUM never masquerades as a company valuation."""
+    try:
+        import os
+        import requests
+        key = os.getenv("FINNHUB_API_KEY")
+        if not key:
+            return None
+        r = requests.get(
+            f"{_FH_BASE}/stock/profile2",
+            params={"symbol": ticker, "token": key},
+            timeout=10,
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json() or {}
+        if str(data.get("type", "")).upper() in ("ETP", "ETF", "FUND"):
+            return None
+        mcap_m = data.get("marketCapitalization")
+        return float(mcap_m) * 1e6 if mcap_m else None
+    except Exception:
+        return None
+
+
 def _fetch_fundamentals(ticker: str) -> tuple[float | None, float | None]:
-    """Fetch (TTM revenue, market cap) via yfinance in one .info call.
-    Either element is None on failure."""
+    """Fetch (TTM revenue, market cap) for sizing the bet vs the company.
+
+    Market cap comes from Finnhub (reliable units) with yfinance as fallback;
+    TTM revenue comes from yfinance. Both pass through _sanitize_fundamentals
+    so one bad source can't poison the materiality ratios. Either element is
+    None when unavailable (ETFs, delisted, or pre-revenue names)."""
     if ticker in _fundamentals_cache:
         return _fundamentals_cache[ticker]
     rev: float | None = None
@@ -61,6 +111,10 @@ def _fetch_fundamentals(ticker: str) -> tuple[float | None, float | None]:
         cap = float(_cap) if _cap else None
     except Exception:
         pass
+    fh_cap = _finnhub_market_cap(ticker)   # prefer Finnhub's cleaner market cap
+    if fh_cap:
+        cap = fh_cap
+    rev, cap = _sanitize_fundamentals(rev, cap)
     _fundamentals_cache[ticker] = (rev, cap)
     return rev, cap
 
