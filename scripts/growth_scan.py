@@ -113,6 +113,18 @@ def apply_confluence(score: float, conf: dict | None) -> dict:
         parts.append("insiders")
     if _f(conf.get("contract_score")) >= 20:
         parts.append("gov contracts")
+    # MATERIALITY SCALING — the "will it actually move the stock?" research gate.
+    # The confluence boost is scaled by how big the smart-money bet is vs the
+    # company: a $50k Congress buy on a $4T mega-cap (IMMATERIAL) carries
+    # informational value but shouldn't drive a momentum buy the way a contract
+    # worth 17% of revenue (HUGE) does. Blank/unknown materiality is discounted
+    # too — if we can't size it, we don't bet hard on it.
+    mat = str(conf.get("materiality") or "").upper()
+    mat_mult = {"HUGE": 1.25, "MATERIAL": 1.0,
+                "NOTABLE": 0.7, "IMMATERIAL": 0.4}.get(mat, 0.5)
+    boost *= mat_mult
+    if mat:
+        parts.append(f"{mat.title()} vs co.")
     tag = ("smart money: " + " + ".join(parts)) if parts else ""
     return {"score": round(min(100.0, score + boost), 1), "tag": tag, "veto": False}
 

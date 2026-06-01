@@ -55,17 +55,42 @@ def test_confluence_vetoes_smart_money_selling():
 
 def test_confluence_boosts_tier_a_with_congress_and_insiders():
     a = gs.apply_confluence(70.0, {
-        "tier": "A", "confluence_score": "80",
+        "tier": "A", "confluence_score": "80", "materiality": "MATERIAL",
         "congress_score": "30", "insider_score": "25", "contract_score": "5"})
-    assert a["score"] == 95.0           # 70 + 15 (Tier A) + 10 (cap)
+    assert a["score"] == 95.0           # 70 + (15 Tier A + 10 cap) × 1.0 MATERIAL
     assert "Tier A" in a["tag"] and "Congress" in a["tag"] and "insiders" in a["tag"]
     assert "gov contracts" not in a["tag"]   # contract_score 5 < 20
 
 
 def test_confluence_modest_boost_no_tier():
-    a = gs.apply_confluence(70.0, {"tier": "", "confluence_score": "40"})
-    assert a["score"] == 75.0           # 70 + min(10, 40/8=5)
+    a = gs.apply_confluence(70.0, {"tier": "", "confluence_score": "40",
+                                   "materiality": "MATERIAL"})
+    assert a["score"] == 75.0           # 70 + min(10, 40/8=5) × 1.0
     assert a["veto"] is False
+
+
+def test_confluence_immaterial_signal_is_discounted():
+    """A signal too small to move the company gets only a fraction of the boost —
+    an immaterial Congress buy on a mega-cap shouldn't drive a momentum buy."""
+    base = {"tier": "A", "confluence_score": "80", "congress_score": "30"}
+    material = gs.apply_confluence(70.0, {**base, "materiality": "MATERIAL"})
+    immaterial = gs.apply_confluence(70.0, {**base, "materiality": "IMMATERIAL"})
+    assert immaterial["score"] < material["score"]
+    assert immaterial["score"] == 80.0   # 70 + 25 × 0.4
+    assert "Immaterial vs co." in immaterial["tag"]
+
+
+def test_confluence_huge_materiality_amplifies():
+    base = {"tier": "A", "confluence_score": "80", "contract_score": "40"}
+    material = gs.apply_confluence(60.0, {**base, "materiality": "MATERIAL"})
+    huge = gs.apply_confluence(60.0, {**base, "materiality": "HUGE"})
+    assert huge["score"] > material["score"]   # 60 + 25×1.25 > 60 + 25×1.0
+
+
+def test_confluence_blank_materiality_is_conservatively_halved():
+    """If materiality couldn't be computed, don't bet hard on the signal."""
+    a = gs.apply_confluence(70.0, {"tier": "A", "confluence_score": "80"})
+    assert a["score"] == 82.5            # 70 + 25 × 0.5 (unknown materiality)
 
 
 def test_sizing_note_per_account():

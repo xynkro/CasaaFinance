@@ -94,3 +94,25 @@ indices lag/tie the S&P). Recommendation was **core-satellite + measure honestly
 the SPY benchmark** (`scripts/paper_benchmark.py`, `paper_benchmark` tab). GEX does
 not change this — it improves *when* premium is sold, not whether the book beats SPY.
 The honest scoreboard remains the paper-vs-SPY alpha.
+
+---
+
+## Research → live-decision wiring map (audited 2026-06-01)
+
+Verifying the research actually *bites* on buys/actions, not just sits in a doc.
+
+| Research finding | Where it gates a decision | Status |
+|---|---|---|
+| GEX regime → premium-selling risk | `alpaca_paper_execute` skips NEW credit entries (CSP/CC/PCS/CCS/IC) when SPY `premium_gate == SELL_CAUTION` | wired (executor) |
+| GEX regime → real-money awareness | PWA `GexRegimeBanner` on Options page (pre-market) | wired (PWA) |
+| Materiality → "will it move the stock?" on OPTION buys | `daily_options_scan` LONG_CALL quality gate scores contract materiality (0-30 vs market cap); only emits at quality >= 40 | already wired |
+| Materiality → on MOMENTUM/STOCK buys | `growth_scan.apply_confluence` scales smart-money boost by materiality (HUGE 1.25x / MATERIAL 1.0x / NOTABLE 0.7x / IMMATERIAL 0.4x / blank 0.5x) → executor buys the adjusted top picks | wired 2026-06-01 (was the gap) |
+| Smart money SELLING (TRIM) → don't chase | `growth_scan.apply_confluence` VETO on TRIM/SELL | wired |
+| "Won't beat SPY" → measure, don't assume | `paper_benchmark` per-position alpha vs SPY | wired |
+| Delta/OTM/premium discipline → no junk picks | `daily_options_scan` gates (|delta| 0.15-0.35, OTM <=30%, premium >=$0.30) | wired |
+| Growth tilt (diversification drag) → allocation | `risk_parity_targets.yaml` Caspar 74/21/5 | wired |
+
+**Cron pipeline (UTC, all scheduled + dispatchable):**
+`02:35 options-scan -> 12:30 growth-scan (Mon/Thu) -> 13:00 gex-regime -> 14:30 EXECUTOR(--execute) -> 21:30 paper-benchmark`; gov-confluence 23:00 (feeds next day), risk-parity 22:45, tail-hedge 23:15 Mon. The 14:30 executor reads same-day option picks + GEX gate + latest growth picks + prior-day confluence.
+
+**Known not-wired (by design / data limits):** per-stock GEX walls (only index GEX; noise on thin chains); volume profile (deferred); CVD (rejected — tick data unreachable in cron).
