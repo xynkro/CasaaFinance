@@ -626,6 +626,7 @@ const SAFE_WORKFLOWS: { file: string; label: string }[] = [
   { file: "macro-grab.yml", label: "Macro Grab" },
   { file: "risk-parity-audit.yml", label: "Risk Parity" },
   { file: "tail-hedge.yml", label: "Tail Hedge" },
+  { file: "gex-regime.yml", label: "GEX Regime" },
   { file: "fetch-congress-trades.yml", label: "Congress Trades" },
   { file: "fetch-gov-contracts.yml", label: "Gov Contracts" },
   { file: "screen-gov-confluence.yml", label: "Gov Confluence" },

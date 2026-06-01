@@ -1,0 +1,49 @@
+name: GEX Regime — Pre-Market Gamma Map
+
+# Dealer Gamma Exposure regime for SPY/QQQ from CBOE delayed quotes (free, no key,
+# carries real open interest). Classifies the day as POSITIVE_PINNED (vol
+# suppressed, premium-selling friendly) / NEGATIVE_TREND (gap risk, sell premium
+# with caution) / NEUTRAL, plus the gamma-flip level and call/put walls. The PWA
+# shows it as a pre-market banner; the paper executor reads premium_gate to stand
+# down new credit entries on negative-gamma days. Writes the gex_regime tab.
+
+on:
+  schedule:
+    # 13:00 UTC = ~30 min before the US cash open. Mon-Fri.
+    - cron: "0 13 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gex-regime
+  cancel-in-progress: true
+
+jobs:
+  gex:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project deps
+        run: pip install -r requirements.txt
+
+      - name: Run gex_regime
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/gex_regime.py $ARGS

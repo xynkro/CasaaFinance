@@ -9,8 +9,10 @@ import type {
   HarvestScanRow,
   ScanResultRow,
   UoaAlertRow,
+  GexRegimeRow,
 } from "../data";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
+import { GexRegimeBanner } from "../cards/GexRegimeBanner";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
 import { UoaFlowCard } from "../cards/UoaFlowCard";
@@ -32,6 +34,7 @@ export function OptionsPage({
   harvestScan,
   scanResults,
   uoaAlerts,
+  gexRegime,
   loading,
 }: {
   options: OptionRow[];
@@ -44,6 +47,7 @@ export function OptionsPage({
   harvestScan: HarvestScanRow[];
   scanResults: ScanResultRow[];
   uoaAlerts: UoaAlertRow[];
+  gexRegime: GexRegimeRow[];
   loading: boolean;
 }) {
   const [sub, setSub] = useState<Subtab>(() => {
@@ -74,6 +78,13 @@ export function OptionsPage({
 
   return (
     <div className="flex flex-col px-4 pb-4">
+      {/* Pre-market dealer-gamma regime — the premium-selling risk gate */}
+      {gexRegime.length > 0 && (
+        <div className="fade-up fade-up-1 mb-3">
+          <GexRegimeBanner rows={gexRegime} />
+        </div>
+      )}
+
       {/* Sticky subtab selector */}
       <StickyTabs
         active={sub}

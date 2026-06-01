@@ -35,6 +35,9 @@ SINGLE_LEG = {"CSP": ("P", "sell_to_open"), "CC": ("C", "sell_to_open"),
               "LONG_CALL": ("C", "buy_to_open")}
 SPREAD = {"PCS", "CCS", "IC"}
 UNSUPPORTED = {"PMCC", "LONG_PUT"}
+# Short-premium (credit) strategies gated by the GEX regime: skip NEW entries on
+# negative-gamma (SELL_CAUTION) days when gap risk runs through the short strikes.
+PREMIUM_SELLING = {"CSP", "CC", "PCS", "CCS", "IC"}
 
 
 # ──────────────────── Pure helpers (unit-tested) ────────────────────────────
@@ -219,7 +222,19 @@ def _read_picks_and_account():
         macro = latest("macro")[-1]
     except IndexError:
         pass
-    return picks, growth, acct, macro
+    # GEX premium-selling gate (SPY, today) — permissive default if absent.
+    gex_gate = {"gate": "NORMAL", "note": ""}
+    try:
+        td = date.today().isoformat()
+        spy = [r for r in latest("gex_regime")
+               if (r.get("symbol") or "").upper() == "SPY"
+               and (r.get("date") or "")[:10] == td]
+        if spy:
+            gex_gate = {"gate": spy[-1].get("premium_gate") or "NORMAL",
+                        "note": spy[-1].get("note") or ""}
+    except Exception:
+        pass
+    return picks, growth, acct, macro, gex_gate
 
 
 def main() -> int:
@@ -236,20 +251,28 @@ def main() -> int:
         return 2
 
     today = date.today().isoformat()
-    picks, growth, acct, macro = _read_picks_and_account()
+    picks, growth, acct, macro, gexg = _read_picks_and_account()
     vix = _f(macro.get("vix"), 16.0)
     spx_ok = str(macro.get("spx_above_200sma", "True")).lower() not in ("false", "0", "")
+    gex_caution = (gexg.get("gate") == "SELL_CAUTION")
 
     top = select_top_per_strategy(picks, today)
     growth_top = select_growth_picks(growth, today)
     print(f"=== Alpaca paper executor · {today} · NLV ${acct['nlv']:,.0f} "
           f"excess ${acct['excess_liq'] or 0:,.0f} · VIX {vix} ===")
+    if gexg.get("note"):
+        print(f"  GEX: {gexg['note']}")
     print(f"{len(top)} option picks + {len(growth_top)} growth stock picks for today\n")
 
     from src import alpaca
     plan = []
     # Options (top per strategy)
     for p in top:
+        strat = "CSP" if p.get("strategy") == "HARVEST_CSP" else (p.get("strategy") or "")
+        if gex_caution and strat in PREMIUM_SELLING:
+            print(f"  SKIP {strat:10} {str(p.get('ticker','')):6} — GEX SELL_CAUTION "
+                  f"(SPY short gamma → gap risk through short strikes)")
+            continue
         spec, reason = pick_to_order(p)
         if spec is None:
             print(f"  SKIP {p.get('strategy'):10} {p.get('ticker'):6} — {reason}")

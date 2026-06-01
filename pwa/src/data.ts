@@ -757,6 +757,21 @@ export interface GovConfluenceRow {
   congress_pct_mktcap?: string;   // congress_usd / market cap (fraction)
 }
 
+export interface GexRegimeRow {
+  date: string;
+  symbol: string;                 // SPY | QQQ
+  spot?: string;
+  net_gex?: string;               // net dealer dollar-gamma ($ per 1% move)
+  gamma_flip?: string;            // zero-gamma spot level (0 if none)
+  flip_distance_pct?: string;     // (spot − flip) / spot * 100
+  call_wall?: string;             // resistance strike
+  put_wall?: string;              // support strike
+  regime?: string;                // POSITIVE_PINNED | NEGATIVE_TREND | NEUTRAL
+  premium_gate?: string;          // SELL_OK | SELL_CAUTION | NORMAL
+  note?: string;
+  updated_at?: string;
+}
+
 export interface AlpacaSnapshotRow {
   date: string;
   net_liq: string;
@@ -1290,6 +1305,7 @@ export interface DashboardData {
   alpaca: AlpacaSnapshotRow | null;
   alpacaPositions: AlpacaPositionRow[];
   paperBenchmark: PaperBenchmarkRow[];   // "did each pick beat SPY?" (latest day, incl. a TOTAL row)
+  gexRegime: GexRegimeRow[];             // dealer gamma regime per index (latest day: SPY, QQQ)
   error: string | null;
 }
 
@@ -1367,6 +1383,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       alpacaSnapRaw,
       alpacaPosRows,
       paperBenchmarkRows,
+      gexRegimeRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -1384,6 +1401,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTab<Record<string, string>>("snapshot_alpaca").catch(() => [] as Record<string, string>[]),
       fetchTab<AlpacaPositionRow>("positions_alpaca").catch(() => [] as AlpacaPositionRow[]),
       fetchTabByName<PaperBenchmarkRow>("paper_benchmark").catch(() => [] as PaperBenchmarkRow[]),
+      fetchTabByName<GexRegimeRow>("gex_regime").catch(() => [] as GexRegimeRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -1467,6 +1485,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       })(),
       alpacaPositions: latestGroup(alpacaPosRows),
       paperBenchmark: latestGroup(paperBenchmarkRows),
+      gexRegime: latestGroup(gexRegimeRows),
       error: null,
     };
   } catch (e) {
@@ -1500,6 +1519,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       alpaca: null,
       alpacaPositions: [],
       paperBenchmark: [],
+      gexRegime: [],
       error: String(e),
     };
   }

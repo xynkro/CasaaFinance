@@ -116,6 +116,7 @@ function Dashboard() {
             harvestScan={data?.harvestScan ?? []}
             scanResults={data?.scanResults ?? []}
             uoaAlerts={data?.uoaAlerts ?? []}
+            gexRegime={data?.gexRegime ?? []}
             loading={loading && !data}
           />
         );

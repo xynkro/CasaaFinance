@@ -2156,6 +2156,51 @@ class PaperBenchmarkRow:
 
 
 @dataclass
+class GexRegimeRow:
+    """Daily dealer Gamma Exposure regime per index/ETF (SPY, QQQ).
+
+    Read by the PWA (pre-market banner) and the paper executor (premium-selling
+    gate): positive gamma → vol suppressed → friendly for CSP/CC/credit spreads;
+    negative gamma → gap risk → sell premium with caution. See src/gex.py.
+    """
+    TAB_NAME = "gex_regime"
+    HEADERS = [
+        "date", "symbol", "spot",
+        "net_gex",            # net dealer dollar-gamma ($ per 1% move; calls +, puts −)
+        "gamma_flip",         # zero-gamma spot level (0 if none found)
+        "flip_distance_pct",  # (spot − flip) / spot * 100
+        "call_wall",          # largest call-gamma strike at/above spot (resistance)
+        "put_wall",           # largest put-gamma strike at/below spot (support)
+        "regime",             # POSITIVE_PINNED | NEGATIVE_TREND | NEUTRAL
+        "premium_gate",       # SELL_OK | SELL_CAUTION | NORMAL
+        "note",
+        "updated_at",
+    ]
+
+    date: str
+    symbol: str
+    spot: float
+    net_gex: float
+    gamma_flip: float
+    flip_distance_pct: float
+    call_wall: float
+    put_wall: float
+    regime: str
+    premium_gate: str
+    note: str = ""
+    updated_at: str = ""
+
+    def to_row(self) -> List[str]:
+        return [
+            self.date, self.symbol, _num(self.spot, 2),
+            _num(self.net_gex, 0), _num(self.gamma_flip, 2),
+            _num(self.flip_distance_pct, 2),
+            _num(self.call_wall, 2), _num(self.put_wall, 2),
+            self.regime, self.premium_gate, self.note, self.updated_at,
+        ]
+
+
+@dataclass
 class HarvestScanRow:
     """Premium Harvest scanner output — one row per candidate per day.
 
