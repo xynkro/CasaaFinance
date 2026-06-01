@@ -26,6 +26,7 @@ import math
 from datetime import date, datetime
 from typing import Any, Optional
 
+from src.schema import PNL_MODEL_PREMIUM
 from src.wheel_continuation import bs_delta
 
 
@@ -328,13 +329,26 @@ _half_kelly_size = _fractional_kelly_size
 # realized history. win_rate is unitless; avg_win/avg_loss encode the payoff
 # RATIO only (the Kelly formula uses avg_win/avg_loss solely through their
 # ratio b = avg_win/avg_loss).
-KELLY_PRIOR_WIN_RATE = 0.70
+# Prior must be SELF-CONSISTENT: the Kelly fraction f = win - (1-win)/b (b =
+# avg_win/avg_loss) has to be POSITIVE, or the cap clamps to $0 and every
+# candidate is flagged "OVERSIZED" until 20+ realized trades exist — making the
+# sizing signal inert. With win 0.75 / payoff 0.50/1.00 (b=0.5): breakeven win =
+# 1/(1+b) = 0.667, so f = 0.75 - 0.25/0.5 = 0.25 → ×KELLY_FRACTION(0.10) = 2.5%
+# of account, safely under the 5% MAX_POSITION_PCT. Reflects managed short
+# premium (close ~50% of credit; ~1× credit avg loss; ~75% win rate). The thin,
+# honest edge: size stays small until realized VRP data earns more.
+KELLY_PRIOR_WIN_RATE = 0.75
 KELLY_PRIOR_AVG_WIN = 0.50
-KELLY_PRIOR_AVG_LOSS = 1.50
+KELLY_PRIOR_AVG_LOSS = 1.00
 KELLY_MIN_SAMPLES = 20    # need this many closed gains+losses before trusting
 KELLY_MIN_LOSSES = 5      # ...and at least this many LOSSES (fat tails need them)
 KELLY_SHRINK_K = 20       # shrinkage constant: measured weight = n / (n + k)
 KELLY_SCRATCH_EPS = 0.1   # |pnl%| below this is treated as scratch (breakeven)
+# Live sizing consumes ONLY premium-inclusive outcome rows. Legacy stock-proxy
+# rows (pre-fix, empty/old pnl_model) carry mis-stated P&L sign/magnitude, so
+# they are excluded rather than blended — the loop falls back to the prior until
+# enough premium-inclusive history accumulates. See src/schema.PNL_MODEL_*.
+KELLY_ACCEPT_PNL_MODELS = frozenset({PNL_MODEL_PREMIUM})
 
 
 def realized_kelly_inputs(
@@ -346,12 +360,18 @@ def realized_kelly_inputs(
     min_samples: int = KELLY_MIN_SAMPLES,
     min_losses: int = KELLY_MIN_LOSSES,
     shrink_k: int = KELLY_SHRINK_K,
+    accept_pnl_models: frozenset[str] | set[str] | None = None,
 ) -> tuple[float, float, float, int, str]:
     """
     Derive (win_rate, avg_win, avg_loss) for a strategy from realized
     signal_outcomes rows, shrunk toward `prior` by sample size.
 
-    Each row needs keys: strategy, outcome_pnl_pct.
+    Each row needs keys: strategy, outcome_pnl_pct (optionally pnl_model).
+
+    accept_pnl_models — when provided, only rows whose `pnl_model` is in the set
+    are counted (the live path passes KELLY_ACCEPT_PNL_MODELS to consume only
+    premium-inclusive rows and skip legacy stock-proxy rows). Default None counts
+    every row regardless of version, preserving the bare (strategy, pnl) contract.
 
     CRITICAL — partition by P&L SIGN, not the upstream WIN/LOSS label. A
     strategy's "win" label is NOT the same as a profitable trade: signal_feedback
@@ -384,6 +404,9 @@ def realized_kelly_inputs(
     for r in outcome_rows or []:
         if str(r.get("strategy", "")).upper() != strategy.upper():
             continue
+        if accept_pnl_models is not None and \
+                str(r.get("pnl_model", "")).strip() not in accept_pnl_models:
+            continue          # skip legacy / unversioned rows when a filter is set
         try:
             pnl = float(r.get("outcome_pnl_pct", 0) or 0)
         except (TypeError, ValueError):
@@ -438,9 +461,11 @@ def scan_watchlist(
       - Post-Earnings IV Crush: boost recently-reported tickers with IV collapse
 
     outcome_rows: optional signal_outcomes rows (dicts with strategy,
-      strategy_outcome, outcome_pnl_pct). When supplied, per-strategy Kelly
-      inputs are derived from realized results (shrunk to prior); otherwise the
-      tastytrade-style prior is used for both CSP and CC.
+      outcome_pnl_pct, pnl_model). When supplied, per-strategy Kelly inputs are
+      derived from realized results (shrunk to prior); otherwise the
+      tastytrade-style prior is used for both CSP and CC. Only premium-inclusive
+      rows (pnl_model in KELLY_ACCEPT_PNL_MODELS) are consumed — legacy stock-proxy
+      rows are skipped, so the prior holds until enough corrected history exists.
     """
     results = []
 
@@ -453,8 +478,10 @@ def scan_watchlist(
 
     # Per-strategy Kelly inputs from realized outcomes (shrunk to prior).
     # Falls back to the tastytrade-style prior when history is thin.
-    csp_wr, csp_aw, csp_al, csp_n, csp_src = realized_kelly_inputs("CSP", outcome_rows)
-    cc_wr, cc_aw, cc_al, cc_n, cc_src = realized_kelly_inputs("CC", outcome_rows)
+    csp_wr, csp_aw, csp_al, csp_n, csp_src = realized_kelly_inputs(
+        "CSP", outcome_rows, accept_pnl_models=KELLY_ACCEPT_PNL_MODELS)
+    cc_wr, cc_aw, cc_al, cc_n, cc_src = realized_kelly_inputs(
+        "CC", outcome_rows, accept_pnl_models=KELLY_ACCEPT_PNL_MODELS)
     kelly_max_csp = _fractional_kelly_size(
         csp_wr, csp_aw, csp_al, total_account_value,
     ) if total_account_value > 0 else 0

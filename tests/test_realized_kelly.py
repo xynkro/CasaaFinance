@@ -23,6 +23,19 @@ def test_prior_when_no_data():
     assert n == 0
 
 
+def test_prior_yields_positive_subcap_size():
+    """Regression (A1): the prior must produce a POSITIVE Kelly size under the
+    hard cap — not $0, which would clamp the cap and flag EVERY candidate
+    'OVERSIZED' on thin history, making the sizing signal inert."""
+    from src.option_scanner import (
+        realized_kelly_inputs, _fractional_kelly_size, MAX_POSITION_PCT)
+    wr, aw, al, n, src = realized_kelly_inputs("CSP", None)
+    assert src == "prior"
+    size = _fractional_kelly_size(wr, aw, al, 100_000.0)
+    assert size > 0, "prior must yield positive Kelly, not $0"
+    assert size <= 100_000 * MAX_POSITION_PCT
+
+
 def test_prior_when_below_min_samples():
     from src.option_scanner import realized_kelly_inputs
     # Only 5 closed trades — below the 20 min
@@ -83,8 +96,11 @@ def test_cc_negative_win_pnl_does_not_inflate_size():
     assert src == "prior"
     assert aw > 0  # never a negative avg_win that trips the max-size guard
     size = _fractional_kelly_size(wr, aw, al, 100_000.0)
-    # Prior is a negative-edge bet → Kelly clamps to 0, NOT the 5% max.
-    assert size == 0.0
+    # Falls back to the (positive, capped) prior — NOT an inflated realized bet.
+    prior_size = _fractional_kelly_size(
+        *realized_kelly_inputs("CSP", None)[:3], 100_000.0)
+    assert size == prior_size
+    assert size <= 100_000 * 0.05
 
 
 def test_cc_mixed_outcomes_size_sanely():
@@ -101,7 +117,9 @@ def test_cc_mixed_outcomes_size_sanely():
     assert src == "realized"
     assert n == 33
     assert aw > 0                       # payoff ratio strictly positive
-    assert wr < 0.55                    # only 15/33 trades actually profitable
+    # Only 15/33 trades actually profitable → blended win rate pulled well below
+    # the 0.75 prior (exact value depends on shrinkage weight).
+    assert wr < 0.60
     size = _fractional_kelly_size(wr, aw, al, 100_000.0)
     assert size <= 100_000 * 0.05       # never exceeds the hard cap
 
@@ -138,3 +156,28 @@ def test_scratch_excluded():
               "outcome_pnl_pct": 0.0} for _ in range(50)]
     wr, aw, al, n, src = realized_kelly_inputs("CSP", rows)
     assert n == 30  # scratch excluded
+
+
+def test_pnl_model_filter():
+    """accept_pnl_models gates rows by outcome_pnl_pct semantics version: the
+    live path counts ONLY premium-inclusive rows (legacy stock-proxy rows carry
+    mis-stated P&L and must never be blended); the default (None) counts all."""
+    from src.option_scanner import realized_kelly_inputs, KELLY_ACCEPT_PNL_MODELS
+    from src.schema import PNL_MODEL_PREMIUM, PNL_MODEL_LEGACY
+    rows = [{"strategy": "CSP", "outcome_pnl_pct": 2.0, "pnl_model": PNL_MODEL_PREMIUM}
+            for _ in range(24)]
+    rows += [{"strategy": "CSP", "outcome_pnl_pct": -8.0, "pnl_model": PNL_MODEL_PREMIUM}
+             for _ in range(6)]
+    rows += [{"strategy": "CSP", "outcome_pnl_pct": 2.0, "pnl_model": PNL_MODEL_LEGACY}
+             for _ in range(50)]                                   # legacy — skipped
+    rows += [{"strategy": "CSP", "outcome_pnl_pct": 2.0} for _ in range(50)]  # unversioned
+
+    # Live filter: only the 30 premium_v2 rows are counted.
+    _, _, _, n_filtered, src_filtered = realized_kelly_inputs(
+        "CSP", rows, accept_pnl_models=KELLY_ACCEPT_PNL_MODELS)
+    assert n_filtered == 30
+    assert src_filtered == "realized"
+
+    # No filter (back-compat): every row with a parseable pnl counts.
+    _, _, _, n_all, _ = realized_kelly_inputs("CSP", rows)
+    assert n_all == 130
