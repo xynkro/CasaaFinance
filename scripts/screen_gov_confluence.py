@@ -70,12 +70,35 @@ def _fetch_ttm_revenue(ticker: str) -> float | None:
     return _fetch_fundamentals(ticker)[0]
 
 
-# Materiality thresholds (fraction of TTM revenue, falling back to market cap):
-# a contract that is a large slice of a company's revenue is a real catalyst;
-# one that is a rounding error won't move the stock.
-_MAT_HUGE = 0.20        # ≥20% → HUGE
-_MAT_MATERIAL = 0.05    # ≥5%  → MATERIAL
-_MAT_NOTABLE = 0.01     # ≥1%  → NOTABLE
+# Materiality thresholds. Two different yardsticks, because the two kinds of
+# "smart money" move a stock through different mechanisms:
+#   • A CONTRACT is a fundamental catalyst — it adds revenue. Size it vs TTM
+#     revenue (falling back to market cap when revenue is unknown).
+#   • INSIDER / CONGRESS buying is an equity FLOW — it's only stock-moving if
+#     it's a meaningful slice of the company's market cap. A senator's $50k
+#     buy on a $4T mega-cap is a rounding error; an insider cluster buying 1%
+#     of a small-cap's float is a real flow.
+# A contract = 20% of revenue is enormous; an equity flow = 1% of market cap is
+# already enormous, so the flow bands sit an order of magnitude lower.
+_MAT_REV_HUGE = 0.20        # contract ≥20% of revenue → HUGE
+_MAT_REV_MATERIAL = 0.05    # ≥5%  → MATERIAL
+_MAT_REV_NOTABLE = 0.01     # ≥1%  → NOTABLE
+_MAT_CAP_HUGE = 0.01        # flow ≥1% of market cap → HUGE
+_MAT_CAP_MATERIAL = 0.003   # ≥0.3% → MATERIAL
+_MAT_CAP_NOTABLE = 0.001    # ≥0.1% → NOTABLE
+
+_MAT_LABELS = ["IMMATERIAL", "NOTABLE", "MATERIAL", "HUGE"]
+
+
+def _severity(value: float, huge: float, material: float, notable: float) -> int:
+    """Map a ratio onto 0..3 (IMMATERIAL..HUGE) against three thresholds."""
+    if value >= huge:
+        return 3
+    if value >= material:
+        return 2
+    if value >= notable:
+        return 1
+    return 0
 
 
 def compute_materiality(
@@ -83,37 +106,55 @@ def compute_materiality(
     insider_usd: float,
     ttm_revenue: float | None,
     market_cap: float | None,
+    congress_usd: float = 0.0,
 ) -> dict:
     """Size the bet against the company so the user can judge stock-impact.
 
-    Returns {contract_pct_rev, contract_pct_mktcap, insider_pct_mktcap,
-             materiality}. The label is driven by the contract's revenue
-    impact (the clearest "will it move the stock" measure for a contract),
-    falling back to market-cap impact when revenue is unknown.
+    Returns the per-leg ratios, the company's raw size (so the PWA can show
+    "Company: $4.6T cap / $451B rev"), and a single `materiality` label that
+    is the more material of two views:
+      • the contract's revenue impact (fundamental catalyst), and
+      • the insider+congress flow vs market cap (equity-flow impact).
+    Every signal with activity and a known denominator gets a label — a tiny
+    Congress buy on a mega-cap correctly reads IMMATERIAL ("won't move it").
+    Label is "" only when the company's size couldn't be fetched.
     """
+    contract_usd = contract_usd or 0.0
+    insider_usd = insider_usd or 0.0
+    congress_usd = congress_usd or 0.0
     rev = ttm_revenue if (ttm_revenue and ttm_revenue > 0) else 0.0
     cap = market_cap if (market_cap and market_cap > 0) else 0.0
     c_pct_rev = (contract_usd / rev) if rev > 0 else 0.0
     c_pct_cap = (contract_usd / cap) if cap > 0 else 0.0
     i_pct_cap = (insider_usd / cap) if cap > 0 else 0.0
+    cg_pct_cap = (congress_usd / cap) if cap > 0 else 0.0
+    flow_pct_cap = ((insider_usd + congress_usd) / cap) if cap > 0 else 0.0
 
-    drive = c_pct_rev if c_pct_rev > 0 else c_pct_cap
-    if contract_usd <= 0:
-        label = ""                       # no contract → no contract-materiality
-    elif drive >= _MAT_HUGE:
-        label = "HUGE"
-    elif drive >= _MAT_MATERIAL:
-        label = "MATERIAL"
-    elif drive >= _MAT_NOTABLE:
-        label = "NOTABLE"
-    elif drive > 0:
-        label = "IMMATERIAL"
+    # Contract severity: vs revenue, falling back to market cap.
+    contract_drive = c_pct_rev if c_pct_rev > 0 else c_pct_cap
+    sev_contract = _severity(
+        contract_drive, _MAT_REV_HUGE, _MAT_REV_MATERIAL, _MAT_REV_NOTABLE,
+    )
+    # Equity-flow severity: insider + congress buying vs market cap.
+    sev_flow = _severity(
+        flow_pct_cap, _MAT_CAP_HUGE, _MAT_CAP_MATERIAL, _MAT_CAP_NOTABLE,
+    )
+
+    has_activity = (contract_usd > 0) or (insider_usd > 0) or (congress_usd > 0)
+    has_denominator = (rev > 0) or (cap > 0)
+    if has_activity and has_denominator:
+        label = _MAT_LABELS[max(sev_contract, sev_flow)]
     else:
-        label = ""                       # contract present but no denominator
+        label = ""                       # no activity, or size unknown
+
     return {
         "contract_pct_rev": round(c_pct_rev, 4),
         "contract_pct_mktcap": round(c_pct_cap, 4),
         "insider_pct_mktcap": round(i_pct_cap, 4),
+        "congress_pct_mktcap": round(cg_pct_cap, 4),
+        "flow_pct_mktcap": round(flow_pct_cap, 4),
+        "market_cap": cap,
+        "ttm_revenue": rev,
         "materiality": label,
     }
 
@@ -965,6 +1006,7 @@ def _build_signal_rows(
         contract_score, impact_pct = _score_contract(ts, ttm_revenue=ttm_rev)
         mat = compute_materiality(
             ts.contract_total_30d, ts.insider_value_total, ttm_rev, mkt_cap,
+            congress_usd=ts.congress_amount_total,
         )
         congress_score = _score_congress(ts)
         insider_score = _score_insider(ts)
@@ -1020,6 +1062,10 @@ def _build_signal_rows(
             insider_usd=ts.insider_value_total,
             insider_pct_mktcap=mat["insider_pct_mktcap"],
             materiality=mat["materiality"],
+            market_cap=mat["market_cap"],
+            ttm_revenue=mat["ttm_revenue"],
+            congress_usd=ts.congress_amount_total,
+            congress_pct_mktcap=mat["congress_pct_mktcap"],
         ))
     out.sort(key=lambda r: r.confluence_score, reverse=True)
     return out

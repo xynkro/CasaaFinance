@@ -147,9 +147,21 @@ function SignalRow({ row }: { row: GovConfluenceRow }) {
               }`}>{invScore}</div>
             </div>
           </div>
-          {(Number(row.contract_usd) > 0 || Number(row.insider_usd) > 0) && (
+          {(Number(row.contract_usd) > 0 ||
+            Number(row.insider_usd) > 0 ||
+            Number(row.congress_usd) > 0 ||
+            Number(row.market_cap) > 0) && (
             <div className="text-[length:var(--t-2xs)] text-slate-400 space-y-0.5 pt-0.5">
               <div className="text-slate-600 uppercase tracking-wide">Size vs company</div>
+              {Number(row.market_cap) > 0 && (
+                <div className="text-slate-400">
+                  <span className="text-slate-500">Company </span>
+                  <span className="font-semibold text-slate-200 tabular-nums">{fmtUsd(row.market_cap)} cap</span>
+                  {Number(row.ttm_revenue) > 0 && (
+                    <span className="text-slate-500"> · {fmtUsd(row.ttm_revenue)} TTM rev</span>
+                  )}
+                </div>
+              )}
               {Number(row.contract_usd) > 0 && (
                 <div>
                   <span className="text-slate-500">Contract </span>
@@ -166,9 +178,22 @@ function SignalRow({ row }: { row: GovConfluenceRow }) {
                 <div>
                   <span className="text-slate-500">Insider buys </span>
                   <span className="font-semibold text-slate-200 tabular-nums">{fmtUsd(row.insider_usd)}</span>
-                  {fmtPct(row.insider_pct_mktcap) && (
+                  {fmtPct(row.insider_pct_mktcap) ? (
                     <span className="text-slate-500"> · {fmtPct(row.insider_pct_mktcap)} of mkt cap</span>
-                  )}
+                  ) : Number(row.market_cap) > 0 ? (
+                    <span className="text-slate-600"> · &lt;0.1% of mkt cap</span>
+                  ) : null}
+                </div>
+              )}
+              {Number(row.congress_usd) > 0 && (
+                <div>
+                  <span className="text-slate-500">Congress buys </span>
+                  <span className="font-semibold text-slate-200 tabular-nums">{fmtUsd(row.congress_usd)}</span>
+                  {fmtPct(row.congress_pct_mktcap) ? (
+                    <span className="text-slate-500"> · {fmtPct(row.congress_pct_mktcap)} of mkt cap</span>
+                  ) : Number(row.market_cap) > 0 ? (
+                    <span className="text-slate-600"> · &lt;0.1% of mkt cap — informational, not a flow</span>
+                  ) : null}
                 </div>
               )}
             </div>

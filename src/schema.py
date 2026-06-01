@@ -2020,6 +2020,12 @@ class GovConfluenceSignalRow:
         "insider_usd",           # 30d insider buy total ($)
         "insider_pct_mktcap",    # insider_usd / market cap (fraction)
         "materiality",           # HUGE | MATERIAL | NOTABLE | IMMATERIAL | ""
+        # Company size + Congress flow (appended; back-compatible) so the PWA
+        # can show the bet relative to the company's actual valuation.
+        "market_cap",            # company market cap ($), 0 if unknown
+        "ttm_revenue",           # trailing-twelve-month revenue ($), 0 if unknown
+        "congress_usd",          # 60d Congress buy total ($, midpoint of ranges)
+        "congress_pct_mktcap",   # congress_usd / market cap (fraction)
     ]
 
     date: str
@@ -2044,6 +2050,10 @@ class GovConfluenceSignalRow:
     insider_usd: float = 0.0           # 30d insider buy total ($)
     insider_pct_mktcap: float = 0.0    # insider_usd / market cap (fraction)
     materiality: str = ""              # HUGE | MATERIAL | NOTABLE | IMMATERIAL | ""
+    market_cap: float = 0.0            # company market cap ($), 0 if unknown
+    ttm_revenue: float = 0.0           # TTM revenue ($), 0 if unknown
+    congress_usd: float = 0.0          # 60d Congress buy total ($)
+    congress_pct_mktcap: float = 0.0   # congress_usd / market cap (fraction)
 
     def to_row(self) -> List[str]:
         return [
@@ -2068,6 +2078,10 @@ class GovConfluenceSignalRow:
             _num(self.insider_usd, 0),
             _num(self.insider_pct_mktcap, 4),
             self.materiality,
+            _num(self.market_cap, 0),
+            _num(self.ttm_revenue, 0),
+            _num(self.congress_usd, 0),
+            _num(self.congress_pct_mktcap, 4),
         ]
 
 

@@ -751,6 +751,10 @@ export interface GovConfluenceRow {
   insider_usd?: string;           // 30d insider buy total ($)
   insider_pct_mktcap?: string;    // insider_usd / market cap (fraction)
   materiality?: string;           // HUGE | MATERIAL | NOTABLE | IMMATERIAL | ""
+  market_cap?: string;            // company market cap ($), 0 if unknown
+  ttm_revenue?: string;           // TTM revenue ($), 0 if unknown
+  congress_usd?: string;          // 60d Congress buy total ($)
+  congress_pct_mktcap?: string;   // congress_usd / market cap (fraction)
 }
 
 export interface AlpacaSnapshotRow {

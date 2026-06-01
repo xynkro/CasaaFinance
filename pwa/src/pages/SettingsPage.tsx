@@ -628,6 +628,7 @@ const SAFE_WORKFLOWS: { file: string; label: string }[] = [
   { file: "tail-hedge.yml", label: "Tail Hedge" },
   { file: "fetch-congress-trades.yml", label: "Congress Trades" },
   { file: "fetch-gov-contracts.yml", label: "Gov Contracts" },
+  { file: "screen-gov-confluence.yml", label: "Gov Confluence" },
   { file: "finnhub-calendars.yml", label: "Calendars" },
   { file: "options-refresh.yml", label: "Live Prices" },
 ];
