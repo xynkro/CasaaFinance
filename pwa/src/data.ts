@@ -744,6 +744,13 @@ export interface GovConfluenceRow {
   contributing_insider_buys: string;
   updated_at: string;
   investment_score?: string;
+  // Materiality — how big the bet is vs the company (judge stock-impact)
+  contract_usd?: string;          // 30d contract award total ($)
+  contract_pct_rev?: string;      // contract_usd / TTM revenue (fraction)
+  contract_pct_mktcap?: string;   // contract_usd / market cap (fraction)
+  insider_usd?: string;           // 30d insider buy total ($)
+  insider_pct_mktcap?: string;    // insider_usd / market cap (fraction)
+  materiality?: string;           // HUGE | MATERIAL | NOTABLE | IMMATERIAL | ""
 }
 
 export interface AlpacaSnapshotRow {

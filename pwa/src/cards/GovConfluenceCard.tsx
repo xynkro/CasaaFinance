@@ -8,6 +8,38 @@ function fmtScore(v: string | number): number {
   return isNaN(n) ? 0 : Math.round(n);
 }
 
+function fmtUsd(v?: string): string {
+  const n = Number(v);
+  if (!n || isNaN(n)) return "";
+  if (Math.abs(n) >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  if (Math.abs(n) >= 1e6) return `$${(n / 1e6).toFixed(0)}M`;
+  if (Math.abs(n) >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+function fmtPct(v?: string): string {
+  const n = Number(v);
+  if (!n || isNaN(n)) return "";
+  if (n < 0.001) return "<0.1%";
+  return `${(n * 100).toFixed(n < 0.1 ? 1 : 0)}%`;
+}
+
+// Materiality: HUGE/MATERIAL = green (can move the stock), NOTABLE = amber,
+// IMMATERIAL = muted (won't move it).
+function MaterialityBadge({ label }: { label?: string }) {
+  if (!label) return null;
+  const c =
+    label === "HUGE" ? "text-emerald-300 bg-emerald-500/20 border-emerald-500/40"
+    : label === "MATERIAL" ? "text-emerald-400 bg-emerald-500/15 border-emerald-500/30"
+    : label === "NOTABLE" ? "text-amber-400 bg-amber-500/15 border-amber-500/30"
+    : "text-slate-500 bg-slate-500/10 border-slate-500/20";
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-bold border ${c}`}>
+      {label}
+    </span>
+  );
+}
+
 function TierBadge({ tier }: { tier: string }) {
   if (!tier) return null;
   const color = tier === "A"
@@ -65,6 +97,7 @@ function SignalRow({ row }: { row: GovConfluenceRow }) {
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[length:var(--t-sm)] font-bold text-white">{row.ticker}</span>
           <TierBadge tier={row.tier} />
+          <MaterialityBadge label={row.materiality} />
           <InvestBadge value={invScore} />
           {row.recommended_strategy && (
             <span className="text-[length:var(--t-2xs)] font-semibold text-indigo-300 uppercase">
@@ -114,6 +147,32 @@ function SignalRow({ row }: { row: GovConfluenceRow }) {
               }`}>{invScore}</div>
             </div>
           </div>
+          {(Number(row.contract_usd) > 0 || Number(row.insider_usd) > 0) && (
+            <div className="text-[length:var(--t-2xs)] text-slate-400 space-y-0.5 pt-0.5">
+              <div className="text-slate-600 uppercase tracking-wide">Size vs company</div>
+              {Number(row.contract_usd) > 0 && (
+                <div>
+                  <span className="text-slate-500">Contract </span>
+                  <span className="font-semibold text-slate-200 tabular-nums">{fmtUsd(row.contract_usd)}</span>
+                  {fmtPct(row.contract_pct_rev) && (
+                    <span className="text-slate-400"> · {fmtPct(row.contract_pct_rev)} of TTM rev</span>
+                  )}
+                  {fmtPct(row.contract_pct_mktcap) && (
+                    <span className="text-slate-500"> · {fmtPct(row.contract_pct_mktcap)} of mkt cap</span>
+                  )}
+                </div>
+              )}
+              {Number(row.insider_usd) > 0 && (
+                <div>
+                  <span className="text-slate-500">Insider buys </span>
+                  <span className="font-semibold text-slate-200 tabular-nums">{fmtUsd(row.insider_usd)}</span>
+                  {fmtPct(row.insider_pct_mktcap) && (
+                    <span className="text-slate-500"> · {fmtPct(row.insider_pct_mktcap)} of mkt cap</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           {row.recommended_action && (
             <p className="text-[length:var(--t-2xs)] text-slate-500">{row.recommended_action}</p>
           )}

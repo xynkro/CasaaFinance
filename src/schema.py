@@ -2012,6 +2012,14 @@ class GovConfluenceSignalRow:
         "contributing_insider_buys",
         "updated_at",
         "investment_score",
+        # Materiality — how big is the bet vs the company, so you can judge
+        # whether it can actually move the stock (appended; back-compatible).
+        "contract_usd",          # 30d contract award total ($)
+        "contract_pct_rev",      # contract_usd / TTM revenue (fraction)
+        "contract_pct_mktcap",   # contract_usd / market cap (fraction)
+        "insider_usd",           # 30d insider buy total ($)
+        "insider_pct_mktcap",    # insider_usd / market cap (fraction)
+        "materiality",           # HUGE | MATERIAL | NOTABLE | IMMATERIAL | ""
     ]
 
     date: str
@@ -2030,6 +2038,12 @@ class GovConfluenceSignalRow:
     contributing_insider_buys: str = ""  # JSON array of insider tx ids
     updated_at: str = ""
     investment_score: float = 0.0  # composite: 40% confluence + 30% fundamental + 30% technical
+    contract_usd: float = 0.0          # 30d contract award total ($)
+    contract_pct_rev: float = 0.0      # contract_usd / TTM revenue (fraction)
+    contract_pct_mktcap: float = 0.0   # contract_usd / market cap (fraction)
+    insider_usd: float = 0.0           # 30d insider buy total ($)
+    insider_pct_mktcap: float = 0.0    # insider_usd / market cap (fraction)
+    materiality: str = ""              # HUGE | MATERIAL | NOTABLE | IMMATERIAL | ""
 
     def to_row(self) -> List[str]:
         return [
@@ -2048,6 +2062,12 @@ class GovConfluenceSignalRow:
             self.contributing_insider_buys,
             self.updated_at,
             _num(self.investment_score, 1),
+            _num(self.contract_usd, 0),
+            _num(self.contract_pct_rev, 4),
+            _num(self.contract_pct_mktcap, 4),
+            _num(self.insider_usd, 0),
+            _num(self.insider_pct_mktcap, 4),
+            self.materiality,
         ]
 
 

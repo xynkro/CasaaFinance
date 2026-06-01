@@ -42,21 +42,80 @@ from src import schema as S    # noqa: E402
 
 log = logging.getLogger(__name__)
 
-_ttm_revenue_cache: dict[str, float | None] = {}
+_fundamentals_cache: dict[str, tuple[float | None, float | None]] = {}
 
 
-def _fetch_ttm_revenue(ticker: str) -> float | None:
-    """Fetch trailing-twelve-month revenue via yfinance. Returns None on failure."""
-    if ticker in _ttm_revenue_cache:
-        return _ttm_revenue_cache[ticker]
+def _fetch_fundamentals(ticker: str) -> tuple[float | None, float | None]:
+    """Fetch (TTM revenue, market cap) via yfinance in one .info call.
+    Either element is None on failure."""
+    if ticker in _fundamentals_cache:
+        return _fundamentals_cache[ticker]
+    rev: float | None = None
+    cap: float | None = None
     try:
         import yfinance as yf
         info = yf.Ticker(ticker).info
-        rev = info.get("totalRevenue") or info.get("revenue")
-        _ttm_revenue_cache[ticker] = float(rev) if rev else None
+        _rev = info.get("totalRevenue") or info.get("revenue")
+        rev = float(_rev) if _rev else None
+        _cap = info.get("marketCap")
+        cap = float(_cap) if _cap else None
     except Exception:
-        _ttm_revenue_cache[ticker] = None
-    return _ttm_revenue_cache[ticker]
+        pass
+    _fundamentals_cache[ticker] = (rev, cap)
+    return rev, cap
+
+
+def _fetch_ttm_revenue(ticker: str) -> float | None:
+    """Backward-compatible wrapper — TTM revenue only."""
+    return _fetch_fundamentals(ticker)[0]
+
+
+# Materiality thresholds (fraction of TTM revenue, falling back to market cap):
+# a contract that is a large slice of a company's revenue is a real catalyst;
+# one that is a rounding error won't move the stock.
+_MAT_HUGE = 0.20        # ≥20% → HUGE
+_MAT_MATERIAL = 0.05    # ≥5%  → MATERIAL
+_MAT_NOTABLE = 0.01     # ≥1%  → NOTABLE
+
+
+def compute_materiality(
+    contract_usd: float,
+    insider_usd: float,
+    ttm_revenue: float | None,
+    market_cap: float | None,
+) -> dict:
+    """Size the bet against the company so the user can judge stock-impact.
+
+    Returns {contract_pct_rev, contract_pct_mktcap, insider_pct_mktcap,
+             materiality}. The label is driven by the contract's revenue
+    impact (the clearest "will it move the stock" measure for a contract),
+    falling back to market-cap impact when revenue is unknown.
+    """
+    rev = ttm_revenue if (ttm_revenue and ttm_revenue > 0) else 0.0
+    cap = market_cap if (market_cap and market_cap > 0) else 0.0
+    c_pct_rev = (contract_usd / rev) if rev > 0 else 0.0
+    c_pct_cap = (contract_usd / cap) if cap > 0 else 0.0
+    i_pct_cap = (insider_usd / cap) if cap > 0 else 0.0
+
+    drive = c_pct_rev if c_pct_rev > 0 else c_pct_cap
+    if contract_usd <= 0:
+        label = ""                       # no contract → no contract-materiality
+    elif drive >= _MAT_HUGE:
+        label = "HUGE"
+    elif drive >= _MAT_MATERIAL:
+        label = "MATERIAL"
+    elif drive >= _MAT_NOTABLE:
+        label = "NOTABLE"
+    elif drive > 0:
+        label = "IMMATERIAL"
+    else:
+        label = ""                       # contract present but no denominator
+    return {
+        "contract_pct_rev": round(c_pct_rev, 4),
+        "contract_pct_mktcap": round(c_pct_cap, 4),
+        "insider_pct_mktcap": round(i_pct_cap, 4),
+        "materiality": label,
+    }
 
 # Lookback windows (per design doc §3)
 CONTRACT_LOOKBACK_DAYS = 30
@@ -902,8 +961,11 @@ def _build_signal_rows(
     contracts_by_ticker = contracts_by_ticker or {}
 
     for ticker, ts in stats.items():
-        ttm_rev = _fetch_ttm_revenue(ticker)
+        ttm_rev, mkt_cap = _fetch_fundamentals(ticker)
         contract_score, impact_pct = _score_contract(ts, ttm_revenue=ttm_rev)
+        mat = compute_materiality(
+            ts.contract_total_30d, ts.insider_value_total, ttm_rev, mkt_cap,
+        )
         congress_score = _score_congress(ts)
         insider_score = _score_insider(ts)
         analyst_score = _score_analyst(ts)
@@ -952,6 +1014,12 @@ def _build_signal_rows(
             contributing_insider_buys=json.dumps([b["id"] for b in ts.insider_buys[:20]]),
             updated_at=now_iso,
             investment_score=inv_score,
+            contract_usd=ts.contract_total_30d,
+            contract_pct_rev=mat["contract_pct_rev"],
+            contract_pct_mktcap=mat["contract_pct_mktcap"],
+            insider_usd=ts.insider_value_total,
+            insider_pct_mktcap=mat["insider_pct_mktcap"],
+            materiality=mat["materiality"],
         ))
     out.sort(key=lambda r: r.confluence_score, reverse=True)
     return out
