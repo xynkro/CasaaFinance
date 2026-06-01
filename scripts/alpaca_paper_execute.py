@@ -245,7 +245,11 @@ def main() -> int:
     args = ap.parse_args()
 
     # HARD PAPER GUARD — refuse to place unless the base URL is the paper endpoint.
-    base = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+    # `or` (not get-default): CI sets ALPACA_BASE_URL to an unset secret's EMPTY
+    # string → empty/missing must fail SAFE to the paper endpoint (the only
+    # supported mode), not fail CLOSED and refuse. A real non-paper URL is still
+    # refused below.
+    base = os.environ.get("ALPACA_BASE_URL") or "https://paper-api.alpaca.markets"
     if args.execute and "paper-api" not in base:
         print(f"REFUSING: ALPACA_BASE_URL is not paper-api ({base}). This tool is PAPER ONLY.")
         return 2

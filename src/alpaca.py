@@ -18,7 +18,10 @@ from typing import Literal
 
 import requests
 
-_BASE = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+# `or` (not get-default): the CI env sets ALPACA_BASE_URL to an unset secret's
+# EMPTY string, which get(key, default) returns as "" — fall back to the paper
+# endpoint on empty/missing. Paper is the only supported mode.
+_BASE = os.environ.get("ALPACA_BASE_URL") or "https://paper-api.alpaca.markets"
 
 
 def _headers() -> dict[str, str]:
