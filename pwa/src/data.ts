@@ -1476,7 +1476,17 @@ export async function fetchDashboard(): Promise<DashboardData> {
           .sort((a, b) => (b.transaction_date || b.filing_date || "").localeCompare(a.transaction_date || a.filing_date || ""));
       })(),
       uoaAlerts: latestGroup(uoaRows),
-      harvestScan: latestGroup(harvestScanRows),
+      // Harvest freshness guard: harvest_scan and scan_results are written by the
+      // SAME scan run, so they share a date on a healthy run. If harvest's latest
+      // date is OLDER than scan_results', a newer scan ran without producing any
+      // harvest picks — the harvest set is stale, so don't surface it (this is what
+      // kept showing week-old CLSK/MARA puts the gates already reject).
+      harvestScan: (() => {
+        const h = latestGroup(harvestScanRows);
+        const hDate = (h[0]?.date ?? "").slice(0, 10);
+        const sDate = (latest(scanResultRows)?.date ?? "").slice(0, 10);
+        return sDate && hDate && hDate < sDate ? [] : h;
+      })(),
       scanResults: latestGroup(scanResultRows),
       ivSurfaceScan: ivSurfaceScanRows,
       alpaca: (() => {

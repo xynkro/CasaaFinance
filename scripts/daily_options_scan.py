@@ -106,6 +106,7 @@ HARVEST_DTE_RANGE  = (25, 45)      # acceptable range
 HARVEST_MIN_YIELD  = 14.0          # annualised yield floor for harvest CSPs
 MAX_HARVEST_PICKS  = 25            # max harvest picks to sheet
 TG_HARVEST_PICKS   = 8             # max harvest picks in Telegram
+HARVEST_HISTORY_DAYS = 10          # prune harvest_scan rows older than this
 
 FALLBACK_HIGH_IV_UNIVERSE = [
     "SLV", "GDX", "COPX", "GLD", "TLT", "USO", "XLE",
@@ -2174,34 +2175,48 @@ def main() -> int:
     logger.info(f"✓ Wrote {len(scan_rows)} rows to scan_results")
 
     # ── Write to harvest_scan (discovery CSP picks for PWA Harvest page) ──
-    if harvest_picks:
-        try:
-            sh.ensure_headers(client, S.HarvestScanRow.TAB_NAME, S.HarvestScanRow.HEADERS)
-            harvest_rows: list[list[str]] = []
-            for c in harvest_picks[:MAX_HARVEST_PICKS]:
-                hrow = S.HarvestScanRow(
-                    date=today_iso, ticker=c["ticker"], strategy="HARVEST_CSP",
-                    strike=c["strike"], expiry=c["expiry"], dte=c["dte"],
-                    credit=c["premium"],
-                    annual_yield_pct=c["annual_yield_pct"],
-                    iv_rank=c["iv_rank"],
-                    conviction=c.get("_conviction", 0),
-                    underlying_last=c["underlying_last"],
-                    cash_required=c["cash_required"],
-                    breakeven=c["breakeven"],
-                    sr_context=c.get("_sr_context", ""),
-                    macro_regime=macro.get("regime", "STANDARD"),
-                    vix=macro.get("vix", 0),
-                    entry_signals=c.get("_entry_signals", "{}"),
-                    maintenance_signals=c.get("_maintenance_signals", "{}"),
-                    exit_signals=c.get("_exit_signals", "{}"),
-                    notes=c.get("notes", ""),
-                )
-                harvest_rows.append(hrow.to_row())
-            sh.append_rows(client, S.HarvestScanRow.TAB_NAME, harvest_rows)
-            logger.info(f"✓ Wrote {len(harvest_rows)} rows to harvest_scan")
-        except Exception as e:
-            logger.warning(f"  harvest_scan write failed: {e}")
+    # UNCONDITIONAL + self-pruning replace (NOT append): rewrite today's rows and
+    # drop anything older than HARVEST_HISTORY_DAYS. This runs even when there are
+    # zero qualifying picks, so a clean run CLEARS stale picks instead of leaving a
+    # week-old set frozen as "latest" — the bug that kept surfacing CLSK 10P /
+    # MARA 9P long after the delta/OTM/premium gates started rejecting them.
+    try:
+        sh.ensure_headers(client, S.HarvestScanRow.TAB_NAME, S.HarvestScanRow.HEADERS)
+        harvest_rows: list[list[str]] = []
+        for c in harvest_picks[:MAX_HARVEST_PICKS]:
+            hrow = S.HarvestScanRow(
+                date=today_iso, ticker=c["ticker"], strategy="HARVEST_CSP",
+                strike=c["strike"], expiry=c["expiry"], dte=c["dte"],
+                credit=c["premium"],
+                annual_yield_pct=c["annual_yield_pct"],
+                iv_rank=c["iv_rank"],
+                conviction=c.get("_conviction", 0),
+                underlying_last=c["underlying_last"],
+                cash_required=c["cash_required"],
+                breakeven=c["breakeven"],
+                sr_context=c.get("_sr_context", ""),
+                macro_regime=macro.get("regime", "STANDARD"),
+                vix=macro.get("vix", 0),
+                entry_signals=c.get("_entry_signals", "{}"),
+                maintenance_signals=c.get("_maintenance_signals", "{}"),
+                exit_signals=c.get("_exit_signals", "{}"),
+                notes=c.get("notes", ""),
+            )
+            harvest_rows.append(hrow.to_row())
+        ws = sh._open_sheet(client).worksheet(S.HarvestScanRow.TAB_NAME)
+        existing = ws.get_all_values()
+        header = existing[0] if existing else S.HarvestScanRow.HEADERS
+        cutoff = (date.today() - timedelta(days=HARVEST_HISTORY_DAYS)).isoformat()
+        keep = [header]
+        keep += [r for r in existing[1:]
+                 if r and r[0][:10] != today_iso and r[0][:10] >= cutoff]
+        keep += harvest_rows
+        ws.clear()
+        ws.update("A1", keep, value_input_option="USER_ENTERED")
+        logger.info(f"✓ harvest_scan: {len(harvest_rows)} fresh rows "
+                    f"(pruned stale, kept {len(keep) - 1 - len(harvest_rows)} history)")
+    except Exception as e:
+        logger.warning(f"  harvest_scan write failed: {e}")
 
     # ── Single Telegram push → Options Intel topic ────────────────────
     # Combine all candidates into one message. HARVEST_CSP shows as "CSP"
