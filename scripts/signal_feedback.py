@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT))
 from src import sheets as sh
 from src import schema as S
 from src.indicators import compute_indicators
+from src.option_pnl import csp_settle_pct, cc_settle_pct
 from src.technical_score import compute_signals, STRATEGY_WEIGHTS
 
 logger = logging.getLogger("signal_feedback")
@@ -52,8 +53,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 BUY_EVAL_DAYS = 30
 MIN_EVAL_DAYS = 5  # don't evaluate anything less than 5 days old
 
-# Outcome thresholds
-SCRATCH_THRESHOLD_PCT = 0.5  # ±0.5% of strike = scratch for options
+# Outcome thresholds — a trade within ±PNL_SCRATCH_EPS% of breakeven is a SCRATCH.
+# Defined on P&L (not price distance from the strike) so the kept premium is never
+# thrown away. Matches option_scanner.KELLY_SCRATCH_EPS so a row labelled SCRATCH
+# here is also the row Kelly drops from both buckets — one breakeven band system-wide.
+PNL_SCRATCH_EPS = 0.10
 
 # yfinance rate limiting — pause between ticker downloads
 YF_DELAY_S = 0.3
@@ -172,49 +176,50 @@ def _get_indicators_at(ticker: str, scan_date: datetime) -> dict | None:
 
 # ── Outcome evaluation ─────────────────────────────────────────────────────
 
-def _eval_csp_outcome(
-    strike: float, premium: float, price_at_eval: float, cash_required: float,
-) -> tuple[str, float]:
-    """Evaluate CSP outcome.
+def _label_by_pnl(pnl_pct: float) -> str:
+    """WIN / LOSS / SCRATCH from the SIGN of premium-inclusive P&L.
 
-    WIN = put expired OTM (price > strike).
-    LOSS = put expired ITM (price < strike).
-    Returns (outcome, pnl_pct).
+    Labelling by P&L sign (not by whether the option was assigned) is what stops
+    strategy_outcome and outcome_pnl_pct from ever contradicting each other: a
+    covered call called away above cost is a WIN (its max-profit outcome), while a
+    sideways-down CC whose drop exceeds the premium is a LOSS even though the call
+    expired worthless. Breakeven (|pnl| < eps) is SCRATCH, excluded from win-rate.
     """
-    if cash_required <= 0:
-        cash_required = strike * 100  # approximate
+    if pnl_pct > PNL_SCRATCH_EPS:
+        return "WIN"
+    if pnl_pct < -PNL_SCRATCH_EPS:
+        return "LOSS"
+    return "SCRATCH"
 
-    if price_at_eval > strike * (1 + SCRATCH_THRESHOLD_PCT / 100):
-        # OTM — put expires worthless, keep premium
-        pnl_pct = (premium * 100 / cash_required) * 100  # annualize later if needed
-        return "WIN", round(pnl_pct, 2)
-    elif price_at_eval < strike * (1 - SCRATCH_THRESHOLD_PCT / 100):
-        # ITM — assigned. Loss = strike - price - premium received
-        loss_per_share = strike - price_at_eval - premium
-        pnl_pct = (-loss_per_share * 100 / cash_required) * 100
-        return "LOSS", round(pnl_pct, 2)
-    else:
-        return "SCRATCH", 0.0
+
+def _eval_csp_outcome(
+    strike: float, premium: float, price_at_eval: float,
+) -> tuple[str, float]:
+    """Evaluate a cash-secured put as realized, premium-inclusive P&L.
+
+    outcome_pnl_pct = % of the cash-secured strike: keep the credit if the put
+    expires OTM, else the credit minus the assignment loss. WIN/LOSS/SCRATCH by
+    the SIGN of that P&L. Settlement logic is shared with backtest_scoring via
+    src/option_pnl.csp_settle_pct — one P&L model across the system.
+    """
+    pnl_pct = csp_settle_pct(strike, premium, price_at_eval)
+    return _label_by_pnl(pnl_pct), round(pnl_pct, 2)
 
 
 def _eval_cc_outcome(
-    strike: float, price_at_scan: float, price_at_eval: float,
+    strike: float, price_at_scan: float, price_at_eval: float, premium: float,
 ) -> tuple[str, float]:
-    """Evaluate CC outcome.
+    """Evaluate a covered call as realized, premium-inclusive P&L.
 
-    WIN = call expired OTM (price < strike). Keep premium + stock.
-    LOSS = call expired ITM (price > strike). Called away.
+    outcome_pnl_pct = % of the share cost basis (price_at_scan): the stock move
+    capped at the strike when called away, PLUS the premium the old stock-return
+    proxy omitted. This fixes the two inversions the proxy produced — a profitable
+    sideways-down CC the proxy logged NEGATIVE, and a called-away OTM call the proxy
+    logged as "LOSS" with POSITIVE return. Shared with backtest_scoring via
+    src/option_pnl.cc_settle_pct.
     """
-    if price_at_eval < strike * (1 - SCRATCH_THRESHOLD_PCT / 100):
-        # OTM — win
-        fwd_ret = (price_at_eval / price_at_scan - 1) * 100
-        return "WIN", round(fwd_ret, 2)
-    elif price_at_eval > strike * (1 + SCRATCH_THRESHOLD_PCT / 100):
-        # ITM — stock called away. P&L capped at strike.
-        capped_ret = (strike / price_at_scan - 1) * 100
-        return "LOSS", round(capped_ret, 2)
-    else:
-        return "SCRATCH", 0.0
+    pnl_pct = cc_settle_pct(price_at_scan, strike, premium, price_at_eval)
+    return _label_by_pnl(pnl_pct), round(pnl_pct, 2)
 
 
 def _eval_buy_outcome(
@@ -373,11 +378,11 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
             strategy = pick["strategy"]
             if strategy == "CSP":
                 outcome, pnl_pct = _eval_csp_outcome(
-                    pick["strike"], pick["premium"], price_at_eval, pick["cash_required"],
+                    pick["strike"], pick["premium"], price_at_eval,
                 )
             elif strategy == "CC":
                 outcome, pnl_pct = _eval_cc_outcome(
-                    pick["strike"], price_at_scan, price_at_eval,
+                    pick["strike"], price_at_scan, price_at_eval, pick["premium"],
                 )
             elif strategy in ("LONG_CALL", "LONG_PUT"):
                 # Simplified: LONG_CALL wins if price > strike, LONG_PUT if price < strike
@@ -437,6 +442,7 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
                 fwd_return_pct=round(fwd_ret, 2),
                 strategy_outcome=outcome,
                 outcome_pnl_pct=pnl_pct,
+                pnl_model=S.PNL_MODEL_PREMIUM,
                 sig_rsi=signals.get("rsi", 0),
                 sig_macd=signals.get("macd", 0),
                 sig_macd_cross=signals.get("macd_cross", 0),
@@ -585,6 +591,168 @@ def _build_report(
     return "\n".join(lines)
 
 
+# ── Phase 2: empirical weight calibration ───────────────────────────────────
+# The 16 signal columns in signal_outcomes map to STRATEGY_WEIGHTS keys by
+# dropping the "sig_" prefix.
+_SIG_COLS = [
+    "sig_rsi", "sig_macd", "sig_macd_cross", "sig_bb_pct_b", "sig_bb_squeeze",
+    "sig_wvf", "sig_trend", "sig_momentum", "sig_volume_spike", "sig_divergence",
+    "sig_candle", "sig_fib_support", "sig_volatility", "sig_vol_regime",
+    "sig_iv_rv_ratio", "sig_term_structure",
+]
+CALIB_MIN_PER_STRATEGY = 30   # rows needed before a strategy is calibrated
+CALIB_NOISE_ABS_R = 0.05      # |corr| below this → signal is noise
+CALIB_SIGNAL_ABS_R = 0.10     # |corr| at/above this → meaningful sign signal
+
+
+def calibrate_weights(
+    outcome_rows: list[dict],
+    min_per_strategy: int = CALIB_MIN_PER_STRATEGY,
+) -> dict:
+    """
+    Phase-2 empirical weight calibration. For each strategy with enough closed
+    outcomes, regress realized P&L on the 16 scan-time signal values and compare
+    the empirical importance of each signal to its configured STRATEGY_WEIGHTS.
+
+    Per signal it reports:
+      - corr   : univariate Pearson r vs outcome_pnl_pct (robust, primary)
+      - beta   : multivariate OLS coefficient (joint, collinearity-prone)
+      - verdict: confirmed | SIGN-FLIP | noise | weak
+      - suggested: a proposed weight = current total |weight| budget redistributed
+                   by |corr|, sign from corr. NOT applied — a proposal for review.
+    Also reports OLS R² (does the composite explain ANY variance?).
+
+    Pure: takes rows, returns a dict. Does NOT mutate STRATEGY_WEIGHTS.
+    Returns {strategy: {n, r2, signals: [...], flips: [...], noise: [...]}}.
+    """
+    import numpy as np
+
+    out: dict = {}
+    by_strat: dict[str, list[dict]] = defaultdict(list)
+    for r in outcome_rows or []:
+        strat = str(r.get("strategy", "")).upper()
+        if strat in STRATEGY_WEIGHTS:
+            by_strat[strat].append(r)
+
+    for strat, rows in by_strat.items():
+        weights = STRATEGY_WEIGHTS[strat]
+        # Build y and X from rows with a usable outcome + all signal values.
+        ys: list[float] = []
+        xs: list[list[float]] = []
+        for r in rows:
+            raw = r.get("outcome_pnl_pct", "")
+            if raw is None or raw == "":   # missing — skip (do NOT treat 0.0 as missing)
+                continue
+            try:
+                y = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if y != y:  # NaN
+                continue
+            try:
+                xrow = [float(r.get(c, "") or 0.0) for c in _SIG_COLS]
+            except (TypeError, ValueError):
+                continue
+            ys.append(y)
+            xs.append(xrow)
+
+        n = len(ys)
+        if n < min_per_strategy:
+            out[strat] = {"n": n, "r2": None, "signals": [], "flips": [],
+                          "noise": [], "skipped": f"only {n} rows (<{min_per_strategy})"}
+            continue
+
+        Y = np.array(ys, dtype=float)
+        X = np.array(xs, dtype=float)
+
+        # Univariate Pearson r per signal (zero-variance → 0).
+        corrs: dict[str, float] = {}
+        for j, col in enumerate(_SIG_COLS):
+            xj = X[:, j]
+            if xj.std() < 1e-9 or Y.std() < 1e-9:
+                corrs[col] = 0.0
+            else:
+                corrs[col] = float(np.corrcoef(xj, Y)[0, 1])
+
+        # Multivariate OLS with intercept; R² for explanatory power.
+        A = np.hstack([X, np.ones((n, 1))])
+        beta, *_ = np.linalg.lstsq(A, Y, rcond=None)
+        y_hat = A @ beta
+        ss_res = float(((Y - y_hat) ** 2).sum())
+        ss_tot = float(((Y - Y.mean()) ** 2).sum())
+        r2 = (1 - ss_res / ss_tot) if ss_tot > 1e-12 else 0.0
+
+        # Suggested reweights: redistribute the current total |weight| budget by
+        # |corr|, taking the sign from corr (the data's direction).
+        total_abs = sum(abs(w) for w in weights.values()) or 1.0
+        sum_abs_r = sum(abs(corrs[f"sig_{k}"]) for k in weights) or 1.0
+
+        signals = []
+        flips, noise = [], []
+        for k in weights:
+            col = f"sig_{k}"
+            r = corrs.get(col, 0.0)
+            b = float(beta[_SIG_COLS.index(col)])
+            w = weights[k]
+            w_sign = (w > 0) - (w < 0)
+            r_sign = (r > CALIB_SIGNAL_ABS_R) - (r < -CALIB_SIGNAL_ABS_R)
+            if abs(r) < CALIB_NOISE_ABS_R:
+                verdict = "noise"
+                noise.append(k)
+            elif w_sign and r_sign and w_sign != r_sign:
+                verdict = "SIGN-FLIP"
+                flips.append(k)
+            elif abs(r) >= CALIB_SIGNAL_ABS_R:
+                verdict = "confirmed"
+            else:
+                verdict = "weak"
+            suggested = round(total_abs * abs(r) / sum_abs_r, 1)
+            if r < 0:
+                suggested = -suggested
+            signals.append({
+                "signal": k, "weight": w, "corr": round(r, 3),
+                "beta": round(b, 4), "verdict": verdict, "suggested": suggested,
+            })
+        signals.sort(key=lambda s: abs(s["corr"]), reverse=True)
+        out[strat] = {"n": n, "r2": round(r2, 4), "signals": signals,
+                      "flips": flips, "noise": noise, "skipped": None}
+
+    return out
+
+
+def format_calibration_report(results: dict) -> str:
+    """Render calibrate_weights() output as a concise text report."""
+    lines = ["🔬 Phase-2 Weight Calibration",
+             "(empirical betas vs configured weights — PROPOSALS, not applied)",
+             "Note: CC outcome P&L is being corrected (premium-inclusive); treat",
+             "CC results as provisional until that lands.", ""]
+    if not results:
+        return "No signal_outcomes data to calibrate."
+    for strat in sorted(results):
+        res = results[strat]
+        if res.get("skipped"):
+            lines.append(f"{strat}: skipped — {res['skipped']}")
+            continue
+        r2 = res["r2"]
+        lines.append(f"━ {strat}  (n={res['n']}, OLS R²={r2:.3f})")
+        if r2 is not None and r2 < 0.02:
+            lines.append("  ⚠️ R²≈0 — signals jointly explain ~no variance (echoes the")
+            lines.append("     backtest: selection edge is weak; lean on IV/RV + term structure).")
+        if res["flips"]:
+            lines.append(f"  🔴 SIGN-FLIPS (weight points wrong way): {', '.join(res['flips'])}")
+        if res["noise"]:
+            lines.append(f"  ⚪ noise (|corr|<{CALIB_NOISE_ABS_R}): {', '.join(res['noise'])}")
+        # Top 5 by |corr|
+        lines.append("  signal            weight  corr   →suggest  verdict")
+        for s in res["signals"][:6]:
+            lines.append(
+                f"  {s['signal']:<16}{s['weight']:>+5.0f}  {s['corr']:>+5.2f}"
+                f"  {s['suggested']:>+6.1f}  {s['verdict']}"
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
 # ── Telegram ───────────────────────────────────────────────────────────────
 
 def _send_telegram(report: str):
@@ -600,14 +768,39 @@ def _send_telegram(report: str):
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 
+def run_calibration(dry: bool = False) -> str:
+    """Phase-2 standalone: read the full signal_outcomes history and report
+    empirical weight calibration. Does NOT re-evaluate picks or mutate weights."""
+    from src.sync import load_env
+    from src import sheets as sh
+    from src import schema as S
+    load_env()
+    client = sh.authenticate()
+    rows = _read_tab(client, S.SignalOutcomeRow.TAB_NAME)
+    logger.info(f"Calibration: read {len(rows)} signal_outcomes rows")
+    results = calibrate_weights(rows)
+    report = format_calibration_report(results)
+    if dry:
+        logger.info(f"[DRY] Calibration report:\n{report}")
+    else:
+        logger.info(report)
+        _send_telegram(report)
+    return report
+
+
 def main():
     ap = argparse.ArgumentParser(description="Signal Feedback Loop")
     ap.add_argument("--dry", action="store_true", help="Don't write to sheets or Telegram")
     ap.add_argument("--days", type=int, default=90, help="Lookback window in days")
     ap.add_argument("--force", action="store_true", help="Re-evaluate all picks (ignore existing outcomes)")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="Phase-2: empirical weight calibration over full history (no re-eval)")
     args = ap.parse_args()
 
-    run(dry=args.dry, lookback_days=args.days, force=args.force)
+    if args.calibrate:
+        run_calibration(dry=args.dry)
+    else:
+        run(dry=args.dry, lookback_days=args.days, force=args.force)
 
 
 if __name__ == "__main__":
