@@ -934,6 +934,14 @@ def scan_ticker(
 
     out: list[dict[str, Any]] = []
 
+    # ── BUCKET ELIGIBILITY GATE (wheel discipline) ──────────────────────────
+    # Never CSP a lottery name or leveraged ETF; never CC the compounder (core),
+    # blue-chips (no cost basis here), or leveraged ETFs. Unknown tickers default
+    # to spec_growth (eligible) so discovery-universe names flow through.
+    from src.trading_rules import cc_blocked_by_bucket, csp_blocked_by_bucket
+    csp_bucket_blocked, csp_bucket_reason = csp_blocked_by_bucket(ticker)
+    cc_bucket_blocked, cc_bucket_reason = cc_blocked_by_bucket(ticker)
+
     # ── CSP (unified: vol-adjusted OTM for discovery, static for watchlist) ──
     # EARNINGS GATE: reject CSP if earnings falls inside option DTE window.
     # Selling premium into a binary event (earnings) is the #1 CSP blowup.
@@ -941,8 +949,10 @@ def scan_ticker(
     csp_earnings_blocked = (0 <= earnings_days_away <= dte)
     if csp_earnings_blocked:
         logger.info(f"  {ticker}: CSP EARNINGS_BLOCKED — earnings in {earnings_days_away}d, option DTE={dte}d")
+    if csp_bucket_blocked:
+        logger.info(f"  {ticker}: {csp_bucket_reason}")
 
-    if not csp_earnings_blocked:
+    if not csp_earnings_blocked and not csp_bucket_blocked:
         try:
             puts = chain.puts.copy()
             puts = puts[puts["openInterest"] >= MIN_OI]
@@ -1094,8 +1104,12 @@ def scan_ticker(
         # EARNINGS GATE: skip CC if earnings falls inside the option's DTE
         # window — a gap through the short call caps the upside / forces
         # assignment, the same binary-event risk that blocks CSPs.
-        if 0 <= earnings_days_away <= dte:
-            logger.info(f"  {ticker}: CC EARNINGS_BLOCKED — earnings in {earnings_days_away}d ≤ {dte}DTE")
+        # BUCKET GATE: never CC the compounder / blue-chip / leveraged ETF.
+        cc_earnings_blocked = (0 <= earnings_days_away <= dte)
+        if cc_earnings_blocked or cc_bucket_blocked:
+            _cc_why = (f"EARNINGS_BLOCKED — earnings in {earnings_days_away}d ≤ {dte}DTE"
+                       if cc_earnings_blocked else cc_bucket_reason)
+            logger.info(f"  {ticker}: CC {_cc_why}")
             calls = chain.calls.iloc[0:0].copy()  # empty frame → no CC candidate
         else:
             calls = chain.calls.copy()

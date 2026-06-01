@@ -82,56 +82,9 @@ HARDCODED_FALLBACK = [
     "AAPL", "GOOGL", "META", "NFLX", "AMZN", "JPM", "V", "MA",
 ]
 
-# Ticker → bucket map for CC eligibility gating. Mirrors the bucket
-# semantics in src/trading_rules.py without forcing every ticker to
-# resolve — anything not listed is treated as "spec_growth" (CC-eligible
-# by default; CSP-eligible too) which is the correct conservative default
-# for a wheel-target universe.
-TICKER_BUCKET: dict[str, str] = {
-    # core (no CCs ever)
-    "SCHD": "core", "SPY": "core", "VOO": "core", "QQQ": "core",
-    "VTI": "core", "VEA": "core", "VWO": "core", "BND": "core",
-    # blue_chip (no CCs unless strike ≥ 115% cost — we exclude entirely
-    # in the screener since we don't track per-user cost basis here)
-    "AAPL": "blue_chip", "MSFT": "blue_chip", "GOOGL": "blue_chip",
-    "GOOG": "blue_chip", "AMZN": "blue_chip", "META": "blue_chip",
-    "NFLX": "blue_chip", "JPM": "blue_chip", "V": "blue_chip",
-    "MA": "blue_chip", "JNJ": "blue_chip", "PG": "blue_chip",
-    "KO": "blue_chip", "BRK-B": "blue_chip",
-    # leveraged_etf (no CCs ever — daily reset + assignment compounds)
-    "TQQQ": "leveraged_etf", "SQQQ": "leveraged_etf",
-    "SSO": "leveraged_etf", "UPRO": "leveraged_etf",
-    "SOXL": "leveraged_etf", "TNA": "leveraged_etf",
-    # commodity_etf (CCs OK on strength)
-    "GLD": "commodity_etf", "SLV": "commodity_etf", "GDX": "commodity_etf",
-    "GDXJ": "commodity_etf", "USO": "commodity_etf", "UNG": "commodity_etf",
-    "DBA": "commodity_etf", "CPER": "commodity_etf", "GLDM": "commodity_etf",
-    # quality_growth (CCs OK)
-    "AMD": "quality_growth", "NVDA": "quality_growth",
-    # spec_growth (CCs OK — this is the natural CC pool)
-    "F": "spec_growth", "T": "spec_growth", "BAC": "spec_growth",
-    "WFC": "spec_growth", "INTC": "spec_growth", "MU": "spec_growth",
-    "PYPL": "spec_growth", "U": "spec_growth", "RBLX": "spec_growth",
-    "SOFI": "spec_growth", "RIVN": "spec_growth", "AFRM": "spec_growth",
-    "SHOP": "spec_growth", "COIN": "spec_growth", "TSLA": "spec_growth",
-    "OPEN": "spec_growth", "RDDT": "spec_growth", "PLTR": "spec_growth",
-    "SQ": "spec_growth", "HIMS": "spec_growth", "SBET": "spec_growth",
-    # lottery (CSPs blocked, CCs OK)
-    "BBAI": "lottery", "BTBT": "lottery", "RCAT": "lottery",
-    "BYND": "lottery",
-    # defensive ETFs (treat as commodity_etf-like — CCs OK on strength)
-    "XLV": "commodity_etf", "XLP": "commodity_etf", "XLU": "commodity_etf",
-    "VHT": "commodity_etf", "VDC": "commodity_etf", "VPU": "commodity_etf",
-    "ITA": "commodity_etf", "KRE": "commodity_etf",
-    # volatility products — never wheel
-    "VIXM": "leveraged_etf", "UVXY": "leveraged_etf", "SVXY": "leveraged_etf",
-}
-
-
-def _bucket_for(ticker: str) -> str:
-    """Return bucket name for a ticker. Defaults to 'spec_growth' (most permissive
-    natural wheel target) when unknown."""
-    return TICKER_BUCKET.get(ticker.upper(), "spec_growth")
+# Ticker → bucket map + gates now live in src/trading_rules.py (single source
+# of truth, shared with daily_options_scan). Aliased here for backward compat.
+from src.trading_rules import TICKER_BUCKET, bucket_for as _bucket_for  # noqa: E402,F401
 
 
 # ──────────────────── Math helpers ────────────────────────────────────────
@@ -657,34 +610,12 @@ def _signal_gate(
     return False, ""
 
 
-def cc_blocked_by_bucket(ticker: str) -> tuple[bool, str]:
-    """
-    Return (blocked, reason). True if this ticker is in a bucket where CC
-    is NOT eligible (core / blue_chip / leveraged_etf). For blue_chip we
-    block here because the screener doesn't know per-user cost basis;
-    the brain can override at recommendation time if it has cost info.
-    """
-    from src.trading_rules import CC_ELIGIBLE_BUCKETS  # local import — late binding
-
-    bucket = _bucket_for(ticker)
-    if bucket == "blue_chip":
-        return True, "CC blocked: blue_chip (need strike ≥ 115% cost — brain decides)"
-    if not CC_ELIGIBLE_BUCKETS.get(bucket, True):
-        return True, f"CC blocked: {bucket} not CC-eligible"
-    return False, bucket
-
-
-def csp_blocked_by_bucket(ticker: str) -> tuple[bool, str]:
-    """
-    Return (blocked, reason). True if this ticker is in a bucket where CSP
-    is NOT eligible (lottery / leveraged_etf per CSP_ELIGIBLE_BUCKETS).
-    """
-    from src.trading_rules import CSP_ELIGIBLE_BUCKETS  # local import
-
-    bucket = _bucket_for(ticker)
-    if not CSP_ELIGIBLE_BUCKETS.get(bucket, True):
-        return True, f"CSP blocked: {bucket} not CSP-eligible"
-    return False, bucket
+# Bucket eligibility gates now live in src/trading_rules.py (single source of
+# truth, shared with daily_options_scan). Re-exported here for backward compat.
+from src.trading_rules import (  # noqa: E402
+    cc_blocked_by_bucket,
+    csp_blocked_by_bucket,
+)
 
 
 # ──────────────────── Per-ticker pipeline ────────────────────────────────

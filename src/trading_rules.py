@@ -145,6 +145,79 @@ def csp_allowed(bucket: str) -> tuple[bool, str]:
     return True, "OK"
 
 
+# ── Ticker → bucket map + per-ticker option-eligibility gates ────────────────
+# Single source of truth for "which wheel discipline applies to this ticker".
+# Unknown tickers default to 'spec_growth' (the most permissive natural wheel
+# target — CC- and CSP-eligible), so discovery-universe names are never
+# over-suppressed; only KNOWN core/blue_chip/leveraged_etf/lottery names get
+# gated. Promoted here from options_yield_screener so every scanner shares it.
+TICKER_BUCKET: dict[str, str] = {
+    # core (no CCs ever — never wheel away the compounder)
+    "SCHD": "core", "SPY": "core", "VOO": "core", "QQQ": "core",
+    "VTI": "core", "VEA": "core", "VWO": "core", "BND": "core",
+    # blue_chip (no CCs unless strike ≥ 115% cost — scanners lack per-user cost
+    # basis, so block CC entirely here; the brain can override with cost info)
+    "AAPL": "blue_chip", "MSFT": "blue_chip", "GOOGL": "blue_chip",
+    "GOOG": "blue_chip", "AMZN": "blue_chip", "META": "blue_chip",
+    "NFLX": "blue_chip", "JPM": "blue_chip", "V": "blue_chip",
+    "MA": "blue_chip", "JNJ": "blue_chip", "PG": "blue_chip",
+    "KO": "blue_chip", "BRK-B": "blue_chip",
+    # leveraged_etf (no CCs/CSPs ever — daily reset + assignment compounds)
+    "TQQQ": "leveraged_etf", "SQQQ": "leveraged_etf",
+    "SSO": "leveraged_etf", "UPRO": "leveraged_etf",
+    "SOXL": "leveraged_etf", "TNA": "leveraged_etf",
+    # commodity_etf (CCs OK on strength)
+    "GLD": "commodity_etf", "SLV": "commodity_etf", "GDX": "commodity_etf",
+    "GDXJ": "commodity_etf", "USO": "commodity_etf", "UNG": "commodity_etf",
+    "DBA": "commodity_etf", "CPER": "commodity_etf", "GLDM": "commodity_etf",
+    # quality_growth (CCs OK)
+    "AMD": "quality_growth", "NVDA": "quality_growth",
+    # spec_growth (CCs OK — the natural CC pool)
+    "F": "spec_growth", "T": "spec_growth", "BAC": "spec_growth",
+    "WFC": "spec_growth", "INTC": "spec_growth", "MU": "spec_growth",
+    "PYPL": "spec_growth", "U": "spec_growth", "RBLX": "spec_growth",
+    "SOFI": "spec_growth", "RIVN": "spec_growth", "AFRM": "spec_growth",
+    "SHOP": "spec_growth", "COIN": "spec_growth", "TSLA": "spec_growth",
+    "OPEN": "spec_growth", "RDDT": "spec_growth", "PLTR": "spec_growth",
+    "SQ": "spec_growth", "HIMS": "spec_growth", "SBET": "spec_growth",
+    # lottery (CSPs blocked — assignment risk too high; CCs OK)
+    "BBAI": "lottery", "BTBT": "lottery", "RCAT": "lottery", "BYND": "lottery",
+    # defensive ETFs (treat as commodity_etf-like — CCs OK on strength)
+    "XLV": "commodity_etf", "XLP": "commodity_etf", "XLU": "commodity_etf",
+    "VHT": "commodity_etf", "VDC": "commodity_etf", "VPU": "commodity_etf",
+    "ITA": "commodity_etf", "KRE": "commodity_etf",
+    # volatility products — never wheel
+    "VIXM": "leveraged_etf", "UVXY": "leveraged_etf", "SVXY": "leveraged_etf",
+}
+
+
+def bucket_for(ticker: str) -> str:
+    """Bucket name for a ticker. Defaults to 'spec_growth' (most permissive
+    natural wheel target) when unknown."""
+    return TICKER_BUCKET.get(ticker.upper(), "spec_growth")
+
+
+def cc_blocked_by_bucket(ticker: str) -> tuple[bool, str]:
+    """(blocked, reason). True if CC is NOT eligible for this ticker's bucket
+    (core / blue_chip / leveraged_etf). blue_chip blocks here because scanners
+    don't track per-user cost basis (need strike >= 115% cost)."""
+    bucket = bucket_for(ticker)
+    if bucket == "blue_chip":
+        return True, "CC blocked: blue_chip (need strike >= 115% cost)"
+    if not CC_ELIGIBLE_BUCKETS.get(bucket, True):
+        return True, f"CC blocked: {bucket} not CC-eligible"
+    return False, bucket
+
+
+def csp_blocked_by_bucket(ticker: str) -> tuple[bool, str]:
+    """(blocked, reason). True if CSP is NOT eligible for this ticker's bucket
+    (lottery / leveraged_etf)."""
+    bucket = bucket_for(ticker)
+    if not CSP_ELIGIBLE_BUCKETS.get(bucket, True):
+        return True, f"CSP blocked: {bucket} not CSP-eligible"
+    return False, bucket
+
+
 # ── OPTIONS WRITING RULES ────────────────────────────────────────────────────
 
 # Cash-Secured Puts — paid to maybe own quality
