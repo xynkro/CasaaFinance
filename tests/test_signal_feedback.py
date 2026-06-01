@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
@@ -13,56 +15,74 @@ from scripts.signal_feedback import (
     _parse_date,
     _parse_float,
 )
-from src.schema import SignalOutcomeRow
+from src.option_pnl import csp_settle_pct, cc_settle_pct
+from src.schema import SignalOutcomeRow, PNL_MODEL_PREMIUM
 
 
 # ── Outcome evaluation ────────────────────────────────────────────────────
 
 class TestCSPOutcome:
     def test_otm_win(self):
-        """CSP: price above strike at expiry → WIN."""
-        outcome, pnl = _eval_csp_outcome(
-            strike=190, premium=3.50, price_at_eval=195, cash_required=19000,
-        )
+        """CSP: put expires OTM → keep premium → WIN, positive premium-inclusive P&L."""
+        outcome, pnl = _eval_csp_outcome(strike=190, premium=3.50, price_at_eval=195)
         assert outcome == "WIN"
-        assert pnl > 0
+        assert pnl == pytest.approx(round((3.50 - 0.02) / 190 * 100, 2))
 
     def test_itm_loss(self):
-        """CSP: price below strike at expiry → LOSS."""
-        outcome, pnl = _eval_csp_outcome(
-            strike=190, premium=3.50, price_at_eval=180, cash_required=19000,
-        )
+        """CSP: assigned, loss exceeds premium → LOSS, negative P&L."""
+        outcome, pnl = _eval_csp_outcome(strike=190, premium=3.50, price_at_eval=180)
         assert outcome == "LOSS"
         assert pnl < 0
 
-    def test_scratch(self):
-        """CSP: price very close to strike → SCRATCH."""
-        outcome, _ = _eval_csp_outcome(
-            strike=190, premium=3.50, price_at_eval=190.0, cash_required=19000,
-        )
-        assert outcome == "SCRATCH"
-
-    def test_zero_cash_required_fallback(self):
-        """CSP: cash_required=0 should use strike*100 fallback."""
-        outcome, pnl = _eval_csp_outcome(
-            strike=100, premium=2.0, price_at_eval=105, cash_required=0,
-        )
+    def test_at_strike_keeps_premium_not_scratch(self):
+        """Pinned at the strike is OTM for a put — the premium is kept, so WIN.
+        The old price-distance scratch band wrongly logged this as 0."""
+        outcome, pnl = _eval_csp_outcome(strike=190, premium=3.50, price_at_eval=190.0)
         assert outcome == "WIN"
         assert pnl > 0
 
+    def test_scratch_is_near_breakeven_pnl(self):
+        """SCRATCH now means |P&L| ≈ 0 (premium ≈ assignment loss), not a price band."""
+        outcome, pnl = _eval_csp_outcome(strike=100, premium=2.00, price_at_eval=98.0)
+        assert outcome == "SCRATCH"
+        assert abs(pnl) < 0.1
+
+    def test_delegates_to_shared_settlement(self):
+        """Consistency: the feedback loop settles with the SAME model as the backtest."""
+        _, pnl = _eval_csp_outcome(strike=190, premium=3.50, price_at_eval=188)
+        assert pnl == pytest.approx(round(csp_settle_pct(190, 3.50, 188), 2))
+
 
 class TestCCOutcome:
-    def test_otm_win(self):
-        """CC: price below strike at expiry → WIN (keep premium + stock)."""
-        outcome, _ = _eval_cc_outcome(strike=200, price_at_scan=195, price_at_eval=192)
+    def test_sideways_down_win_is_positive(self):
+        """Stock fell but stayed below strike and the premium covers the drop →
+        WIN with POSITIVE P&L. The old proxy logged this WIN with a NEGATIVE return."""
+        outcome, pnl = _eval_cc_outcome(
+            strike=200, price_at_scan=195, price_at_eval=192, premium=5.0,
+        )
         assert outcome == "WIN"
+        assert pnl > 0
+        assert pnl == pytest.approx(round(cc_settle_pct(195, 200, 5.0, 192), 2))
 
-    def test_itm_loss(self):
-        """CC: price above strike → LOSS (called away)."""
-        outcome, pnl = _eval_cc_outcome(strike=200, price_at_scan=195, price_at_eval=210)
+    def test_called_away_above_cost_is_win_not_loss(self):
+        """OTM call called away above cost = profit (capped gain + premium) → WIN.
+        The old proxy labelled this a LOSS while storing a POSITIVE capped return."""
+        outcome, pnl = _eval_cc_outcome(
+            strike=200, price_at_scan=195, price_at_eval=210, premium=5.0,
+        )
+        assert outcome == "WIN"
+        assert pnl > 0
+        uncapped = (210 - 195 + 5.0) / 195 * 100   # gain if the strike didn't cap
+        assert pnl < uncapped                      # capping must bind
+
+    def test_drop_exceeds_premium_is_loss(self):
+        """Down more than the premium → LOSS, negative P&L, even though the call
+        expired worthless (shares kept). The label follows P&L, not assignment."""
+        outcome, pnl = _eval_cc_outcome(
+            strike=200, price_at_scan=195, price_at_eval=180, premium=5.0,
+        )
         assert outcome == "LOSS"
-        # P&L should be capped at strike / scan_price - 1
-        assert pnl < 10  # < the full 7.7% move
+        assert pnl < 0
 
 
 class TestBuyOutcome:
@@ -123,8 +143,24 @@ class TestSignalOutcomeRow:
             fwd_return_pct=1.28, strategy_outcome="WIN", outcome_pnl_pct=2.1,
         )
         assert row.TAB_NAME == "signal_outcomes"
-        assert len(row.HEADERS) == 30
-        assert len(row.to_row()) == 30
+        assert len(row.HEADERS) == 31
+        assert len(row.to_row()) == 31
+
+    def test_pnl_model_versioned_last(self):
+        """New rows default to the premium-inclusive version, appended LAST so
+        legacy 30-col rows stay positionally aligned on read-back."""
+        row = SignalOutcomeRow(
+            scan_date="2026-05-20", eval_date="2026-05-25", ticker="AAPL",
+            strategy="CSP", scan_composite=70, scan_technical=15,
+            strike=190, expiry="20260620", dte=30,
+            price_at_scan=195, price_at_eval=197.5,
+            fwd_return_pct=1.28, strategy_outcome="WIN", outcome_pnl_pct=2.1,
+        )
+        assert row.pnl_model == PNL_MODEL_PREMIUM
+        assert row.HEADERS[-1] == "pnl_model"
+        assert row.to_row()[-1] == PNL_MODEL_PREMIUM
+        # the signal block is untouched by the append (indices stable)
+        assert row.HEADERS[14] == "sig_rsi"
 
     def test_signal_values_stored(self):
         row = SignalOutcomeRow(

@@ -29,57 +29,17 @@ from src.technical_score import compute_scores, score_label
 
 import math
 
-# ── Realistic option P&L (replaces the old flat ~2% premium proxy) ──────────
-_RF = 0.04          # risk-free
-_RT_COST = 0.02     # round-trip commission + slippage, $/share
-
-
-def _norm_cdf(x: float) -> float:
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-
-
-def _bsm_put(S: float, K: float, T: float, sigma: float, r: float = _RF) -> float:
-    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
-        return max(0.0, K - S)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
-
-
-def _bsm_call(S: float, K: float, T: float, sigma: float, r: float = _RF) -> float:
-    if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
-        return max(0.0, S - K)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
-    d2 = d1 - sigma * math.sqrt(T)
-    return S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
-
-
-def _csp_pnl_pct(entry: float, exit_price: float, sigma: float, hold_days: int) -> float:
-    """CSP P&L as % of cash-secured notional (strike). Sells a ~0.25Δ put
-    (≈0.67σ OTM over the hold), prices it via BSM from the realized-vol proxy,
-    settles at expiry: keep premium if OTM, else premium − assignment loss.
-    Round-trip cost netted. This is an underlying-driven approximation (no IV
-    smile, no early assignment) but real option economics, not a flat 2%."""
-    T = max(hold_days / 365.0, 1e-6)
-    sigma = sigma if sigma > 0 else 0.4
-    otm = 0.67 * sigma * math.sqrt(T)
-    strike = entry * (1 - otm)
-    prem = _bsm_put(entry, strike, T, sigma)
-    pnl = (prem - _RT_COST) if exit_price >= strike else (prem - (strike - exit_price) - _RT_COST)
-    return pnl / strike * 100 if strike > 0 else 0.0
-
-
-def _cc_pnl_pct(entry: float, exit_price: float, sigma: float, hold_days: int) -> float:
-    """Covered-call P&L as % of shares cost (entry). Sells a ~0.25Δ call;
-    P&L = stock move (capped at the strike when called away) + premium − cost."""
-    T = max(hold_days / 365.0, 1e-6)
-    sigma = sigma if sigma > 0 else 0.4
-    otm = 0.67 * sigma * math.sqrt(T)
-    strike = entry * (1 + otm)
-    prem = _bsm_call(entry, strike, T, sigma)
-    capped_exit = min(exit_price, strike)   # shares called away above the strike
-    pnl = (capped_exit - entry) + prem - _RT_COST
-    return pnl / entry * 100 if entry > 0 else 0.0
+# ── Realistic option P&L ─────────────────────────────────────────────────────
+# Single-source settlement model, shared with the live signal_feedback loop so
+# the backtest and the feedback loop speak the same P&L language. The backtest
+# has no option chain, so it SYNTHESIZES the strike + premium from a realized-vol
+# proxy via BSM and then settles — see src/option_pnl.py. The names are
+# re-exported here so the rest of this script (and its tests) are unchanged.
+from src.option_pnl import (
+    _RF, _RT_COST, _norm_cdf, _bsm_put, _bsm_call,
+    csp_pnl_pct as _csp_pnl_pct,
+    cc_pnl_pct as _cc_pnl_pct,
+)
 
 
 # ── Default universe for backtesting ────────────────────────────────────────
