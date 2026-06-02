@@ -2107,7 +2107,8 @@ class AlpacaSnapshotRow:
 class AlpacaPositionRow:
     """One row per open Alpaca paper position."""
     TAB_NAME = "positions_alpaca"
-    HEADERS = ["date", "ticker", "qty", "avg_cost", "last", "mkt_val", "upl", "upl_pct", "side"]
+    HEADERS = ["date", "ticker", "qty", "avg_cost", "last", "mkt_val", "upl", "upl_pct", "side",
+               "origin"]   # "casaa" = FinancePWA's automated book | "external" = other bot (ZeroDTE/decisions)
 
     date: str
     ticker: str
@@ -2118,10 +2119,11 @@ class AlpacaPositionRow:
     upl: str = "0"
     upl_pct: str = "0"
     side: str = "long"
+    origin: str = "casaa"
 
     def to_row(self) -> List[str]:
         return [self.date, self.ticker, self.qty, self.avg_cost, self.last,
-                self.mkt_val, self.upl, self.upl_pct, self.side]
+                self.mkt_val, self.upl, self.upl_pct, self.side, self.origin]
 
 
 @dataclass

@@ -104,6 +104,19 @@ def main() -> int:
         print(f"Alpaca read failed: {e}")
         return 1
 
+    # Attribution: this paper account is shared (ZeroDTE 0-DTE SPY bot + an
+    # untagged decision-queue executor trade here too). Benchmark ONLY the
+    # automated FinancePWA book — positions whose symbol was placed by a
+    # casaa-tagged order — so "did the book beat SPY?" measures our picks, not
+    # someone else's. Falls back to all positions if no tagged orders are found.
+    owned = alpaca.financepwa_symbols(orders)
+    if owned:
+        external = [p for p in positions if p.get("symbol", "") not in owned]
+        positions = [p for p in positions if p.get("symbol", "") in owned]
+        if external:
+            print(f"(excluded {len(external)} non-FinancePWA positions from the "
+                  f"benchmark: {', '.join(sorted({p.get('symbol','') for p in external}))})")
+
     entry = _entry_dates(orders)
     start = min([entry.get(p.get("symbol", ""), today) for p in positions] + [today])
     spy = _spy_series(start) if positions else {}

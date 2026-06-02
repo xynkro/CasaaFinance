@@ -46,14 +46,24 @@ def sync(dry: bool = False) -> dict:
         short_value=account.get("short_market_value", "0"),
     )
 
+    # Attribution: this paper account is shared with other bots (ZeroDTE 0-DTE
+    # SPY + the untagged decision-queue executor). Tag each position by whether
+    # FinancePWA's casaa- executor placed it, so the PWA can show its own book
+    # cleanly instead of someone else's trades mixed in.
+    try:
+        owned = alp.financepwa_symbols(alp.get_orders(status="all", limit=500))
+    except Exception:
+        owned = set()
+
     pos_rows = []
     for p in positions:
         upl = float(p.get("unrealized_pl", 0))
         cost_basis = float(p.get("cost_basis", 1)) or 1
         upl_pct = (upl / cost_basis) * 100
+        sym = p.get("symbol", "")
         pos_rows.append(S.AlpacaPositionRow(
             date=today,
-            ticker=p.get("symbol", ""),
+            ticker=sym,
             qty=str(p.get("qty", "0")),
             avg_cost=str(p.get("avg_entry_price", "0")),
             last=str(p.get("current_price", "0")),
@@ -61,6 +71,7 @@ def sync(dry: bool = False) -> dict:
             upl=str(round(upl, 2)),
             upl_pct=str(round(upl_pct, 2)),
             side=p.get("side", "long"),
+            origin=("casaa" if (not owned or sym in owned) else "external"),
         ))
 
     if dry:

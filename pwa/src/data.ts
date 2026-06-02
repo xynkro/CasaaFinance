@@ -791,6 +791,7 @@ export interface AlpacaPositionRow {
   upl: string;
   upl_pct: string;
   side: string;
+  origin?: string;      // "casaa" = FinancePWA's own book | "external" = other bot (ZeroDTE/decisions)
 }
 
 export interface PaperBenchmarkRow {

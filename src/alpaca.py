@@ -76,6 +76,33 @@ def get_positions() -> list[dict]:
     return _get("positions")
 
 
+# FinancePWA tags its scanner-executor orders with this client_order_id prefix.
+# Other bots sharing the SAME Alpaca paper account (e.g. the ZeroDTE 0-DTE SPY
+# bot, or the untagged decision-queue executor) use auto-generated UUIDs, so the
+# prefix cleanly attributes positions back to FinancePWA's automated book.
+FINANCEPWA_PREFIX = "casaa-"
+
+
+def financepwa_symbols(orders: list[dict], prefix: str = FINANCEPWA_PREFIX) -> set[str]:
+    """Symbols FinancePWA's tagged executor placed — underlyings + multi-leg
+    option legs — from orders whose client_order_id starts with `prefix`.
+
+    Use it to filter a shared Alpaca account's positions down to FinancePWA's
+    own, so the SPY benchmark and the PWA Paper view aren't polluted by another
+    bot trading the same account.
+    """
+    syms: set[str] = set()
+    for o in orders or []:
+        if not str(o.get("client_order_id", "") or "").startswith(prefix):
+            continue
+        if o.get("symbol"):
+            syms.add(o["symbol"])
+        for leg in (o.get("legs") or []):
+            if leg.get("symbol"):
+                syms.add(leg["symbol"])
+    return syms
+
+
 def get_position(ticker: str) -> dict | None:
     """Single position by symbol, or None if not held."""
     try:
@@ -210,13 +237,19 @@ def occ_symbol(underlying: str, expiry: str, right: str, strike: float) -> str:
     return f"{underlying.upper()}{yymmdd}{r}{strike_milli:08d}"
 
 
-def parse_occ_symbol(occ: str) -> dict:
-    """Inverse of occ_symbol → {underlying, expiry (YYYY-MM-DD), right, strike}."""
-    # strike = last 8 digits, right = char before that, date = 6 before that
-    strike = int(occ[-8:]) / 1000.0
-    right = occ[-9]
-    yymmdd = occ[-15:-9]
-    underlying = occ[:-15]
+def parse_occ_symbol(occ: str) -> dict | None:
+    """Inverse of occ_symbol → {underlying, expiry (YYYY-MM-DD), right, strike},
+    or None when `occ` is not an OCC option symbol (e.g. a plain equity ticker
+    like 'AMD' — fractional growth buys live in the same account)."""
+    s = str(occ or "")
+    # OCC = ROOT(>=1) + YYMMDD(6) + C/P(1) + strike(8 digits) → min length 16.
+    if (len(s) < 16 or not s[-8:].isdigit()
+            or s[-9] not in ("C", "P") or not s[-15:-9].isdigit()):
+        return None
+    strike = int(s[-8:]) / 1000.0
+    right = s[-9]
+    yymmdd = s[-15:-9]
+    underlying = s[:-15]
     expiry = f"20{yymmdd[:2]}-{yymmdd[2:4]}-{yymmdd[4:6]}"
     return {"underlying": underlying, "expiry": expiry, "right": right, "strike": strike}
 

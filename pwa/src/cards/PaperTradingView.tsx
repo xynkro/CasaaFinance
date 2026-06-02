@@ -214,7 +214,12 @@ export function PaperTradingView({
   benchmark: PaperBenchmarkRow[];
   loading: boolean;
 }) {
-  const groups = groupPositions(positions);
+  // This Alpaca account is shared with another bot (ZeroDTE 0-DTE SPY). Show
+  // ONLY FinancePWA's own book — positions its casaa- executor placed — so the
+  // view isn't polluted by trades it didn't make.
+  const owned = positions.filter((p) => (p.origin ?? "casaa") !== "external");
+  const externalCount = positions.length - owned.length;
+  const groups = groupPositions(owned);
   const totalUpl = groups.reduce((s, g) => s + g.upl, 0);
   const nlv = num(snapshot?.net_liq);
   const cash = num(snapshot?.cash);
@@ -290,6 +295,12 @@ export function PaperTradingView({
             {groups.length} {groups.length === 1 ? "position" : "positions"}
           </span>
         </div>
+        {externalCount > 0 && (
+          <p className="text-[length:var(--t-2xs)] text-slate-600 -mt-0.5 mb-1.5">
+            {externalCount} other position{externalCount === 1 ? "" : "s"} in this shared account
+            (ZeroDTE / decision-queue) hidden — showing FinancePWA's book only.
+          </p>
+        )}
         {groups.length === 0 ? (
           <p className="text-[length:var(--t-xs)] text-slate-500 py-5 text-center">
             The auto-trader hasn't opened any paper positions yet.<br />
