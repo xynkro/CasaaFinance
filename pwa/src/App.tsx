@@ -153,6 +153,7 @@ function Dashboard() {
             insiderByTicker={data?.insiderByTicker}
             screenCandidates={data?.screenCandidates ?? []}
             livePrices={data?.livePrices ?? new Map()}
+            dailyPlan={data?.dailyPlan ?? []}
           />
         );
       case 6:

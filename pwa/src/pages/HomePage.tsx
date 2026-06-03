@@ -12,6 +12,7 @@ import { GovConfluenceCard } from "../cards/GovConfluenceCard";
 import { CongressTradesCard } from "../cards/CongressTradesCard";
 import { TldrTodayCard } from "../cards/TldrTodayCard";
 import { PaperStatusCard } from "../cards/PaperStatusCard";
+import { TodaysPlanCard } from "../cards/TodaysPlanCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
 import { Activity } from "lucide-react";
@@ -158,6 +159,15 @@ export function HomePage({
             onOpen={jumpPaper}
           />
         </div>
+
+        {/* Today's Plan — the unified recommendation list the auto-trader will
+            execute (core + hedge + protector + opportunities). This is the
+            "what's the bot doing" surface; recommendation == execution. */}
+        {(data?.dailyPlan?.length ?? 0) > 0 && (
+          <div className="fade-up fade-up-2 mt-3">
+            <TodaysPlanCard plan={data?.dailyPlan ?? []} />
+          </div>
+        )}
 
         {/* Concentration alert — single-ticker over-exposure. Only renders
             when at least one position crosses 30% of NLV. Risk parity audit

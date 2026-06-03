@@ -5,6 +5,7 @@ import type {
   LivePriceRow,
   PositionRow,
   ScreenCandidateRow,
+  DailyPlanRow,
   SnapshotRow,
   TechnicalScoreRow,
   OptionsDefenseRow,
@@ -21,6 +22,7 @@ import { BuyRecommendationsCard } from "../cards/BuyRecommendationsCard";
 import { FreshIdeasCard } from "../cards/FreshIdeasCard";
 import { ActionQueueCard } from "../cards/ActionQueueCard";
 import { ExposureBudgetCard } from "../cards/ExposureBudgetCard";
+import { TodaysPlanCard } from "../cards/TodaysPlanCard";
 import {
   EarningsBadge,
   AnalystChip,
@@ -884,6 +886,7 @@ export function DecisionsPage({
   insiderByTicker,
   screenCandidates,
   livePrices,
+  dailyPlan = [],
 }: {
   decisions: DecisionRow[];
   technicalScores?: TechnicalScoreRow[];
@@ -903,6 +906,7 @@ export function DecisionsPage({
   insiderByTicker?: Map<string, InsiderSummary>;
   screenCandidates?: ScreenCandidateRow[];
   livePrices?: Map<string, LivePriceRow>;
+  dailyPlan?: DailyPlanRow[];
 }) {
   const [selected, setSelected] = useState<DecisionRow | null>(null);
   const [accountTab, setAccountTab] = useState<AccountTab>("caspar");
@@ -993,6 +997,16 @@ export function DecisionsPage({
   return (
     <>
       <div className="px-4 pb-4 flex flex-col gap-4">
+        {/* The unified auto-trader plan — what the bot recommends AND executes
+            today (recommendation == execution). Shown first so this is the
+            "what's the system doing" answer. The cards below are the legacy
+            manual decision queue (kept for review). */}
+        {dailyPlan.length > 0 && (
+          <div className={nextFade()}>
+            <TodaysPlanCard plan={dailyPlan} />
+          </div>
+        )}
+
         <div className={nextFade()}>
           <ExposureBudgetCard
             posture={exposurePosture ?? null}
