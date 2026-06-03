@@ -1,4 +1,5 @@
-import type { AlpacaSnapshotRow, AlpacaPositionRow, ParsedOcc, PaperBenchmarkRow } from "../data";
+import type { AlpacaSnapshotRow, AlpacaPositionRow, ParsedOcc, PaperBenchmarkRow, DailyPlanRow } from "../data";
+import { TodaysPlanCard } from "./TodaysPlanCard";
 import { parseOcc } from "../data";
 import { Card } from "./Card";
 import { FlaskConical, TrendingUp, TrendingDown, Bot, Swords } from "lucide-react";
@@ -207,11 +208,13 @@ export function PaperTradingView({
   snapshot,
   positions,
   benchmark,
+  dailyPlan = [],
   loading,
 }: {
   snapshot: AlpacaSnapshotRow | null;
   positions: AlpacaPositionRow[];
   benchmark: PaperBenchmarkRow[];
+  dailyPlan?: DailyPlanRow[];
   loading: boolean;
 }) {
   // This Alpaca account is shared with another bot (ZeroDTE 0-DTE SPY). Show
@@ -239,6 +242,9 @@ export function PaperTradingView({
           </div>
         </div>
       </div>
+
+      {/* The single source of truth — what the bot trades, shown before it trades */}
+      <TodaysPlanCard plan={dailyPlan} />
 
       {/* The honest scoreboard — is the active book beating the index? */}
       <BenchmarkStrip benchmark={benchmark} />

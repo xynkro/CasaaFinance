@@ -757,6 +757,23 @@ export interface GovConfluenceRow {
   congress_pct_mktcap?: string;   // congress_usd / market cap (fraction)
 }
 
+export interface DailyPlanRow {
+  date: string;
+  rank?: string;
+  leg?: string;          // hedge | protector | growth | income
+  ticker?: string;
+  strategy?: string;     // ALLOC | CSP | CC | PCS | CCS | IC | LONG_CALL | GROWTH
+  detail?: string;
+  conviction?: string;
+  target_pct?: string;
+  notional?: string;
+  reason?: string;
+  source?: string;       // risk_parity | scan_results | screen_candidates
+  execute?: string;      // "TRUE" = the auto-trader will place it
+  fill_status?: string;  // "" | filled | held (at target) | skipped:<why> | failed:<why>
+  updated_at?: string;
+}
+
 export interface GexRegimeRow {
   date: string;
   symbol: string;                 // SPY | QQQ
@@ -1307,6 +1324,7 @@ export interface DashboardData {
   alpacaPositions: AlpacaPositionRow[];
   paperBenchmark: PaperBenchmarkRow[];   // "did each pick beat SPY?" (latest day, incl. a TOTAL row)
   gexRegime: GexRegimeRow[];             // dealer gamma regime per index (latest day: SPY, QQQ)
+  dailyPlan: DailyPlanRow[];             // the unified plan the auto-trader executes (latest day)
   error: string | null;
 }
 
@@ -1385,6 +1403,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       alpacaPosRows,
       paperBenchmarkRows,
       gexRegimeRows,
+      dailyPlanRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -1403,6 +1422,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTab<AlpacaPositionRow>("positions_alpaca").catch(() => [] as AlpacaPositionRow[]),
       fetchTabByName<PaperBenchmarkRow>("paper_benchmark").catch(() => [] as PaperBenchmarkRow[]),
       fetchTabByName<GexRegimeRow>("gex_regime").catch(() => [] as GexRegimeRow[]),
+      fetchTabByName<DailyPlanRow>("daily_plan").catch(() => [] as DailyPlanRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -1497,6 +1517,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       alpacaPositions: latestGroup(alpacaPosRows),
       paperBenchmark: latestGroup(paperBenchmarkRows),
       gexRegime: latestGroup(gexRegimeRows),
+      dailyPlan: latestGroup(dailyPlanRows),
       error: null,
     };
   } catch (e) {
@@ -1531,6 +1552,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       alpacaPositions: [],
       paperBenchmark: [],
       gexRegime: [],
+      dailyPlan: [],
       error: String(e),
     };
   }

@@ -2127,6 +2127,56 @@ class AlpacaPositionRow:
 
 
 @dataclass
+class DailyPlanRow:
+    """THE single source of truth for what the auto-trader will do today.
+
+    Built by build_daily_plan.py (standing allocation + ranked opportunities),
+    shown verbatim on the PWA "Today's Plan", and executed verbatim by
+    alpaca_paper_execute.py — so the recommendation IS the execution. The
+    fill_status column doubles as the audit trail (filled / skipped:<why>).
+    """
+    TAB_NAME = "daily_plan"
+    HEADERS = [
+        "date", "rank",
+        "leg",            # hedge | protector | growth | income
+        "ticker",
+        "strategy",       # ALLOC | CSP | CC | PCS | CCS | IC | LONG_CALL | GROWTH
+        "detail",         # human one-liner (strikes/credit, or "5% NLV → $5,257")
+        "conviction",     # 0-100 unified score
+        "target_pct",     # standing-allocation target as % of NLV (0 for opportunities)
+        "notional",       # target/order dollars
+        "reason",         # why it's in the plan (provenance)
+        "source",         # source tab: risk_parity | scan_results | screen_candidates
+        "execute",        # "TRUE" = the auto-trader will place it
+        "fill_status",    # "" | filled | skipped:<reason> | failed:<reason>
+        "updated_at",
+    ]
+
+    date: str
+    rank: int
+    leg: str
+    ticker: str
+    strategy: str
+    detail: str = ""
+    conviction: float = 0.0
+    target_pct: float = 0.0
+    notional: float = 0.0
+    reason: str = ""
+    source: str = ""
+    execute: bool = False
+    fill_status: str = ""
+    updated_at: str = ""
+
+    def to_row(self) -> List[str]:
+        return [
+            self.date, str(self.rank), self.leg, self.ticker, self.strategy,
+            self.detail, _num(self.conviction, 1), _num(self.target_pct, 1),
+            _num(self.notional, 2), self.reason, self.source,
+            "TRUE" if self.execute else "", self.fill_status, self.updated_at,
+        ]
+
+
+@dataclass
 class PaperBenchmarkRow:
     """'Did this pick beat just holding SPY?' — per open paper position + a TOTAL
     row. Compares each position's P&L to the P&L the SAME entry capital would

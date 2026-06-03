@@ -100,6 +100,7 @@ function Dashboard() {
             alpacaSnapshot={data?.alpaca ?? null}
             alpacaPositions={data?.alpacaPositions ?? []}
             paperBenchmark={data?.paperBenchmark ?? []}
+            dailyPlan={data?.dailyPlan ?? []}
             loading={loading && !data}
           />
         );

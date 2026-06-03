@@ -1,19 +1,17 @@
-name: Execute Decisions — Alpaca Paper Trading
+name: Execute Decisions — Alpaca Paper Trading (RETIRED)
 
-# Reads ACT_NOW decisions from decision_queue and submits orders to
-# Alpaca paper trading. Runs after the daily brief (07:43 SGT) has
-# had time to update the decision queue.
+# RETIRED 2026-06-03 — consolidated into ONE pipeline. The auto-trader is now
+# build-daily-plan.yml → alpaca-paper-execute.yml (daily_plan = the single source
+# of truth; recommendation = execution). This second executor caused the
+# bifurcation Caspar flagged ("it traded things that weren't in my recommendations").
+# Schedule DISABLED; left dispatch-only so legacy decision_queue ACT_NOW items can
+# still be run by hand if ever needed. Do NOT re-enable the schedule.
 #
-# Schedule: 00:00 UTC = 08:00 SGT (after 07:43 brief + buffer)
-# Only fires Mon-Fri (market days).
-#
-# REQUIRED SECRETS:
-#   ALPACA_API_KEY_ID     — paper-api key
-#   ALPACA_API_SECRET_KEY — paper-api secret
+# REQUIRED SECRETS: ALPACA_API_KEY_ID, ALPACA_API_SECRET_KEY
 
 on:
-  schedule:
-    - cron: "0 0 * * 1-5"
+  # schedule:                 # DISABLED — one pipeline only (see header)
+  #   - cron: "0 0 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

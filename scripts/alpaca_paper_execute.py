@@ -194,7 +194,14 @@ def stock_order_spec(pick: dict, nlv: float) -> tuple[dict | None, str]:
             "label": f"BUY {tk} ${notional:.0f} (~{approx:.2f}sh @{price:.2f})"}, ""
 
 
-def _read_picks_and_account():
+def _norm_strat(s: str) -> str:
+    return "CSP" if s == "HARVEST_CSP" else str(s or "")
+
+
+def _read_plan_and_context():
+    """Read the ONE source of truth (daily_plan) plus what's needed to execute
+    it: scan_results (to rebuild option-spread legs), account NLV, VIX, GEX gate,
+    and current positions (to rebalance standing allocation to target, not re-buy)."""
     from src.sync import load_env
     from src import sheets as sh
     load_env()
@@ -208,8 +215,11 @@ def _read_picks_and_account():
         except Exception:
             return []
 
-    picks = latest("scan_results")
-    growth = latest("screen_candidates")
+    td = date.today().isoformat()
+    plan = [r for r in latest("daily_plan")
+            if (r.get("date") or "")[:10] == td
+            and str(r.get("execute", "")).upper() in ("TRUE", "1", "YES")]
+    scan = latest("scan_results")
     acct = {"nlv": 0.0, "excess_liq": None}
     try:
         c = latest("snapshot_caspar")[-1]
@@ -222,10 +232,8 @@ def _read_picks_and_account():
         macro = latest("macro")[-1]
     except IndexError:
         pass
-    # GEX premium-selling gate (SPY, today) — permissive default if absent.
     gex_gate = {"gate": "NORMAL", "note": ""}
     try:
-        td = date.today().isoformat()
         spy = [r for r in latest("gex_regime")
                if (r.get("symbol") or "").upper() == "SPY"
                and (r.get("date") or "")[:10] == td]
@@ -234,7 +242,14 @@ def _read_picks_and_account():
                         "note": spy[-1].get("note") or ""}
     except Exception:
         pass
-    return picks, growth, acct, macro, gex_gate
+    return plan, scan, acct, macro, gex_gate
+
+
+def _alloc_coid(ticker: str) -> str:
+    """Weekly id for standing-allocation top-ups — rebalance at most once/week,
+    never re-buy the full sleeve every day."""
+    y, w, _ = date.today().isocalendar()
+    return f"casaa-ALLOC-{ticker}-{y}W{w:02d}"[:48]
 
 
 def main() -> int:
@@ -244,70 +259,104 @@ def main() -> int:
                     help="Actually place orders on Alpaca PAPER (default: dry-run print only)")
     args = ap.parse_args()
 
-    # HARD PAPER GUARD — refuse to place unless the base URL is the paper endpoint.
-    # `or` (not get-default): CI sets ALPACA_BASE_URL to an unset secret's EMPTY
-    # string → empty/missing must fail SAFE to the paper endpoint (the only
-    # supported mode), not fail CLOSED and refuse. A real non-paper URL is still
-    # refused below.
+    # HARD PAPER GUARD — fail SAFE to the paper endpoint on empty/missing base
+    # (the only supported mode); a real non-paper URL is still refused.
     base = os.environ.get("ALPACA_BASE_URL") or "https://paper-api.alpaca.markets"
     if args.execute and "paper-api" not in base:
         print(f"REFUSING: ALPACA_BASE_URL is not paper-api ({base}). This tool is PAPER ONLY.")
         return 2
 
     today = date.today().isoformat()
-    picks, growth, acct, macro, gexg = _read_picks_and_account()
+    plan_rows, scan, acct, macro, gexg = _read_plan_and_context()
     vix = _f(macro.get("vix"), 16.0)
     spx_ok = str(macro.get("spx_above_200sma", "True")).lower() not in ("false", "0", "")
     gex_caution = (gexg.get("gate") == "SELL_CAUTION")
 
-    top = select_top_per_strategy(picks, today)
-    growth_top = select_growth_picks(growth, today)
     print(f"=== Alpaca paper executor · {today} · NLV ${acct['nlv']:,.0f} "
           f"excess ${acct['excess_liq'] or 0:,.0f} · VIX {vix} ===")
     if gexg.get("note"):
         print(f"  GEX: {gexg['note']}")
-    print(f"{len(top)} option picks + {len(growth_top)} growth stock picks for today\n")
+    if not plan_rows:
+        print("No daily_plan rows for today (run build_daily_plan.py first). Nothing to do.")
+        return 0
+    print(f"Executing the {len(plan_rows)}-row daily_plan (recommendation = execution)\n")
 
     from src import alpaca
-    plan = []
-    # Options (top per strategy)
-    for p in top:
-        strat = "CSP" if p.get("strategy") == "HARVEST_CSP" else (p.get("strategy") or "")
-        if gex_caution and strat in PREMIUM_SELLING:
-            print(f"  SKIP {strat:10} {str(p.get('ticker','')):6} — GEX SELL_CAUTION "
-                  f"(SPY short gamma → gap risk through short strikes)")
-            continue
-        spec, reason = pick_to_order(p)
-        if spec is None:
-            print(f"  SKIP {p.get('strategy'):10} {p.get('ticker'):6} — {reason}")
-            continue
-        qty = contracts_for(p, acct["nlv"], acct["excess_liq"], vix, spx_ok)
-        if qty <= 0:
-            print(f"  SKIP {spec['label']} — sized to 0 contracts (Caspar profile)")
-            continue
-        coid = client_order_id(today, p)
-        plan.append((spec, qty, coid))
-        print(f"  PLAN {spec['label']}  ×{qty}  [{spec['kind']}]  id={coid}")
+    # Index scan_results by (ticker, strategy) so an income plan row can rebuild
+    # its option order; and current positions to rebalance standing allocation.
+    scan_idx = {}
+    for p in scan:
+        if (p.get("date") or "")[:10] == today:
+            scan_idx[((p.get("ticker") or "").upper(), _norm_strat(p.get("strategy")))] = p
+    try:
+        posval = {p.get("symbol", ""): _f(p.get("market_value")) for p in alpaca.get_positions()}
+    except Exception:
+        posval = {}
 
-    # Growth stocks (momentum + confluence) — the offense leg, as paper equity buys
-    for g in growth_top:
-        spec, reason = stock_order_spec(g, acct["nlv"])
-        if spec is None:
-            print(f"  SKIP GROWTH    {str(g.get('ticker','')):6} — {reason}")
-            continue
-        coid = f"casaa-{today}-GROWTH-{str(g.get('ticker',''))}"[:48]
-        plan.append((spec, 0, coid))   # qty unused for notional equity
-        print(f"  PLAN {spec['label']}  [equity]  id={coid}")
+    # Build the order list: each entry carries its plan-row key for fill_status.
+    orders = []   # (key, spec, qty, coid)
+    statuses = {}  # key -> fill_status (for rows we DON'T place)
+    for r in plan_rows:
+        leg = (r.get("leg") or "").lower()
+        tk = (r.get("ticker") or "").upper()
+        strat = _norm_strat(r.get("strategy"))
+        key = (leg, tk, strat)
+
+        if leg in ("hedge", "protector"):
+            target = _f(r.get("notional"))
+            cur = posval.get(tk, 0.0)
+            gap = round(target - cur, 2)
+            if gap < max(1.0, 0.15 * target):     # within 15% of target → hold
+                statuses[key] = "held (at target)"
+                print(f"  HOLD {tk:6} {leg:9} — ${cur:,.0f}/${target:,.0f} at target")
+                continue
+            spec = {"kind": "equity", "symbol": tk, "side": "buy",
+                    "notional": gap, "label": f"{leg.upper()} {tk} +${gap:,.0f}→target"}
+            orders.append((key, spec, 0, _alloc_coid(tk)))
+            print(f"  PLAN {spec['label']}  [rebalance]")
+
+        elif leg == "growth":
+            spec = {"kind": "equity", "symbol": tk, "side": "buy",
+                    "notional": _f(r.get("notional")),
+                    "label": f"GROWTH {tk} ${_f(r.get('notional')):,.0f}"}
+            orders.append((key, spec, 0, f"casaa-{today}-GROWTH-{tk}"[:48]))
+            print(f"  PLAN {spec['label']}  [equity]")
+
+        elif leg == "income":
+            if gex_caution and strat in PREMIUM_SELLING:
+                statuses[key] = "skipped:GEX SELL_CAUTION"
+                print(f"  SKIP {strat:10} {tk:6} — GEX SELL_CAUTION (short gamma)")
+                continue
+            pick = scan_idx.get((tk, strat))
+            if not pick:
+                statuses[key] = "skipped:no scan_results match"
+                print(f"  SKIP {strat:10} {tk:6} — no matching scan_results pick")
+                continue
+            spec, reason = pick_to_order(pick)
+            if spec is None:
+                statuses[key] = f"skipped:{reason}"[:40]
+                print(f"  SKIP {strat:10} {tk:6} — {reason}")
+                continue
+            qty = contracts_for(pick, acct["nlv"], acct["excess_liq"], vix, spx_ok)
+            if qty <= 0:
+                statuses[key] = "skipped:sized to 0"
+                print(f"  SKIP {spec['label']} — sized to 0 contracts")
+                continue
+            orders.append((key, spec, qty, client_order_id(today, pick)))
+            print(f"  PLAN {spec['label']}  ×{qty}  [{spec['kind']}]")
+        else:
+            statuses[key] = f"skipped:unknown leg {leg}"
 
     if not args.execute:
-        print(f"\n[DRY-RUN] {len(plan)} orders planned. Re-run with --execute to place on PAPER.")
+        print(f"\n[DRY-RUN] {len(orders)} orders planned from the daily_plan. "
+              f"Re-run with --execute to place on PAPER.")
         return 0
 
-    # Idempotency: skip ids already submitted (open or closed today).
     existing = {o.get("client_order_id") for o in alpaca.get_orders(status="all", limit=500)}
     placed = 0
-    for spec, qty, coid in plan:
+    for key, spec, qty, coid in orders:
         if coid in existing:
+            statuses[key] = "filled (already placed)"
             print(f"  ALREADY PLACED {coid} — skip")
             continue
         try:
@@ -321,11 +370,41 @@ def main() -> int:
                 alpaca.submit_mleg_order(spec["legs"], qty=qty,
                                          limit_price=spec["limit_price"], client_order_id=coid)
             placed += 1
+            statuses[key] = "filled"
             print(f"  ✓ PLACED {spec['label']} ×{qty}")
         except Exception as e:
+            statuses[key] = f"failed:{e}"[:60]
             print(f"  ✗ FAILED {spec['label']} — {e}")
-    print(f"\nPlaced {placed}/{len(plan)} orders on Alpaca PAPER.")
+
+    _writeback_fill_status(today, statuses)
+    print(f"\nPlaced {placed}/{len(orders)} orders on Alpaca PAPER (daily_plan executed).")
     return 0
+
+
+def _writeback_fill_status(today: str, statuses: dict) -> None:
+    """Record each plan row's outcome back onto the daily_plan tab, so the PWA
+    shows filled / held / skipped per row — the audit trail."""
+    try:
+        from src import sheets as sh, schema as S
+        client = sh.authenticate()
+        ss = sh._open_sheet(client)
+        ws = ss.worksheet(S.DailyPlanRow.TAB_NAME)
+        vals = ws.get_all_values()
+        if len(vals) < 2:
+            return
+        hdr = vals[0]
+        ci = {h: i for i, h in enumerate(hdr)}
+        for row in vals[1:]:
+            if (row[ci["date"]] or "")[:10] != today:
+                continue
+            key = ((row[ci["leg"]] or "").lower(),
+                   (row[ci["ticker"]] or "").upper(),
+                   _norm_strat(row[ci["strategy"]]))
+            if key in statuses and ci.get("fill_status") is not None:
+                row[ci["fill_status"]] = statuses[key]
+        ws.update("A1", vals, value_input_option="USER_ENTERED")
+    except Exception as e:
+        print(f"  (fill_status writeback skipped: {e})")
 
 
 if __name__ == "__main__":

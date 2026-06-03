@@ -1,0 +1,46 @@
+name: Build Daily Plan — Unified Recommendations
+
+# THE single source of truth for the auto-trader. Aggregates standing allocation
+# (VIXM hedge + IEF/TLT/GLD protector) + the top growth/income opportunities into
+# the daily_plan tab, which the PWA shows verbatim and alpaca-paper-execute trades
+# verbatim. Runs AFTER the scanners and BEFORE the 14:30 UTC executor, so you see
+# the recommendation, then it executes exactly that.
+
+on:
+  schedule:
+    # 14:00 UTC — after options-scan (02:35), growth-scan (12:30), gex (13:00);
+    # 30 min before the executor (14:30). Mon-Fri.
+    - cron: "0 14 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-daily-plan
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project deps
+        run: pip install -r requirements.txt
+      - name: Build daily plan
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
+          python scripts/build_daily_plan.py $ARGS

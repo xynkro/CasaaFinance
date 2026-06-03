@@ -7,6 +7,7 @@ import type {
   AlpacaSnapshotRow,
   AlpacaPositionRow,
   PaperBenchmarkRow,
+  DailyPlanRow,
 } from "../data";
 import { PnlCard } from "../cards/PnlCard";
 import { PaperTradingView } from "../cards/PaperTradingView";
@@ -48,6 +49,7 @@ export function PortfolioPage({
   alpacaSnapshot,
   alpacaPositions,
   paperBenchmark,
+  dailyPlan,
   loading,
 }: {
   casparSnapshot: SnapshotRow | null;
@@ -63,6 +65,7 @@ export function PortfolioPage({
   alpacaSnapshot: AlpacaSnapshotRow | null;
   alpacaPositions: AlpacaPositionRow[];
   paperBenchmark: PaperBenchmarkRow[];
+  dailyPlan: DailyPlanRow[];
   loading: boolean;
 }) {
   const CasparPanel = (
@@ -130,6 +133,7 @@ export function PortfolioPage({
           snapshot={alpacaSnapshot}
           positions={alpacaPositions}
           benchmark={paperBenchmark}
+          dailyPlan={dailyPlan}
           loading={loading}
         />
       </div>
