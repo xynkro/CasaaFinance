@@ -302,7 +302,8 @@ def main() -> int:
         strat = _norm_strat(r.get("strategy"))
         key = (leg, tk, strat)
 
-        if leg in ("hedge", "protector"):
+        if leg in ("core", "hedge", "protector"):
+            # Held sleeves — rebalance toward target, never re-buy the full sleeve.
             target = _f(r.get("notional"))
             cur = posval.get(tk, 0.0)
             gap = round(target - cur, 2)

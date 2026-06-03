@@ -31,23 +31,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# Standing allocation — hedge + protector sleeves, target % of NLV.
-# Mirrors config/risk_parity_targets.yaml (Caspar): vol_long 5, bond_intermediate
-# 7, bond_long 6, gold 5. These are HELD continuously, not daily opportunities.
+# Standing allocation — the HELD base of a growth-tilted, all-rounded book
+# (core-satellite). Held continuously, rebalanced to target, NOT daily picks:
+#   • CORE growth (QQQ 45%) — the diversified equity engine (Caspar's ~64%
+#     equity target, minus the satellite that the opportunities add on top).
+#   • HEDGE (VIXM 5%) — convex tail hedge.
+#   • PROTECTOR (IEF 6% + GLD 4%) — recession bond ballast + gold. TLT dropped:
+#     long Treasuries are a duration/rate bet, not crash protection.
+# Defensive total = 15% (lighter than the 23% risk-parity weight) because every
+# defensive dollar drags CAGR and this book is deliberately growth-tilted.
 STANDING_ALLOCATION = [
+    {"ticker": "QQQ",  "leg": "core",      "pct": 45.0,
+     "reason": "broad growth core (Nasdaq-100) — the diversified equity engine"},
     {"ticker": "VIXM", "leg": "hedge",     "pct": 5.0,
-     "reason": "long-vol tail hedge (vol_long sleeve) — convex crisis ballast"},
-    {"ticker": "IEF",  "leg": "protector", "pct": 7.0,
+     "reason": "long-vol tail hedge — convex crisis ballast"},
+    {"ticker": "IEF",  "leg": "protector", "pct": 6.0,
      "reason": "intermediate Treasuries — the justified recession ballast"},
-    {"ticker": "TLT",  "leg": "protector", "pct": 6.0,
-     "reason": "long Treasuries — duration ballast (capped, it's a rate bet)"},
-    {"ticker": "GLD",  "leg": "protector", "pct": 5.0,
-     "reason": "gold — inflation / crisis protector"},
+    {"ticker": "GLD",  "leg": "protector", "pct": 4.0,
+     "reason": "gold — uncorrelated inflation / crisis protector"},
 ]
 
 INCOME_STRATEGIES = ("CSP", "CC", "PCS", "CCS", "IC", "LONG_CALL")
-TOP_GROWTH = 3      # momentum opportunities in the plan
-TOP_INCOME = 2      # option-income opportunities in the plan
+TOP_GROWTH = 5         # momentum satellite names in the plan (incl the AMD tier)
+TOP_INCOME = 2         # option-income opportunities in the plan
+SATELLITE_PER_NAME_PCT = 0.05   # each momentum satellite ~5% NLV → ~25% across 5
 
 
 def _f(v, default: float = 0.0) -> float:
@@ -100,7 +107,7 @@ def _income_candidates(scan_rows: list[dict], today: str) -> list[dict]:
 
 
 def _growth_candidates(screen_rows: list[dict], today: str, nlv: float,
-                       per_name_pct: float = 0.10) -> list[dict]:
+                       per_name_pct: float = SATELLITE_PER_NAME_PCT) -> list[dict]:
     """Top momentum growth picks for `today` from screen_candidates."""
     todays = [r for r in screen_rows
               if (r.get("date") or "")[:10] == today

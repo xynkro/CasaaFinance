@@ -1,6 +1,6 @@
 import type { DailyPlanRow } from "../data";
 import { Card } from "./Card";
-import { ClipboardList, Shield, TrendingUp, Coins, CircleDollarSign } from "lucide-react";
+import { ClipboardList, Shield, TrendingUp, Coins, CircleDollarSign, Layers } from "lucide-react";
 
 function num(v?: string): number {
   const n = Number(v);
@@ -8,6 +8,7 @@ function num(v?: string): number {
 }
 
 const LEG_META: Record<string, { label: string; icon: typeof Shield; cls: string }> = {
+  core:      { label: "Core",      icon: Layers,            cls: "text-indigo-300" },
   hedge:     { label: "Hedge",     icon: Shield,            cls: "text-violet-300" },
   protector: { label: "Protector", icon: Coins,             cls: "text-sky-300" },
   growth:    { label: "Growth",    icon: TrendingUp,        cls: "text-emerald-300" },
@@ -58,7 +59,7 @@ export function TodaysPlanCard({ plan }: { plan: DailyPlanRow[] }) {
   if (!plan.length) return null;
   const rank = (r: DailyPlanRow) => num(r.rank);
   const rows = [...plan].sort((a, b) => rank(a) - rank(b));
-  const standing = rows.filter((r) => ["hedge", "protector"].includes((r.leg || "").toLowerCase()));
+  const standing = rows.filter((r) => ["core", "hedge", "protector"].includes((r.leg || "").toLowerCase()));
   const opps = rows.filter((r) => ["growth", "income"].includes((r.leg || "").toLowerCase()));
   const filled = rows.filter((r) => (r.fill_status || "").toLowerCase().startsWith("filled")).length;
 
@@ -78,7 +79,7 @@ export function TodaysPlanCard({ plan }: { plan: DailyPlanRow[] }) {
       {standing.length > 0 && (
         <div className="mb-1">
           <div className="text-[length:var(--t-2xs)] text-slate-500 uppercase tracking-wide mb-0.5">
-            Standing allocation (hedge + protector)
+            Standing allocation (core + hedge + protector)
           </div>
           <div className="divide-y divide-white/5">
             {standing.map((r, i) => <PlanRow key={`s${i}`} row={r} />)}

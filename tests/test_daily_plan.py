@@ -20,19 +20,23 @@ TODAY = "2026-06-01"
 def test_standing_allocation_sizes_to_nlv():
     rows = bdp.standing_allocation_rows(10_000)
     by = {r["ticker"]: r for r in rows}
+    assert by["QQQ"]["notional"] == 4500.0 and by["QQQ"]["leg"] == "core"
     assert by["VIXM"]["notional"] == 500.0 and by["VIXM"]["leg"] == "hedge"
-    assert by["IEF"]["notional"] == 700.0 and by["IEF"]["leg"] == "protector"
-    assert by["TLT"]["notional"] == 600.0
-    assert by["GLD"]["notional"] == 500.0
-    # hedge + protector together ≈ 23% of NLV
-    assert round(sum(r["notional"] for r in rows)) == 2300
+    assert by["IEF"]["notional"] == 600.0 and by["IEF"]["leg"] == "protector"
+    assert by["GLD"]["notional"] == 400.0 and by["GLD"]["leg"] == "protector"
+    assert "TLT" not in by                          # dropped (rate bet, not protection)
+    # defensive (hedge + protector) is 15% of NLV; core is 45% on top
+    defensive = sum(r["notional"] for r in rows if r["leg"] in ("hedge", "protector"))
+    assert round(defensive) == 1500              # 5% + 6% + 4%
+    assert round(by["QQQ"]["notional"]) == 4500
 
 
-def test_plan_always_includes_hedge_and_protector():
+def test_plan_always_includes_core_hedge_protector():
     """Even with zero opportunities, the all-rounded sleeves are present."""
     plan = bdp.build_plan(10_000, [], [], TODAY)
     legs = {r["leg"] for r in plan}
-    assert "hedge" in legs and "protector" in legs
+    assert {"core", "hedge", "protector"} <= legs
+    assert {r["ticker"] for r in plan if r["leg"] == "core"} == {"QQQ"}
     assert {r["ticker"] for r in plan if r["leg"] == "hedge"} == {"VIXM"}
 
 
@@ -51,12 +55,12 @@ def test_opportunities_are_a_mix_capped_and_ranked():
     ]
     plan = bdp.build_plan(10_000, scan, screen, TODAY)
     opps = [r for r in plan if r["leg"] in ("growth", "income")]
-    # TOP_GROWTH (3) + TOP_INCOME (2) = 5 opportunities max
-    assert len(opps) == 5
-    assert sum(1 for r in opps if r["leg"] == "growth") == 3   # NBIS/AMD/QCOM (top 3)
-    assert sum(1 for r in opps if r["leg"] == "income") == 2   # META/IBM
-    assert "AVGO" not in {r["ticker"] for r in opps}           # 4th growth dropped
-    # opportunities ranked by conviction desc
+    # TOP_GROWTH (5) caps growth, TOP_INCOME (2) caps income → all 4 growth + 2 income
+    assert sum(1 for r in opps if r["leg"] == "growth") == 4   # AMD included now
+    assert sum(1 for r in opps if r["leg"] == "income") == 2
+    assert "AMD" in {r["ticker"] for r in opps}                # the name Caspar wanted
+    # satellite sized to ~5% NLV each
+    assert opps[[r["leg"] for r in opps].index("growth")]["notional"] == 500.0
     convs = [r["conviction"] for r in opps]
     assert convs == sorted(convs, reverse=True)
 
