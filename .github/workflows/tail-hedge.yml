@@ -1,20 +1,13 @@
-name: Tail Hedge — Weekly
+name: Tail Hedge — Weekly (RETIRED)
 
-# The convex hedge leg of the all-rounded book. Reads each account's NLV +
-# the macro regime (SPY≈spx/10, VIX, exposure posture) and writes ONE hedge
-# recommendation per account to decision_queue (bucket=hedge):
-#   • a defined-risk SPY put-spread when the budget fits a contract, or
-#   • a fractional VIXM long-vol sleeve on small accounts.
-# Sizing is regime-gated (lean in as the regime sours, don't chase a vol spike,
-# hard-capped at 2% of NLV). Recommendation only — the user executes.
-#
-# Weekly: a tail hedge is a slow-moving allocation, not a daily trade.
-# No FMP needed; pure portfolio math + a BSM cost estimate.
+# RETIRED 2026-06-04 — superseded by the unified daily_plan, whose standing
+# allocation now owns the VIXM hedge sleeve. This script's only output was a
+# hedge DecisionRow in decision_queue, which is now redundant noise on the
+# Decisions page. Schedule DISABLED; left dispatch-only. Do NOT re-enable.
 
 on:
-  schedule:
-    # 23:15 UTC Monday = 07:15 SGT Tuesday — after the daily snapshots/macro.
-    - cron: "15 23 * * 1"
+  # schedule:                  # DISABLED — hedge lives in the unified daily_plan
+  #   - cron: "15 23 * * 1"
   workflow_dispatch:
     inputs:
       dry:

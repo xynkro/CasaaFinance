@@ -41,6 +41,39 @@ def _paths() -> tuple[Path, Path]:
     return client_secret, token_cache
 
 
+def _install_sheets_retry(max_tries: int = 5, base_delay: float = 5.0) -> None:
+    """Patch gspread's HTTP layer to retry on Google Sheets rate limits (429)
+    and transient 5xx, with exponential backoff. Many workflows hit the Sheet in
+    the same minute and trip 'Read requests per minute' — a short backoff sleeps
+    past the window instead of failing the whole run. Idempotent + defensive."""
+    try:
+        import time
+        import gspread
+        from gspread.exceptions import APIError
+        hc = gspread.http_client.HTTPClient
+    except Exception:
+        return
+    if getattr(hc.request, "_casaa_retry", False):
+        return
+    _orig = hc.request
+
+    def _request(self, *args, **kwargs):
+        delay = base_delay
+        for attempt in range(max_tries):
+            try:
+                return _orig(self, *args, **kwargs)
+            except APIError as e:
+                code = getattr(getattr(e, "response", None), "status_code", None)
+                if code in (429, 500, 502, 503) and attempt < max_tries - 1:
+                    time.sleep(delay)
+                    delay = min(delay * 2, 60)
+                    continue
+                raise
+
+    _request._casaa_retry = True
+    hc.request = _request
+
+
 def authenticate(force: bool = False) -> gspread.Client:
     """
     Returns an authorised gspread client. Three credential paths:
@@ -53,6 +86,8 @@ def authenticate(force: bool = False) -> gspread.Client:
 
     `force=True` only affects path 3 (deletes cached token to force re-consent).
     """
+    _install_sheets_retry()   # backoff on 429 / transient 5xx for every request
+
     # Path 1: OAuth user-credential JSON via env var (CI-friendly)
     token_json = os.environ.get("OAUTH_TOKEN_JSON")
     if token_json:

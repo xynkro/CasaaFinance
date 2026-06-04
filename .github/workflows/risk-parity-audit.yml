@@ -63,8 +63,10 @@ jobs:
           if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
           python scripts/risk_parity_audit.py $ARGS
 
-      - name: Generate rebalance recommendations
-        run: |
-          ARGS=""
-          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="--dry"; fi
-          python scripts/risk_parity_recommend.py $ARGS
+      # RETIRED 2026-06-04 — risk_parity_recommend wrote allocation DecisionRows
+      # to decision_queue, now superseded by the unified daily_plan's standing
+      # allocation. The audit above still runs (feeds the PWA Risk Allocation
+      # card via the risk_parity_audit tab); only the redundant decision write
+      # is removed.
+      # - name: Generate rebalance recommendations
+      #   run: python scripts/risk_parity_recommend.py
