@@ -494,6 +494,40 @@ def ping_macro_news(
     )
 
 
+def ping_macro_surprise(interp: dict) -> dict:
+    """Edge-triggered macro-RELEASE alert with a tailored 'so what' — keyed off
+    the actual-vs-forecast surprise, so it's specific, not canned. Zero AI cost.
+    `interp` is the dict from src.macro_playbook.interpret_surprise()."""
+    import html
+
+    def _n(v):
+        if v is None:
+            return ""
+        return f"{v:g}"
+
+    lean = interp.get("lean", "")
+    emoji = {"hawkish": "🦅", "dovish": "🕊️", "risk_on": "📈", "risk_off": "📉"}.get(lean, "📊")
+    unit = interp.get("unit", "") or ""
+    a, fc, prev = interp.get("actual"), interp.get("forecast"), interp.get("previous")
+    label = html.escape(str(interp.get("label", "")))
+    direction = interp.get("direction", "")
+    prev_str = f" · prev {_n(prev)}{unit}" if prev is not None else ""
+
+    lines = [
+        f"📊 <b>{label}</b> · <code>{_n(a)}{unit}</code> vs {_n(fc)}{unit} est"
+        f" ({direction}{prev_str})",
+        f"{emoji} <b>{lean.replace('_', ' ').title()} surprise</b> — "
+        f"{html.escape(interp.get('market_take', ''))}",
+        f"📍 Book: {html.escape(interp.get('book_note', ''))}",
+    ]
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=MACRO_NEWS_TOPIC,
+        disable_web_page_preview=True,
+    )
+
+
 # ────────────────────────────────────────────────────────────────────
 # Insider Trading topic — gov spending confluence pulse
 # ────────────────────────────────────────────────────────────────────

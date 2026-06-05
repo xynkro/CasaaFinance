@@ -32,6 +32,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,6 +43,7 @@ from src import sheets as sh        # noqa: E402
 from src import schema as S         # noqa: E402
 from src import telegram as tg      # noqa: E402
 from src.macro_blackouts import MacroFeed  # noqa: E402
+from src import macro_playbook as mp  # noqa: E402
 
 # Match the PWA evaluator semantics — these strategies BUY when price
 # falls TO the entry level. SELL/TRIM strategies wait for price to RISE
@@ -395,6 +397,40 @@ def load_exposure_rec(client) -> str:
             latest = r[c_d]
             rec = r[c_r]
     return rec
+
+
+def load_macro_prints(client) -> list[dict]:
+    """Today's US macro releases that have PRINTED — actual + forecast both
+    present. Feeds the macro-surprise playbook (interpret_surprise filters down
+    to the events it has a take on)."""
+    try:
+        ss = sh._open_sheet(client)
+        rows = ss.worksheet(S.EconomicEventRow.TAB_NAME).get_all_values()
+    except Exception:
+        return []
+    if len(rows) < 2:
+        return []
+    ci = {h: i for i, h in enumerate(rows[0])}
+    need = ("date", "event", "actual", "forecast")
+    if not all(k in ci for k in need):
+        return []
+    today = date.today().isoformat()
+    out: list[dict] = []
+    for r in rows[1:]:
+        def g(k):
+            return r[ci[k]] if k in ci and len(r) > ci[k] else ""
+        if g("date")[:10] != today:
+            continue
+        if (g("country") or "").upper() != "US":
+            continue
+        if not str(g("actual")).strip() or not str(g("forecast")).strip():
+            continue
+        out.append({
+            "date": g("date"), "event": g("event"), "actual": g("actual"),
+            "forecast": g("forecast"), "previous": g("previous"),
+            "unit": g("unit"), "impact": g("impact"),
+        })
+    return out
 
 
 def _regime_context(client) -> str:
@@ -759,12 +795,30 @@ def main() -> int:
         and f"news:{n['id']}" not in prior_macro_alerts
     ][:HOT_NEWS_PING_CAP]
 
+    # ── Macro-surprise plan — today's US releases with a real beat/miss ──
+    # interpret_surprise filters to playbook events (CPI/NFP/FOMC/...) with a
+    # non-trivial surprise; dedup keeps it once per release. The free, tailored
+    # "so what" — no AI tokens.
+    MACRO_SURPRISE_CAP = 3
+    macro_surprise_plan: list[tuple[str, dict]] = []
+    for ev in load_macro_prints(client):
+        interp = mp.interpret_surprise(
+            ev["event"], ev["actual"], ev["forecast"], ev["previous"], ev["unit"])
+        if not interp:
+            continue
+        skey = f"macro_print:{ev['date'][:10]}-{ev['event']}"
+        if skey in prior_macro_alerts:
+            continue
+        macro_surprise_plan.append((skey, interp))
+    macro_surprise_plan = macro_surprise_plan[:MACRO_SURPRISE_CAP]
+
     n_hot = sum(1 for n in macro.news if n.get("hot"))
     n_fresh = sum(1 for n in macro.news if n.get("hot") and (n.get("datetime") or "") >= fresh_cutoff)
     logger.info(
         f"Macro plan: blackout={'YES' if macro_blackout_plan else 'no'} | "
         f"news={len(macro_news_plan)} of {n_hot} hot "
-        f"({n_fresh} fresh, {len(prior_macro_alerts)} already alerted)"
+        f"({n_fresh} fresh, {len(prior_macro_alerts)} already alerted) | "
+        f"surprises={len(macro_surprise_plan)}"
     )
 
     # ── Portfolio-ticker mirror plan (B) ───────────────────────────────
@@ -800,7 +854,10 @@ def main() -> int:
             logger.info(f"  [DRY] would fire BLACKOUT: {ev.get('event')} ({ev.get('_minutes_until')}min)")
         for n in macro_news_plan:
             logger.info(f"  [DRY] would fire NEWS: [{n.get('source','?')}] {n.get('headline','')[:80]}")
-        if not macro_blackout_plan and not macro_news_plan:
+        for _, it in macro_surprise_plan:
+            logger.info(f"  [DRY] would fire SURPRISE: {it['label']} {it['actual']} vs {it['forecast']} "
+                        f"({it['direction']} → {it['lean']})")
+        if not macro_blackout_plan and not macro_news_plan and not macro_surprise_plan:
             logger.info("  [DRY] no macro pings queued")
         return 0
 
@@ -941,6 +998,23 @@ def main() -> int:
             event_type="hot_news",
             event_summary=n.get("headline", "")[:200],
             event_time=n.get("datetime", now_iso),
+            alerted_at=now_iso,
+            updated_at=now_iso,
+        ))
+
+    # Macro-surprise pings — tailored "so what" on today's US releases.
+    for skey, interp in macro_surprise_plan:
+        try:
+            tg.ping_macro_surprise(interp)
+            macro_pinged += 1
+            logger.info(f"  ✓ sent SURPRISE: {interp['label']} {interp['direction']} → {interp['lean']}")
+        except Exception as e:
+            logger.warning(f"  ✗ SURPRISE failed: {e}")
+        macro_state_rows.append(S.MacroAlertStateRow(
+            event_key=skey,
+            event_type="macro_surprise",
+            event_summary=f"{interp['label']} {interp['actual']} vs {interp['forecast']} ({interp['direction']})"[:200],
+            event_time=now_iso,
             alerted_at=now_iso,
             updated_at=now_iso,
         ))
