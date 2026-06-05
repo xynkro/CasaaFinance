@@ -55,6 +55,8 @@ INCOME_STRATEGIES = ("CSP", "CC", "PCS", "CCS", "IC", "LONG_CALL")
 TOP_GROWTH = 5         # momentum satellite names in the plan (incl the AMD tier)
 TOP_INCOME = 2         # option-income opportunities in the plan
 SATELLITE_PER_NAME_PCT = 0.05   # each momentum satellite ~5% NLV → ~25% across 5
+MF_CORE_CAP = 3                 # max MF Foundational names added to the satellite
+MF_CORE_PER_NAME_PCT = 0.04     # equal-weight, ~4% NLV each (inside satellite budget)
 
 
 def _f(v, default: float = 0.0) -> float:
@@ -136,6 +138,31 @@ def _growth_candidates(screen_rows: list[dict], today: str, nlv: float,
     return rows
 
 
+def _mf_core_candidates(curated_rows: list[dict], today: str, nlv: float,
+                        cap: int = MF_CORE_CAP, per_name_pct: float = MF_CORE_PER_NAME_PCT) -> list[dict]:
+    """Equal-weight, capped MF Foundational sleeve. Selection is MF's edge; sizing
+    stays disciplined (equal-weight, capped, inside the satellite budget). Tagged
+    source=motley_fool so the benchmark can isolate it. INPUT, never auto-signal."""
+    core = [r for r in curated_rows
+            if (r.get("date") or "")[:10] == today
+            and (r.get("role") or "").lower() == "core"]
+    # de-dup by ticker, stable order
+    seen, picks = set(), []
+    for r in core:
+        tk = (r.get("ticker") or "").upper()
+        if tk and tk not in seen:
+            seen.add(tk); picks.append(tk)
+    picks = picks[:cap]
+    notional = round(per_name_pct * nlv, 2)
+    return [{
+        "leg": "mf_core", "ticker": tk, "strategy": "GROWTH",
+        "detail": f"${notional:,.0f} notional (MF Foundational)",
+        "conviction": 90.0, "target_pct": 0.0, "notional": notional,
+        "reason": "Motley Fool Foundational — equal-weight conviction sleeve",
+        "source": "motley_fool",
+    } for tk in picks]
+
+
 # Macro-lean tilt — regime-aware SIZING of the growth satellite (news as INPUT,
 # never a trade signal). Hawkish/risk-off → don't add aggressively into a tape
 # that compresses growth multiples; dovish/risk-on → lean in. Modest by design:
@@ -149,18 +176,19 @@ _LEAN_TILT = {
 
 
 def build_plan(nlv: float, scan_rows: list[dict], screen_rows: list[dict],
-               today: str, lean: str = "neutral") -> list[dict]:
+               today: str, lean: str = "neutral", curated_rows: list[dict] | None = None) -> list[dict]:
     """Assemble the full ranked plan: standing allocation + top opportunities,
     with the growth satellite sized by today's macro-surprise `lean`."""
     plan = standing_allocation_rows(nlv)
     n_growth, sat_pct = _LEAN_TILT.get(lean, (TOP_GROWTH, SATELLITE_PER_NAME_PCT))
     income = _income_candidates(scan_rows, today)[:TOP_INCOME]
     growth = _growth_candidates(screen_rows, today, nlv, per_name_pct=sat_pct)[:n_growth]
+    mf_core = _mf_core_candidates(curated_rows or [], today, nlv)
     if lean in _LEAN_TILT:
         tilt = "trimmed (hawkish/risk-off)" if n_growth < TOP_GROWTH else "leaned-in (dovish/risk-on)"
         for g in growth:
             g["reason"] = f"[macro {lean}: {tilt}] {g['reason']}"[:90]
-    opportunities = sorted(income + growth, key=lambda x: x["conviction"], reverse=True)
+    opportunities = sorted(income + growth + mf_core, key=lambda x: x["conviction"], reverse=True)
     plan.extend(opportunities)
     for i, row in enumerate(plan, start=1):
         row["rank"] = i
@@ -206,7 +234,9 @@ def main() -> int:
     except (IndexError, KeyError):
         pass
 
-    plan = build_plan(nlv, latest("scan_results"), latest("screen_candidates"), today, lean=lean)
+    curated = latest("curated_picks")
+    plan = build_plan(nlv, latest("scan_results"), latest("screen_candidates"),
+                      today, lean=lean, curated_rows=curated)
     now_iso = S.now_sgt_iso()
     print(f"=== Daily Plan · {today} · NLV ${nlv:,.0f} · macro lean: {lean} · {len(plan)} rows ===\n")
     rows = []
