@@ -801,16 +801,40 @@ def main() -> int:
     # "so what" — no AI tokens.
     MACRO_SURPRISE_CAP = 3
     macro_surprise_plan: list[tuple[str, dict]] = []
+    all_leans: list[tuple[str, str]] = []   # (label, lean) across ALL today's prints
     for ev in load_macro_prints(client):
         interp = mp.interpret_surprise(
             ev["event"], ev["actual"], ev["forecast"], ev["previous"], ev["unit"])
         if not interp:
             continue
+        all_leans.append((interp["label"], interp["lean"]))
         skey = f"macro_print:{ev['date'][:10]}-{ev['event']}"
         if skey in prior_macro_alerts:
             continue
         macro_surprise_plan.append((skey, interp))
     macro_surprise_plan = macro_surprise_plan[:MACRO_SURPRISE_CAP]
+
+    # Persist the net lean (from ALL of today's prints, not just newly-alerted) so
+    # build_daily_plan can tilt sizing. Risk-off dominates a tie (defense wins).
+    if all_leans and not args.dry:
+        today = date.today().isoformat()
+        leans = [l for _, l in all_leans]
+        order = ["risk_off", "hawkish", "dovish", "risk_on"]
+        net_lean = max(set(leans), key=lambda x: (leans.count(x), -order.index(x) if x in order else -9))
+        summary = " · ".join(f"{lab}→{ln}" for lab, ln in all_leans[:5])
+        try:
+            sh.ensure_headers(client, S.MacroLeanRow.TAB_NAME, S.MacroLeanRow.HEADERS)
+            ws = sh._open_sheet(client).worksheet(S.MacroLeanRow.TAB_NAME)
+            existing = ws.get_all_values()
+            keep = [existing[0]] if existing else [S.MacroLeanRow.HEADERS]
+            keep += [r for r in (existing[1:] if existing else []) if r and r[0][:10] != today]
+            keep.append(S.MacroLeanRow(date=today, net_lean=net_lean, summary=summary,
+                                       updated_at=now_iso).to_row())
+            ws.clear()
+            ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+            logger.info(f"  ✓ macro_lean: {net_lean} ({summary})")
+        except Exception as e:
+            logger.warning(f"  ✗ macro_lean write failed: {e}")
 
     n_hot = sum(1 for n in macro.news if n.get("hot"))
     n_fresh = sum(1 for n in macro.news if n.get("hot") and (n.get("datetime") or "") >= fresh_cutoff)

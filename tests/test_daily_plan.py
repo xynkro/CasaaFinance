@@ -95,3 +95,37 @@ def test_schema_row_roundtrips():
     assert cells[idx["execute"]] == "TRUE"
     assert cells[idx["ticker"]] == "VIXM"
     assert cells[idx["leg"]] == "hedge"
+
+
+def _screen(n):
+    return [{"date": TODAY, "source": "momentum", "ticker": f"T{i}", "score": str(90 - i),
+             "rationale": "mom"} for i in range(n)]
+
+
+def test_macro_lean_hawkish_trims_growth():
+    """Hawkish lean → fewer growth names, smaller satellite size (don't add into
+    a multiple-compressing tape)."""
+    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="hawkish")
+    g = [r for r in plan if r["leg"] == "growth"]
+    assert len(g) == 3                       # trimmed from 5
+    assert g[0]["notional"] == 300.0         # 3% of 10k, not 5%
+    assert "macro hawkish" in g[0]["reason"]
+
+
+def test_macro_lean_dovish_leans_in():
+    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="dovish")
+    g = [r for r in plan if r["leg"] == "growth"]
+    assert len(g) == 5
+    assert g[0]["notional"] == 600.0         # leaned in to 6%
+
+
+def test_macro_lean_neutral_is_baseline():
+    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="neutral")
+    g = [r for r in plan if r["leg"] == "growth"]
+    assert len(g) == 5 and g[0]["notional"] == 500.0   # default 5/5%
+
+
+def test_macro_lean_schema_roundtrips():
+    from src.schema import MacroLeanRow as R
+    cells = R(date=TODAY, net_lean="hawkish", summary="CPI→hawkish").to_row()
+    assert len(cells) == len(R.HEADERS) and cells[R.HEADERS.index("net_lean")] == "hawkish"

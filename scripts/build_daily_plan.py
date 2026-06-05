@@ -136,12 +136,30 @@ def _growth_candidates(screen_rows: list[dict], today: str, nlv: float,
     return rows
 
 
+# Macro-lean tilt — regime-aware SIZING of the growth satellite (news as INPUT,
+# never a trade signal). Hawkish/risk-off → don't add aggressively into a tape
+# that compresses growth multiples; dovish/risk-on → lean in. Modest by design:
+# it sizes the daily satellite, it does NOT touch the held core/hedge/protector.
+_LEAN_TILT = {
+    "hawkish":  (3, 0.03),   # (growth names, % NLV each) — trim adds
+    "risk_off": (3, 0.03),
+    "dovish":   (5, 0.06),   # lean in
+    "risk_on":  (5, 0.06),
+}
+
+
 def build_plan(nlv: float, scan_rows: list[dict], screen_rows: list[dict],
-               today: str) -> list[dict]:
-    """Assemble the full ranked plan: standing allocation + top opportunities."""
+               today: str, lean: str = "neutral") -> list[dict]:
+    """Assemble the full ranked plan: standing allocation + top opportunities,
+    with the growth satellite sized by today's macro-surprise `lean`."""
     plan = standing_allocation_rows(nlv)
+    n_growth, sat_pct = _LEAN_TILT.get(lean, (TOP_GROWTH, SATELLITE_PER_NAME_PCT))
     income = _income_candidates(scan_rows, today)[:TOP_INCOME]
-    growth = _growth_candidates(screen_rows, today, nlv)[:TOP_GROWTH]
+    growth = _growth_candidates(screen_rows, today, nlv, per_name_pct=sat_pct)[:n_growth]
+    if lean in _LEAN_TILT:
+        tilt = "trimmed (hawkish/risk-off)" if n_growth < TOP_GROWTH else "leaned-in (dovish/risk-on)"
+        for g in growth:
+            g["reason"] = f"[macro {lean}: {tilt}] {g['reason']}"[:90]
     opportunities = sorted(income + growth, key=lambda x: x["conviction"], reverse=True)
     plan.extend(opportunities)
     for i, row in enumerate(plan, start=1):
@@ -179,9 +197,18 @@ def main() -> int:
     if nlv <= 0:
         nlv = 8000.0   # safe fallback so the plan still renders
 
-    plan = build_plan(nlv, latest("scan_results"), latest("screen_candidates"), today)
+    # Today's macro-surprise lean (written by trigger_alerts) tilts growth sizing.
+    lean = "neutral"
+    try:
+        ml = [r for r in latest("macro_lean") if (r.get("date") or "")[:10] == today]
+        if ml:
+            lean = (ml[-1].get("net_lean") or "neutral").lower()
+    except (IndexError, KeyError):
+        pass
+
+    plan = build_plan(nlv, latest("scan_results"), latest("screen_candidates"), today, lean=lean)
     now_iso = S.now_sgt_iso()
-    print(f"=== Daily Plan · {today} · NLV ${nlv:,.0f} · {len(plan)} rows ===\n")
+    print(f"=== Daily Plan · {today} · NLV ${nlv:,.0f} · macro lean: {lean} · {len(plan)} rows ===\n")
     rows = []
     for p in plan:
         flag = "▶" if p["execute"] else " "

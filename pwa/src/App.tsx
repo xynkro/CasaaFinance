@@ -118,6 +118,7 @@ function Dashboard() {
             scanResults={data?.scanResults ?? []}
             uoaAlerts={data?.uoaAlerts ?? []}
             gexRegime={data?.gexRegime ?? []}
+            macroLean={data?.macroLean ?? null}
             loading={loading && !data}
           />
         );

@@ -10,9 +10,11 @@ import type {
   ScanResultRow,
   UoaAlertRow,
   GexRegimeRow,
+  MacroLeanRow,
 } from "../data";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { GexRegimeBanner } from "../cards/GexRegimeBanner";
+import { MacroLeanBanner } from "../cards/MacroLeanBanner";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
 import { UoaFlowCard } from "../cards/UoaFlowCard";
@@ -35,6 +37,7 @@ export function OptionsPage({
   scanResults,
   uoaAlerts,
   gexRegime,
+  macroLean,
   loading,
 }: {
   options: OptionRow[];
@@ -48,6 +51,7 @@ export function OptionsPage({
   scanResults: ScanResultRow[];
   uoaAlerts: UoaAlertRow[];
   gexRegime: GexRegimeRow[];
+  macroLean?: MacroLeanRow | null;
   loading: boolean;
 }) {
   const [sub, setSub] = useState<Subtab>(() => {
@@ -82,6 +86,13 @@ export function OptionsPage({
       {gexRegime.length > 0 && (
         <div className="fade-up fade-up-1 mb-3">
           <GexRegimeBanner rows={gexRegime} />
+        </div>
+      )}
+
+      {/* Macro-surprise lean — what today's releases mean, and how the plan tilts */}
+      {macroLean?.net_lean && (
+        <div className="fade-up fade-up-1 mb-3">
+          <MacroLeanBanner macroLean={macroLean} />
         </div>
       )}
 

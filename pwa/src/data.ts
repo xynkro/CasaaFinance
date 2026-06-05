@@ -774,6 +774,13 @@ export interface DailyPlanRow {
   updated_at?: string;
 }
 
+export interface MacroLeanRow {
+  date: string;
+  net_lean?: string;     // hawkish | dovish | risk_on | risk_off | neutral
+  summary?: string;      // "Core CPI→hawkish · GDP→risk_on"
+  updated_at?: string;
+}
+
 export interface GexRegimeRow {
   date: string;
   symbol: string;                 // SPY | QQQ
@@ -1325,6 +1332,7 @@ export interface DashboardData {
   paperBenchmark: PaperBenchmarkRow[];   // "did each pick beat SPY?" (latest day, incl. a TOTAL row)
   gexRegime: GexRegimeRow[];             // dealer gamma regime per index (latest day: SPY, QQQ)
   dailyPlan: DailyPlanRow[];             // the unified plan the auto-trader executes (latest day)
+  macroLean: MacroLeanRow | null;        // today's macro-surprise lean (tilts the plan sizing)
   error: string | null;
 }
 
@@ -1404,6 +1412,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       paperBenchmarkRows,
       gexRegimeRows,
       dailyPlanRows,
+      macroLeanRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -1423,6 +1432,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTabByName<PaperBenchmarkRow>("paper_benchmark").catch(() => [] as PaperBenchmarkRow[]),
       fetchTabByName<GexRegimeRow>("gex_regime").catch(() => [] as GexRegimeRow[]),
       fetchTabByName<DailyPlanRow>("daily_plan").catch(() => [] as DailyPlanRow[]),
+      fetchTabByName<MacroLeanRow>("macro_lean").catch(() => [] as MacroLeanRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -1518,6 +1528,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       paperBenchmark: latestGroup(paperBenchmarkRows),
       gexRegime: latestGroup(gexRegimeRows),
       dailyPlan: latestGroup(dailyPlanRows),
+      macroLean: latest(macroLeanRows),
       error: null,
     };
   } catch (e) {
@@ -1553,6 +1564,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       paperBenchmark: [],
       gexRegime: [],
       dailyPlan: [],
+      macroLean: null,
       error: String(e),
     };
   }

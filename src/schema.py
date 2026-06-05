@@ -2177,6 +2177,24 @@ class DailyPlanRow:
 
 
 @dataclass
+class MacroLeanRow:
+    """One row/day: the net macro-surprise lean from today's US releases (written
+    by trigger_alerts via the macro_playbook). build_daily_plan reads it to tilt
+    sizing (hawkish/risk_off → trim growth adds; dovish/risk_on → lean in), and
+    the PWA shows it as a regime banner. News as INPUT, never a trade signal."""
+    TAB_NAME = "macro_lean"
+    HEADERS = ["date", "net_lean", "summary", "updated_at"]
+
+    date: str
+    net_lean: str          # hawkish | dovish | risk_on | risk_off | neutral
+    summary: str           # e.g. "Core CPI→hawkish · GDP→risk_on"
+    updated_at: str = ""
+
+    def to_row(self) -> List[str]:
+        return [self.date, self.net_lean, self.summary, self.updated_at]
+
+
+@dataclass
 class PaperBenchmarkRow:
     """'Did this pick beat just holding SPY?' — per open paper position + a TOTAL
     row. Compares each position's P&L to the P&L the SAME entry capital would
