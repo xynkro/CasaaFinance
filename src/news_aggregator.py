@@ -62,6 +62,9 @@ RSS_SOURCES: list[tuple[str, str, str]] = [
     # NYTimes — free RSS, headline + summary (DealBook/Economy carry macro).
     ("NYTimes",    "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml",  "nytimes"),
     ("NYTimes",    "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "nytimes"),
+    # Seeking Alpha Market Currents — real-time markets news (the news feed, not
+    # the opinion/analysis firehose). Free RSS; accepts our UA.
+    ("Seeking Alpha", "https://seekingalpha.com/market_currents.xml",           "seekingalpha"),
 ]
 # Note: Reuters business RSS is no longer free as of late 2024. Finnhub
 # `general` already surfaces Reuters wires. Yahoo Finance and Investing.com
