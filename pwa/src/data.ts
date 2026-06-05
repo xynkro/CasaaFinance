@@ -781,6 +781,17 @@ export interface MacroLeanRow {
   updated_at?: string;
 }
 
+// One curated pick from an external human-vetted source (Motley Fool Stock
+// Advisor today). Read in-session via Chrome MCP, classified into a role, fed
+// to the engine as INPUT — never an auto-signal. Every MF surface in the PWA
+// is read-only/reference; none of them trigger trades.
+export interface CuratedPickRow {
+  date: string; ticker: string; role: string; mf_type: string;
+  rec_date: string; rec_price: string; market_cap: string;
+  return_since_rec: string; return_vs_sp: string; moneyball_score: string;
+  source: string; note: string; updated_at: string;
+}
+
 export interface GexRegimeRow {
   date: string;
   symbol: string;                 // SPY | QQQ
@@ -1333,6 +1344,10 @@ export interface DashboardData {
   gexRegime: GexRegimeRow[];             // dealer gamma regime per index (latest day: SPY, QQQ)
   dailyPlan: DailyPlanRow[];             // the unified plan the auto-trader executes (latest day)
   macroLean: MacroLeanRow | null;        // today's macro-surprise lean (tilts the plan sizing)
+  curatedPicks: CuratedPickRow[];        // raw curated picks, latest day (Motley Fool today)
+  mfWatchlist: CuratedPickRow[];         // role=watchlist — research, not a buy
+  mfOverlay: CuratedPickRow[];           // role=overlay — CSP-entry targets (suggestion-only)
+  mfReference: CuratedPickRow[];         // role=reference — Scorecard, reference only
   error: string | null;
 }
 
@@ -1413,6 +1428,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       gexRegimeRows,
       dailyPlanRows,
       macroLeanRows,
+      curatedPickRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -1433,6 +1449,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTabByName<GexRegimeRow>("gex_regime").catch(() => [] as GexRegimeRow[]),
       fetchTabByName<DailyPlanRow>("daily_plan").catch(() => [] as DailyPlanRow[]),
       fetchTabByName<MacroLeanRow>("macro_lean").catch(() => [] as MacroLeanRow[]),
+      fetchTabByName<CuratedPickRow>("curated_picks").catch(() => [] as CuratedPickRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -1529,6 +1546,15 @@ export async function fetchDashboard(): Promise<DashboardData> {
       gexRegime: latestGroup(gexRegimeRows),
       dailyPlan: latestGroup(dailyPlanRows),
       macroLean: latest(macroLeanRows),
+      ...(() => {
+        const cp = latestGroup(curatedPickRows);
+        return {
+          curatedPicks: cp,
+          mfWatchlist: cp.filter((r) => r.role === "watchlist"),
+          mfOverlay: cp.filter((r) => r.role === "overlay"),
+          mfReference: cp.filter((r) => r.role === "reference"),
+        };
+      })(),
       error: null,
     };
   } catch (e) {
@@ -1565,6 +1591,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       gexRegime: [],
       dailyPlan: [],
       macroLean: null,
+      curatedPicks: [], mfWatchlist: [], mfOverlay: [], mfReference: [],
       error: String(e),
     };
   }
