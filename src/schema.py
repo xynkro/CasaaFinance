@@ -2195,6 +2195,38 @@ class MacroLeanRow:
 
 
 @dataclass
+class CuratedPickRow:
+    """One curated pick from an external human-vetted source (Motley Fool Stock
+    Advisor today). Read in-session via Chrome MCP, classified into a role, and
+    fed to the engine as INPUT — never an auto-signal. Equal-weight + separately
+    benchmarked vs SPY so we KNOW if the subscription earns its keep."""
+    TAB_NAME = "curated_picks"
+    HEADERS = ["date", "ticker", "role", "mf_type", "rec_date", "rec_price",
+               "market_cap", "return_since_rec", "return_vs_sp", "moneyball_score",
+               "source", "note", "updated_at"]
+
+    date: str
+    ticker: str
+    role: str            # core | watchlist | overlay | reference
+    mf_type: str = ""    # Cautious | Moderate | Aggressive (MF risk type)
+    rec_date: str = ""
+    rec_price: str = ""
+    market_cap: str = ""
+    return_since_rec: str = ""
+    return_vs_sp: str = ""
+    moneyball_score: str = ""
+    source: str = "motley_fool"
+    note: str = ""
+    updated_at: str = ""
+
+    def to_row(self) -> List[str]:
+        return [self.date, self.ticker, self.role, self.mf_type, self.rec_date,
+                self.rec_price, self.market_cap, self.return_since_rec,
+                self.return_vs_sp, self.moneyball_score, self.source,
+                self.note, self.updated_at]
+
+
+@dataclass
 class PaperBenchmarkRow:
     """'Did this pick beat just holding SPY?' — per open paper position + a TOTAL
     row. Compares each position's P&L to the P&L the SAME entry capital would
