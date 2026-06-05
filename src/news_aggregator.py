@@ -39,6 +39,13 @@ RSS_SOURCES: list[tuple[str, str, str]] = [
     # summary even if the article is gated.
     ("WSJ",        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",         "wsj"),
     ("WSJ Opinion","https://feeds.a.dj.com/rss/RSSOpinion.xml",             "wsj"),
+    # Financial Times — Caspar requested FT for macro. The articles are
+    # paywalled, but the headline + standfirst in the PUBLIC RSS is free (same
+    # as WSJ above). Global Economy + Markets are the macro desks; placed high
+    # so FT wins the dedupe when a wire story is shared. NO full-text scraping.
+    ("FT",         "https://www.ft.com/global-economy?format=rss",          "ft"),
+    ("FT Markets", "https://www.ft.com/markets?format=rss",                 "ft"),
+    ("FT World",   "https://www.ft.com/world?format=rss",                   "ft"),
     # Bloomberg Markets — usually the freshest macro takes; readable
     # headlines + 1-2 sentence summaries.
     ("Bloomberg",  "https://feeds.bloomberg.com/markets/news.rss",          "bloomberg"),
