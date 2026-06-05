@@ -10,6 +10,7 @@ import { UpcomingCalendarsCard } from "../cards/UpcomingCalendarsCard";
 import { ConcentrationCard } from "../cards/ConcentrationCard";
 import { GovConfluenceCard } from "../cards/GovConfluenceCard";
 import { CongressTradesCard } from "../cards/CongressTradesCard";
+import { MotleyFoolCard } from "../cards/MotleyFoolCard";
 import { TldrTodayCard } from "../cards/TldrTodayCard";
 import { PaperStatusCard } from "../cards/PaperStatusCard";
 import { TodaysPlanCard } from "../cards/TodaysPlanCard";
@@ -214,6 +215,15 @@ export function HomePage({
         <div className="fade-up fade-up-4 mt-4">
           <CongressTradesCard trades={data?.congressTrades ?? []} />
         </div>
+
+        {/* Motley Fool Stock Advisor — reference-only Scorecard names. Engine
+            input, NOT a signal; nothing here is auto-traded. Renders null when
+            empty (no first-deploy stub) via the length guard. */}
+        {(data?.mfReference?.length ?? 0) > 0 && (
+          <div className="fade-up fade-up-4 mt-4">
+            <MotleyFoolCard reference={data?.mfReference ?? []} />
+          </div>
+        )}
       </div>
 
       {briefOpen && daily && (
