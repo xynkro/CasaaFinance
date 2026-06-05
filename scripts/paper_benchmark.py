@@ -53,6 +53,40 @@ def position_alpha(position_pl: float, capital: float, spy_return_pct: float) ->
             "beat": position_pl > se}
 
 
+def mf_sleeve_alpha(rows: list, mf_tickers: set) -> dict | None:
+    """Aggregate the Motley Fool sleeve vs SPY from per-position benchmark rows.
+    Ignores the TOTAL / MF_SLEEVE summary rows; matches by ticker. Returns None when
+    no MF position is held — so 'is the $499/yr sleeve beating SPY?' is always
+    isolatable from the rest of the shared paper book."""
+    want = {t.upper() for t in mf_tickers}
+    mf = [r for r in rows
+          if str(getattr(r, "ticker", "")).upper() in want
+          and str(getattr(r, "ticker", "")).upper() not in ("TOTAL", "MF_SLEEVE")]
+    if not mf:
+        return None
+    pl = round(sum(float(r.position_pl) for r in mf), 2)
+    equiv = round(sum(float(r.spy_equiv_pl) for r in mf), 2)
+    return {"position_pl": pl, "spy_equiv_pl": equiv,
+            "alpha_pl": round(pl - equiv, 2), "beat_spy": (pl - equiv) > 0, "n": len(mf)}
+
+
+def _mf_core_tickers(ss) -> set:
+    """Tickers in the MF core sleeve — daily_plan rows with leg=mf_core (latest day)."""
+    try:
+        vals = ss.worksheet("daily_plan").get_all_values()
+    except Exception:
+        return set()
+    if len(vals) < 2:
+        return set()
+    rows = [dict(zip(vals[0], r)) for r in vals[1:] if any(r)]
+    dates = {(r.get("date") or "")[:10] for r in rows if r.get("date")}
+    if not dates:
+        return set()
+    latest = max(dates)
+    return {(r.get("ticker") or "").upper() for r in rows
+            if (r.get("date") or "")[:10] == latest and (r.get("leg") or "") == "mf_core"}
+
+
 def spy_return_since(spy_by_date: dict, entry_date: str, today: str) -> float:
     """% SPY return from entry → today, using the close on-or-before each date."""
     def close_on_or_before(d: str) -> float:
@@ -168,6 +202,18 @@ def main() -> int:
     from src import sheets as sh
     client = sh.authenticate()
     ss = sh._open_sheet(client)
+
+    # MF sleeve isolation — "is the Motley Fool sleeve beating SPY?" (the accountability
+    # layer: separately measurable from the rest of the shared book).
+    mf = mf_sleeve_alpha(rows, _mf_core_tickers(ss))
+    if mf:
+        print(f"  MF SLEEVE: P&L {mf['position_pl']:+.2f} · SPY-equiv {mf['spy_equiv_pl']:+.2f} "
+              f"· α {mf['alpha_pl']:+.2f}  ({mf['n']} names)")
+        rows.append(S.PaperBenchmarkRow(
+            date=today, ticker="MF_SLEEVE", entry_date="", days_held=0, cost_basis=0.0,
+            position_pl=mf["position_pl"], spy_return_pct=0.0, spy_equiv_pl=mf["spy_equiv_pl"],
+            alpha_pl=mf["alpha_pl"], beat_spy=mf["beat_spy"]))
+
     sh.ensure_headers(client, S.PaperBenchmarkRow.TAB_NAME, S.PaperBenchmarkRow.HEADERS)
     # Replace today's rows (idempotent re-run), keep history.
     ws = ss.worksheet(S.PaperBenchmarkRow.TAB_NAME)
