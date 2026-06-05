@@ -1003,7 +1003,7 @@ export function DecisionsPage({
             manual decision queue (kept for review). */}
         {dailyPlan.length > 0 && (
           <div className={nextFade()}>
-            <TodaysPlanCard plan={dailyPlan} />
+            <TodaysPlanCard plan={dailyPlan} newsByTicker={newsByTicker} />
           </div>
         )}
 

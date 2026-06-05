@@ -1,6 +1,6 @@
-import type { DailyPlanRow } from "../data";
+import type { DailyPlanRow, NewsSummary } from "../data";
 import { Card } from "./Card";
-import { ClipboardList, Shield, TrendingUp, Coins, CircleDollarSign, Layers } from "lucide-react";
+import { ClipboardList, Shield, TrendingUp, Coins, CircleDollarSign, Layers, Flame } from "lucide-react";
 
 function num(v?: string): number {
   const n = Number(v);
@@ -31,7 +31,27 @@ function StatusPill({ status }: { status?: string }) {
   );
 }
 
-function PlanRow({ row }: { row: DailyPlanRow }) {
+// Catalyst flag — reuses the news the PWA already computes. Shows ONLY when a
+// pick has fresh (24h) news with a non-trivial sentiment. It flags "there's a
+// catalyst here, check it" — it does NOT change the pick.
+function CatalystChip({ news }: { news?: NewsSummary }) {
+  if (!news || (news.count_24h ?? 0) <= 0) return null;
+  const best = news.best_score ?? 0;
+  const worst = news.worst_score ?? 0;
+  if (best < 0.35 && worst > -0.35) return null;   // no strong sentiment → skip
+  const neg = worst < -best;
+  const cls = neg
+    ? "text-rose-300 bg-rose-500/15 border-rose-500/30"
+    : "text-amber-300 bg-amber-500/15 border-amber-500/30";
+  return (
+    <span className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[length:var(--t-2xs)] font-bold border ${cls}`}
+          title={news.latest_headline || "fresh news"}>
+      <Flame size={9} /> news
+    </span>
+  );
+}
+
+function PlanRow({ row, news }: { row: DailyPlanRow; news?: NewsSummary }) {
   const meta = LEG_META[(row.leg || "").toLowerCase()] ?? LEG_META.growth;
   const Icon = meta.icon;
   return (
@@ -43,6 +63,7 @@ function PlanRow({ row }: { row: DailyPlanRow }) {
           <span className={`text-[length:var(--t-2xs)] font-semibold ${meta.cls}`}>{meta.label}</span>
           <span className="text-[length:var(--t-2xs)] text-slate-500 tabular-nums">{row.detail}</span>
           <StatusPill status={row.fill_status} />
+          <CatalystChip news={news} />
         </div>
         {row.reason && (
           <p className="text-[length:var(--t-2xs)] text-slate-600 leading-snug line-clamp-1">{row.reason}</p>
@@ -55,8 +76,12 @@ function PlanRow({ row }: { row: DailyPlanRow }) {
   );
 }
 
-export function TodaysPlanCard({ plan }: { plan: DailyPlanRow[] }) {
+export function TodaysPlanCard({ plan, newsByTicker }: {
+  plan: DailyPlanRow[];
+  newsByTicker?: Map<string, NewsSummary>;
+}) {
   if (!plan.length) return null;
+  const newsFor = (t?: string) => newsByTicker?.get((t || "").toUpperCase());
   const rank = (r: DailyPlanRow) => num(r.rank);
   const rows = [...plan].sort((a, b) => rank(a) - rank(b));
   const standing = rows.filter((r) => ["core", "hedge", "protector"].includes((r.leg || "").toLowerCase()));
@@ -82,7 +107,7 @@ export function TodaysPlanCard({ plan }: { plan: DailyPlanRow[] }) {
             Standing allocation (core + hedge + protector)
           </div>
           <div className="divide-y divide-white/5">
-            {standing.map((r, i) => <PlanRow key={`s${i}`} row={r} />)}
+            {standing.map((r, i) => <PlanRow key={`s${i}`} row={r} news={newsFor(r.ticker)} />)}
           </div>
         </div>
       )}
@@ -93,7 +118,7 @@ export function TodaysPlanCard({ plan }: { plan: DailyPlanRow[] }) {
             Opportunities (top growth + income)
           </div>
           <div className="divide-y divide-white/5">
-            {opps.map((r, i) => <PlanRow key={`o${i}`} row={r} />)}
+            {opps.map((r, i) => <PlanRow key={`o${i}`} row={r} news={newsFor(r.ticker)} />)}
           </div>
         </div>
       )}
