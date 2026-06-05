@@ -11,7 +11,9 @@ import type {
   UoaAlertRow,
   GexRegimeRow,
   MacroLeanRow,
+  CuratedPickRow,
 } from "../data";
+import { Card } from "../cards/Card";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { GexRegimeBanner } from "../cards/GexRegimeBanner";
 import { MacroLeanBanner } from "../cards/MacroLeanBanner";
@@ -20,10 +22,57 @@ import { WheelContinuationCard } from "../cards/WheelContinuationCard";
 import { UoaFlowCard } from "../cards/UoaFlowCard";
 import { HarvestContent } from "./HarvestPage";
 import { StickyTabs } from "../components/StickyTabs";
-import { Shield, Briefcase, Wheat, Activity } from "lucide-react";
+import { Shield, Briefcase, Wheat, Activity, Target } from "lucide-react";
 
 type Subtab = "defense" | "book" | "harvest" | "flow";
 const LAST_KEY = "casaa_options_subtab";
+
+/**
+ * Motley Fool CSP-overlay targets — read-only. MF flagged these as recent Buys
+ * trading near their recommended price; selling a cash-secured put is one way
+ * to enter at (or below) MF's price. SUGGESTION-ONLY: nothing here is sized or
+ * auto-traded — it's an engine input, not a signal. Renders null when empty.
+ */
+function MfOverlayTargetsCard({ overlay }: { overlay: CuratedPickRow[] }) {
+  if (!overlay.length) return null;
+  const seen = new Set<string>();
+  const picks = overlay.filter((r) => {
+    const t = (r.ticker || "").toUpperCase();
+    if (!t || seen.has(t)) return false;
+    seen.add(t);
+    return true;
+  });
+  const fmtRec = (v?: string): string => {
+    const n = Number(v);
+    return v && !isNaN(n) ? `$${n.toFixed(2)}` : "—";
+  };
+  return (
+    <Card>
+      <div className="flex items-center gap-2 mb-1.5">
+        <Target size={14} className="text-fuchsia-400" />
+        <h3 className="text-[length:var(--t-sm)] font-medium text-slate-400">MF CSP Targets</h3>
+        <span className="text-[length:var(--t-2xs)] text-slate-600">sell puts to enter at MF's price</span>
+      </div>
+      <p className="text-[length:var(--t-2xs)] text-slate-600 mb-2 leading-relaxed">
+        Recent Motley Fool Buys near their rec price — suggestion-only, not auto-traded.
+      </p>
+      <div className="divide-y divide-white/5">
+        {picks.map((r, i) => (
+          <div key={`${r.ticker}-${i}`} className="flex items-center justify-between py-2">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[length:var(--t-sm)] font-bold text-white">{r.ticker}</span>
+              {r.mf_type && <span className="text-[length:var(--t-2xs)] text-fuchsia-300">{r.mf_type}</span>}
+            </div>
+            <div className="flex flex-col items-end leading-tight shrink-0">
+              <span className="text-[length:var(--t-xs)] font-semibold text-slate-300 tabular-nums">{fmtRec(r.rec_price)}</span>
+              <span className="text-[length:var(--t-2xs)] text-slate-600">rec price</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
 
 export function OptionsPage({
   options,
@@ -38,6 +87,7 @@ export function OptionsPage({
   uoaAlerts,
   gexRegime,
   macroLean,
+  mfOverlay,
   loading,
 }: {
   options: OptionRow[];
@@ -52,6 +102,7 @@ export function OptionsPage({
   uoaAlerts: UoaAlertRow[];
   gexRegime: GexRegimeRow[];
   macroLean?: MacroLeanRow | null;
+  mfOverlay?: CuratedPickRow[];
   loading: boolean;
 }) {
   const [sub, setSub] = useState<Subtab>(() => {
@@ -129,6 +180,13 @@ export function OptionsPage({
           <div className="fade-up fade-up-2 mt-3">
             <WheelContinuationCard rows={wheelNextLeg} />
           </div>
+          {/* Motley Fool CSP-overlay targets — read-only, suggestion-only.
+              Renders null when empty via the card's own guard. */}
+          {(mfOverlay?.length ?? 0) > 0 && (
+            <div className="fade-up fade-up-2 mt-3">
+              <MfOverlayTargetsCard overlay={mfOverlay ?? []} />
+            </div>
+          )}
         </>
       )}
 

@@ -119,6 +119,7 @@ function Dashboard() {
             uoaAlerts={data?.uoaAlerts ?? []}
             gexRegime={data?.gexRegime ?? []}
             macroLean={data?.macroLean ?? null}
+            mfOverlay={data?.mfOverlay ?? []}
             loading={loading && !data}
           />
         );
@@ -155,6 +156,7 @@ function Dashboard() {
             screenCandidates={data?.screenCandidates ?? []}
             livePrices={data?.livePrices ?? new Map()}
             dailyPlan={data?.dailyPlan ?? []}
+            mfWatchlist={data?.mfWatchlist ?? []}
           />
         );
       case 6:
