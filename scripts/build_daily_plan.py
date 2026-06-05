@@ -163,6 +163,18 @@ def _mf_core_candidates(curated_rows: list[dict], today: str, nlv: float,
     } for tk in picks]
 
 
+def mf_core_alerts(prev_plan: list[dict], new_plan: list[dict]) -> list[str]:
+    """Tickers newly entering the mf_core sleeve vs the latest prior plan snapshot.
+    Idempotent (same-day rerun → no repeat); headless-safe — diffs the daily_plan
+    sheet, never Motley Fool. Feeds the 'core-add' Telegram ping."""
+    dates = {(r.get("date") or "")[:10] for r in prev_plan if r.get("date")}
+    prev_date = max(dates) if dates else ""
+    prev = {(r.get("ticker") or "").upper() for r in prev_plan
+            if (r.get("date") or "")[:10] == prev_date and (r.get("leg") or "") == "mf_core"}
+    new = {(r.get("ticker") or "").upper() for r in new_plan if (r.get("leg") or "") == "mf_core"}
+    return sorted(new - prev)
+
+
 # Macro-lean tilt — regime-aware SIZING of the growth satellite (news as INPUT,
 # never a trade signal). Hawkish/risk-off → don't add aggressively into a tape
 # that compresses growth multiples; dovish/risk-on → lean in. Modest by design:
@@ -263,6 +275,18 @@ def main() -> int:
     ws.clear()
     ws.update("A1", keep, value_input_option="USER_ENTERED")
     print(f"\n✓ Wrote {len(rows)} rows to daily_plan")
+
+    # Edge-triggered Telegram: names newly entering the MF core sleeve (core-add).
+    prev_plan = [dict(zip(existing[0], r)) for r in existing[1:] if any(r)] if existing else []
+    added = mf_core_alerts(prev_plan, plan)
+    if added:
+        from src import telegram as tg
+        for tk in added:
+            try:
+                tg.ping_curated_pick("core", tk, "equal-weight sleeve")
+                print(f"  → pinged core {tk}")
+            except Exception:
+                pass
     return 0
 
 
