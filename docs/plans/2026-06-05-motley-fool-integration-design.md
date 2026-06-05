@@ -49,6 +49,7 @@ Chrome MCP reader (in-session, ~monthly)
         │
         ▼
   SPY-benchmark tracker  (tag source=motley_fool, measure sleeve vs SPY over time)
+  Telegram push          (diff curated_picks/daily_plan → ping new-rec · overlay · core-add)
 ```
 
 **One source of truth:** `curated_picks` sheet tab. Everything downstream reads it.
@@ -89,6 +90,14 @@ return_since_rec, return_vs_sp, moneyball_score, source, note, updated_at`.
 - Every `source=motley_fool` position tracked vs SPY from entry, reusing the `paperBenchmark` pattern.
 - **Purpose:** in 12 months, *know* whether the $499/yr earned real alpha — not vibes, not MF's
   marketed "since-2002" framing. Measures the user's actual fills.
+
+### 8. Telegram push (new-rec · overlay · core-add)
+- `ping_curated_pick()` in `src/telegram.py`, fired on **change** — diffs the `curated_picks` /
+  `daily_plan` *sheets* day-over-day, so it survives headless crons (reads the sheet, never MF):
+  - **new-rec** → ingest sees a ticker newly in `curated_picks` → "🧠 New Motley Fool rec: FPS".
+  - **overlay** → a name newly `role=overlay` → "📍 MF pick GLW now in CSP-overlay range".
+  - **core-add** → a name newly in the `mf_core` daily_plan sleeve → "🟣 MF name entered core sleeve".
+- Monthly cadence → high-signal, low-noise. Every ping carries the INPUT-not-signal disclaimer.
 
 ## Data flow & error handling
 - `curated_picks` stale/empty → all roles degrade gracefully (watchlist/reference render nothing;

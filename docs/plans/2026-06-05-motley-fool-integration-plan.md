@@ -548,6 +548,90 @@ Document the monthly cadence: (1) Claude opens fool.com Stock Advisor in Chrome 
 
 ---
 
+### Task 10: Telegram push — new-rec · overlay · core-add
+
+**Files:**
+- Modify: `src/telegram.py` (add `ping_curated_pick`, mirror `ping_macro_surprise`)
+- Modify: `scripts/ingest_curated_picks.py` (pure `curated_alerts(prev, new)` + fire in `main`)
+- Modify: `scripts/trigger_alerts.py` (diff `daily_plan` mf_core → fire core-add pings)
+- Test: `tests/test_curated_alerts.py`
+
+**Step 1: Write the failing test (pure diff)**
+
+```python
+# tests/test_curated_alerts.py
+from scripts.ingest_curated_picks import curated_alerts
+
+PREV = [{"ticker":"GLW","role":"reference"},{"ticker":"GLW","role":"watchlist"}]
+NEW  = [{"ticker":"GLW","role":"reference"},{"ticker":"GLW","role":"watchlist"},
+        {"ticker":"FPS","role":"watchlist"},{"ticker":"FPS","role":"reference"},
+        {"ticker":"GLW","role":"overlay"}]
+
+def test_new_rec_and_overlay_detected():
+    al = {(a["kind"], a["ticker"]) for a in curated_alerts(PREV, NEW)}
+    assert ("new_rec","FPS") in al        # FPS newly appears
+    assert ("overlay","GLW") in al        # GLW newly overlay-eligible
+    assert ("new_rec","GLW") not in al    # GLW already known
+
+def test_no_alerts_when_unchanged():
+    assert curated_alerts(NEW, NEW) == []
+```
+
+**Step 2: Run → fails** (`ImportError: curated_alerts`).
+
+**Step 3: Implement**
+
+```python
+# ingest_curated_picks.py
+def curated_alerts(prev_rows: list[dict], new_rows: list[dict]) -> list[dict]:
+    """New-rec + overlay pings by diffing prior vs new curated_picks rows. Pure."""
+    prev_t = {(r.get("ticker") or "").upper() for r in prev_rows}
+    prev_ov = {(r.get("ticker") or "").upper() for r in prev_rows if (r.get("role") or "") == "overlay"}
+    seen, out = set(), []
+    for r in new_rows:
+        tk = (r.get("ticker") or "").upper()
+        if tk and tk not in prev_t and tk not in seen:
+            seen.add(tk); out.append({"kind": "new_rec", "ticker": tk, "detail": r.get("note", "")})
+    for r in new_rows:
+        tk = (r.get("ticker") or "").upper()
+        if (r.get("role") or "") == "overlay" and tk and tk not in prev_ov:
+            out.append({"kind": "overlay", "ticker": tk, "detail": f"rec {r.get('rec_price','')}"})
+    return out
+```
+
+```python
+# src/telegram.py
+def ping_curated_pick(kind: str, ticker: str, detail: str = "") -> None:
+    icon = {"new_rec": "🧠", "overlay": "📍", "core": "🟣"}.get(kind, "🧠")
+    label = {"new_rec": "New Motley Fool rec",
+             "overlay": "MF pick now in CSP-overlay range",
+             "core": "MF name entered core sleeve"}.get(kind, "Motley Fool")
+    body = f"{icon} {label}: *{ticker}*" + (f" — {detail}" if detail else "")
+    send_message(body + "\n_reference input, not auto-traded_")
+```
+
+In `ingest_curated_picks.main()` (after the sheet write, skip on `--dry`): build `prev_rows`
+from the `existing` values already read, call `curated_alerts(prev_rows, [r.__dict__-ish])`,
+and `for a in alerts: tg.ping_curated_pick(a["kind"], a["ticker"], a["detail"])`.
+
+In `scripts/trigger_alerts.py`: read `daily_plan`, diff today's `leg==mf_core` tickers against
+the prior day's; for each newly-added ticker call `ping_curated_pick("core", tk, "equal-weight sleeve")`.
+Guard with the same date/dedup discipline as the existing pings.
+
+**Step 4: Run → passes**
+
+Run: `python -m pytest tests/test_curated_alerts.py -v`
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git add src/telegram.py scripts/ingest_curated_picks.py scripts/trigger_alerts.py tests/test_curated_alerts.py
+git commit -m "feat(telegram): MF push — new-rec/overlay/core-add (diff-based, headless-safe)"
+```
+
+---
+
 ### Final verification (after all tasks)
 
 ```bash
