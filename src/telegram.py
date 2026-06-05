@@ -529,16 +529,18 @@ def ping_macro_surprise(interp: dict) -> dict:
 
 
 def ping_curated_pick(kind: str, ticker: str, detail: str = "") -> dict:
-    """Edge-triggered Motley Fool curated-pick alert. Three kinds:
+    """Edge-triggered Motley Fool curated-pick alert. Four kinds:
       • new_rec — a name newly appears on the MF Scorecard (research, not a buy)
       • overlay — an existing MF name enters CSP-overlay range (suggestion only)
       • core    — an MF Foundational name enters the equal-weight core sleeve
+      • refresh — MF emailed a new rec (login-teaser, no ticker) → refresh in-session
     Reference INPUT, never an auto-trade. Lands in the Multi Day Swing lane."""
     import html
-    icon = {"new_rec": "🧠", "overlay": "📍", "core": "🟣"}.get(kind, "🧠")
+    icon = {"new_rec": "🧠", "overlay": "📍", "core": "🟣", "refresh": "🔔"}.get(kind, "🧠")
     label = {"new_rec": "New Motley Fool rec",
              "overlay": "MF pick now in CSP-overlay range",
-             "core": "MF name entered core sleeve"}.get(kind, "Motley Fool")
+             "core": "MF name entered core sleeve",
+             "refresh": "New MF rec emailed — refresh in-session"}.get(kind, "Motley Fool")
     body = f"{icon} {label}: <b>{html.escape(ticker)}</b>"
     if detail:
         body += f" — {html.escape(str(detail))}"

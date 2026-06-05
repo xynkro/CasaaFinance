@@ -128,3 +128,30 @@ def test_fetch_email_news_inert_without_creds(monkeypatch):
     for k in ("GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN"):
         monkeypatch.delenv(k, raising=False)
     assert na.fetch_email_news() == []
+
+
+# ── Telegram: new "refresh" kind on ping_curated_pick ────────────────────────
+
+def test_ping_curated_pick_refresh_kind(monkeypatch):
+    """The new 'refresh' kind renders the 🔔 refresh-in-session nudge; existing
+    kinds are unchanged."""
+    import src.telegram as tg
+
+    captured: dict = {}
+
+    def _fake_send(text, **kwargs):
+        captured["text"] = text
+        captured["kwargs"] = kwargs
+        return {"ok": True}
+
+    monkeypatch.setattr(tg, "send", _fake_send)
+
+    tg.ping_curated_pick("refresh", "MF")
+    assert "🔔" in captured["text"]
+    assert "New MF rec emailed — refresh in-session" in captured["text"]
+
+    # Existing kind still works (regression guard).
+    captured.clear()
+    tg.ping_curated_pick("new_rec", "NVDA")
+    assert "🧠" in captured["text"]
+    assert "New Motley Fool rec" in captured["text"]
