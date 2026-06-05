@@ -13,6 +13,7 @@ const LEG_META: Record<string, { label: string; icon: typeof Shield; cls: string
   protector: { label: "Protector", icon: Coins,             cls: "text-sky-300" },
   growth:    { label: "Growth",    icon: TrendingUp,        cls: "text-emerald-300" },
   income:    { label: "Income",    icon: CircleDollarSign,  cls: "text-amber-300" },
+  mf_core:   { label: "MF Core",   icon: TrendingUp,        cls: "text-fuchsia-300" },
 };
 
 // "" = pending; the auto-trader writes the outcome back per row.
@@ -85,7 +86,7 @@ export function TodaysPlanCard({ plan, newsByTicker }: {
   const rank = (r: DailyPlanRow) => num(r.rank);
   const rows = [...plan].sort((a, b) => rank(a) - rank(b));
   const standing = rows.filter((r) => ["core", "hedge", "protector"].includes((r.leg || "").toLowerCase()));
-  const opps = rows.filter((r) => ["growth", "income"].includes((r.leg || "").toLowerCase()));
+  const opps = rows.filter((r) => ["growth", "income", "mf_core"].includes((r.leg || "").toLowerCase()));
   const filled = rows.filter((r) => (r.fill_status || "").toLowerCase().startsWith("filled")).length;
 
   return (
