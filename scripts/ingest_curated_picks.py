@@ -77,6 +77,22 @@ def classify_picks(data: dict, today: str) -> list:
     return rows
 
 
+def curated_alerts(prev_rows: list[dict], new_rows: list[dict]) -> list[dict]:
+    """New-rec + overlay pings by diffing prior vs new curated_picks rows. Pure."""
+    prev_t = {(r.get("ticker") or "").upper() for r in prev_rows}
+    prev_ov = {(r.get("ticker") or "").upper() for r in prev_rows if (r.get("role") or "") == "overlay"}
+    seen, out = set(), []
+    for r in new_rows:
+        tk = (r.get("ticker") or "").upper()
+        if tk and tk not in prev_t and tk not in seen:
+            seen.add(tk); out.append({"kind": "new_rec", "ticker": tk, "detail": r.get("note", "")})
+    for r in new_rows:
+        tk = (r.get("ticker") or "").upper()
+        if (r.get("role") or "") == "overlay" and tk and tk not in prev_ov:
+            out.append({"kind": "overlay", "ticker": tk, "detail": f"rec {r.get('rec_price','')}"})
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--from-json", required=True)
@@ -107,6 +123,23 @@ def main() -> int:
     keep += [r.to_row() for r in rows]
     ws.clear(); ws.update("A1", keep, value_input_option="USER_ENTERED")
     print(f"✓ Wrote {len(rows)} rows to curated_picks")
+
+    # Edge-triggered MF pings (new-rec / overlay) by diffing prior vs new rows.
+    # prev = the motley_fool rows that were on the sheet BEFORE this run.
+    H = S.CuratedPickRow.HEADERS
+    prev_rows = [dict(zip(H, r)) for r in (existing[1:] if existing else [])
+                 if r and len(r) > src_i and r[src_i] == "motley_fool"]
+    new_rows = [{"ticker": r.ticker, "role": r.role, "note": r.note,
+                 "rec_price": r.rec_price} for r in rows]
+    alerts = curated_alerts(prev_rows, new_rows)
+    if alerts:
+        from src import telegram as tg
+        for a in alerts:
+            try:
+                tg.ping_curated_pick(a["kind"], a["ticker"], a.get("detail", ""))
+                print(f"  → pinged {a['kind']} {a['ticker']}")
+            except Exception as e:
+                print(f"  ✗ ping {a['kind']} {a['ticker']} failed: {e}")
     return 0
 
 
