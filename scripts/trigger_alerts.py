@@ -397,6 +397,35 @@ def load_exposure_rec(client) -> str:
     return rec
 
 
+def _regime_context(client) -> str:
+    """The FREE 'so what for my book RIGHT NOW' — no AI, no tokens. Joins the
+    headline to live state we already compute: exposure posture (can I add risk)
+    + the SPY GEX gate (is premium-selling safe today). This is context, not
+    interpretation — which is exactly why it doesn't read as canned filler."""
+    bits: list[str] = []
+    try:
+        rec = load_exposure_rec(client)
+        if rec and rec != "NEW_ENTRY_ALLOWED":
+            bits.append(f"exposure {rec}")
+    except Exception:
+        pass
+    try:
+        ss = sh._open_sheet(client)
+        rows = ss.worksheet(S.GexRegimeRow.TAB_NAME).get_all_values()
+        if len(rows) > 1:
+            ci = {h: i for i, h in enumerate(rows[0])}
+            spy = [r for r in rows[1:]
+                   if len(r) > ci.get("symbol", 99) and r[ci["symbol"]].upper() == "SPY"]
+            if spy and "premium_gate" in ci:
+                gate = spy[-1][ci["premium_gate"]]
+                regime = spy[-1][ci["regime"]] if "regime" in ci else ""
+                if gate and gate != "NORMAL":
+                    bits.append(f"GEX {regime or gate}")
+    except Exception:
+        pass
+    return " · ".join(bits)
+
+
 def load_tv_recs(client) -> tuple[dict[str, str], dict[str, str]]:
     """(daily_rec_by_ticker, weekly_rec_by_ticker) — latest per (ticker, interval)."""
     ss = sh._open_sheet(client)
@@ -866,15 +895,25 @@ def main() -> int:
     elif in_blackout and blackout_event:
         logger.info(f"  · BLACKOUT already alerted: {blackout_event.get('event')}")
 
+    # Live regime context for the macro pings — computed once (same for all).
+    regime_ctx = _regime_context(client)
+    if regime_ctx:
+        logger.info(f"  · regime context for pings: {regime_ctx}")
+
     swing_mirrored = 0
     for n in macro_news_plan:
         news_key = f"news:{n['id']}"
+        # Held-ticker match BEFORE the ping so the "so what" can flag exposure.
+        text_for_match = f"{n.get('headline', '')} {n.get('summary', '')}"
+        matched = _matched_tickers(text_for_match)
         try:
             tg.ping_macro_news(
                 headline=n.get("headline", ""),
                 source=n.get("source", ""),
                 url=n.get("url", ""),
                 category=n.get("category", ""),
+                context=regime_ctx,
+                held=matched,
             )
             macro_pinged += 1
             cat_tag = f" [{n.get('category', '?')}]"
@@ -884,8 +923,6 @@ def main() -> int:
 
         # Mirror to Multi Day Swing if the headline mentions any held ticker.
         # Done inside the same loop so dedup state covers both routes.
-        text_for_match = f"{n.get('headline', '')} {n.get('summary', '')}"
-        matched = _matched_tickers(text_for_match)
         if matched:
             try:
                 tg.ping_macro_news_to_swing(

@@ -430,26 +430,30 @@ def ping_macro_news(
     source: str = "",
     url: str = "",
     category: str = "",
+    context: str = "",
+    held: list[str] | None = None,
 ) -> dict:
     """
     Edge-triggered hot-news headline ping. Fired when the macro_blackouts
     poller catches a headline matching HOT_KEYWORDS (fed/cpi/iran/tariff/
     opec/etc.) across Finnhub (general/forex/crypto/merger) + RSS feeds
-    (WSJ/Bloomberg/MarketWatch/CNBC).
+    (WSJ/Bloomberg/FT/NYTimes/MarketWatch/CNBC/newsdata).
 
     Sent EXACTLY ONCE per news_id (dedup tracked in macro_alerts_state).
     Capped at 3 per cron run so a Finnhub backlog catch-up doesn't flood.
 
-    No "so what" interpretation line — the keyword heuristic produced
-    canned output that read as fake reasoning, and an LLM-driven version
-    would re-introduce API cost. Reasoning lives in the daily brief now
-    (Multi Day Swing topic, once a day, Opus-quality).
+    The "so what" line is CONTEXT, not interpretation — it joins the headline to
+    live state already computed (exposure posture + GEX gate + held tickers), so
+    it costs zero AI tokens and never reads as canned filler. Deep reasoning
+    still lives in the once-a-day Opus brief.
 
     Args:
         headline: news headline (truncated at 200 chars)
         source: publisher name (e.g. "Reuters", "Bloomberg")
         url: link to the article
         category: Finnhub/RSS category for the inline tag
+        context: live regime string (e.g. "exposure CASH_PRIORITY · GEX NEGATIVE_TREND")
+        held: held tickers the headline mentions (flags portfolio exposure)
     """
     # HTML parse mode + inline-linked source. Two fixes layered to kill
     # the headline-twice visual:
@@ -473,6 +477,15 @@ def ping_macro_news(
         lines.append(f"source: {html.escape(source)}")
     elif url:
         lines.append(html.escape(url))
+    # "So what for my book" — free context join (no AI). Held-ticker exposure
+    # flag first (most actionable), then the live regime.
+    so_what = []
+    if held:
+        so_what.append("⚠️ you hold " + ", ".join(html.escape(t) for t in held[:4]))
+    if context:
+        so_what.append(html.escape(context))
+    if so_what:
+        lines.append("📍 " + " · ".join(so_what))
     return send(
         "\n".join(lines),
         parse_mode="HTML",
@@ -689,10 +702,25 @@ def ping_gov_contracts_new(
         amt = float(c.get("award_amount", 0))
         agency = html.escape(str(c.get("agency", ""))[:25])
         naics = html.escape(str(c.get("naics_description", ""))[:30])
+        # Materiality: how big is this award vs the company? % of REVENUE is the
+        # right denominator (a contract is revenue), plus the raw market cap and
+        # the label so it reads "is this a catalyst or a rounding error".
+        cap = float(c.get("market_cap", 0) or 0)
+        pct_rev = float(c.get("pct_rev", 0) or 0)
+        mat = str(c.get("materiality", "") or "")
+        mbits = []
+        if pct_rev > 0:
+            mbits.append(f"{pct_rev*100:.1f}% of rev")
+        if cap > 0:
+            mbits.append(f"${cap/1e9:.1f}B cap")
+        if mat:
+            mbits.append(f"<b>{mat}</b>")
+        mline = ("\n   " + " · ".join(mbits)) if mbits else ""
         lines.append(
             f"\n  <b>${tk}</b> · <code>${amt/1e6:.1f}M</code>"
             f"\n   {recip} · {agency}"
             f"\n   {naics}"
+            f"{mline}"
         )
 
     if len(mapped) > 8:

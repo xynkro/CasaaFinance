@@ -59,6 +59,9 @@ RSS_SOURCES: list[tuple[str, str, str]] = [
     # wires miss (Cramer reactions, Fed-watcher takes).
     ("CNBC",       "https://www.cnbc.com/id/100003114/device/rss/rss.html", "cnbc"),
     ("CNBC Markets","https://www.cnbc.com/id/15839135/device/rss/rss.html", "cnbc"),
+    # NYTimes — free RSS, headline + summary (DealBook/Economy carry macro).
+    ("NYTimes",    "https://rss.nytimes.com/services/xml/rss/nyt/Economy.xml",  "nytimes"),
+    ("NYTimes",    "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", "nytimes"),
 ]
 # Note: Reuters business RSS is no longer free as of late 2024. Finnhub
 # `general` already surfaces Reuters wires. Yahoo Finance and Investing.com
@@ -195,4 +198,54 @@ def aggregate_rss(timeout: float = 8.0) -> list[dict]:
     out: list[dict] = []
     for label, url, category in RSS_SOURCES:
         out.extend(fetch_rss(label, url, category, timeout=timeout))
+    out.extend(fetch_newsdata(timeout=timeout))   # no-op if NEWSDATA_API_KEY unset
+    return out
+
+
+def fetch_newsdata(timeout: float = 8.0, max_items: int = 10) -> list[dict]:
+    """Pull business headlines from newsdata.io (broad aggregator — backfills
+    wires like Reuters that lost free RSS). Returns items in the same shape as
+    fetch_rss. No-op + isolated failure if NEWSDATA_API_KEY is unset or the call
+    errors. The downstream HOT_KEYWORDS gate filters out the PR-wire noise, so
+    this only adds breadth on genuinely macro-relevant stories.
+    """
+    import os
+    key = os.environ.get("NEWSDATA_API_KEY")
+    if not key:
+        return []
+    try:
+        from datetime import datetime, timezone
+        url = ("https://newsdata.io/api/1/latest"
+               f"?apikey={key}&language=en&category=business")
+        r = requests.get(url, timeout=timeout,
+                         headers={"User-Agent": "FinancePWA-news-aggregator/1.0"})
+        r.raise_for_status()
+        results = (r.json() or {}).get("results") or []
+    except Exception as e:
+        log.warning("newsdata.io fetch failed: %s", e)
+        return []
+
+    out: list[dict] = []
+    for a in results[:max_items]:
+        title = (a.get("title") or "").strip()
+        link = (a.get("link") or "").strip()
+        if not title:
+            continue
+        # newsdata pubDate is "YYYY-MM-DD HH:MM:SS" (UTC); fall back to now.
+        ts = a.get("pubDate") or ""
+        try:
+            iso = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc).isoformat()
+        except (ValueError, TypeError):
+            iso = datetime.now(timezone.utc).isoformat()
+        out.append({
+            "id":       _stable_id(link or title, title),
+            "datetime": iso,
+            "headline": _strip_html(title),
+            "summary":  _strip_html(a.get("description") or "")[:200],
+            "source":   str(a.get("source_id") or "newsdata"),
+            "url":      link,
+            "category": "newsdata",
+        })
+    log.info("newsdata.io: %d items", len(out))
     return out

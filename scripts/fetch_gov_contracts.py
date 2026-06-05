@@ -247,18 +247,33 @@ def main() -> int:
             sh.append_rows(client, S.GovUnmappedRecipientRow.TAB_NAME, [u.to_row() for u in new_unmapped])
             logger.info(f"  ✓ wrote {len(new_unmapped)} new unmapped rows for review")
 
-    # Instant Telegram push — only new awards
-    push_data = [
-        {
+    # Instant Telegram push — only new awards, enriched with MATERIALITY so the
+    # digest shows the company's size + how big the award is vs it (the
+    # "will it actually move the stock" gut-check), not just the raw $. Only the
+    # top awards are shown, so only those need a fundamentals lookup.
+    from scripts.screen_gov_confluence import _fetch_fundamentals, compute_materiality
+    _top_ids = {id(r) for r in sorted(
+        new_rows, key=lambda r: float(r.award_amount or 0), reverse=True)[:20]}
+    push_data = []
+    for r in new_rows:
+        mat = {}
+        if r.ticker and id(r) in _top_ids:
+            try:
+                rev, cap = _fetch_fundamentals(r.ticker)
+                mat = compute_materiality(float(r.award_amount or 0), 0, rev, cap)
+            except Exception:
+                mat = {}
+        push_data.append({
             "ticker": r.ticker,
             "recipient_name": r.recipient_name,
             "award_amount": r.award_amount,
             "agency": r.agency,
             "naics_description": r.naics_description,
             "action_date": r.action_date,
-        }
-        for r in new_rows
-    ]
+            "market_cap": mat.get("market_cap", 0.0),
+            "pct_rev": mat.get("contract_pct_rev", 0.0),
+            "materiality": mat.get("materiality", ""),
+        })
     if push_data or new_unmapped_count:
         try:
             tg.ping_gov_contracts_new(push_data, unmapped_count=new_unmapped_count, pwa_url=PWA_URL)
