@@ -202,6 +202,7 @@ def aggregate_rss(timeout: float = 8.0) -> list[dict]:
     for label, url, category in RSS_SOURCES:
         out.extend(fetch_rss(label, url, category, timeout=timeout))
     out.extend(fetch_newsdata(timeout=timeout))   # no-op if NEWSDATA_API_KEY unset
+    out.extend(fetch_email_news(timeout=timeout))  # no-op if GMAIL_* unset
     return out
 
 
@@ -251,4 +252,116 @@ def fetch_newsdata(timeout: float = 8.0, max_items: int = 10) -> list[dict]:
             "category": "newsdata",
         })
     log.info("newsdata.io: %d items", len(out))
+    return out
+
+
+# ── Email-sourced news (Bloomberg briefings) + MF rec nudge ─────────────────
+# Bloomberg's website is hard-paywalled and its RSS is headlines-only, but the
+# email briefings ("Morning/Evening Briefing", "Five Things") carry the actual
+# content and Gmail is readable headlessly. We pull them through the read-only
+# gmail_client and normalise to the same item shape as the RSS feeds.
+#
+# Inert without creds: gmail_client.search() returns [] when GMAIL_* is unset,
+# so fetch_email_news() returns [] — same no-op contract as fetch_newsdata().
+
+# Bloomberg's HTML→text emails wrap the lede in a "View in browser" header line
+# and long runs of zero-width-non-joiner (U+200C) + space "spacer" characters
+# used for layout. Strip both so the summary starts at the real first sentence.
+_ZW_SPACER_RE = re.compile(r"[​‌‍﻿ ]+")
+_VIEW_IN_BROWSER_RE = re.compile(r"^\s*view in browser.*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _clean_email_body(text: str) -> str:
+    """Strip the Bloomberg boilerplate (leading 'View in browser' line + the
+    zero-width spacer runs) and collapse whitespace, leaving the lede."""
+    if not text:
+        return ""
+    text = _VIEW_IN_BROWSER_RE.sub(" ", text)
+    text = _ZW_SPACER_RE.sub(" ", text)
+    return _WHITESPACE_RE.sub(" ", text).strip()
+
+
+def fetch_email_news(timeout: float = 8.0) -> list[dict]:
+    """Pull recent Bloomberg email briefings → normalised news items.
+
+    One item per email: subject→headline, cleaned plaintext lede→summary.
+    No-op + isolated failure if GMAIL_* is unset (gmail_client.search returns
+    [] → we return []). `timeout` mirrors the other fetchers' signature; the
+    gmail_client owns its own per-request timeouts.
+    """
+    import os
+    if not (os.environ.get("GMAIL_CLIENT_ID")
+            and os.environ.get("GMAIL_CLIENT_SECRET")
+            and os.environ.get("GMAIL_REFRESH_TOKEN")):
+        return []
+
+    from src import gmail_client
+
+    out: list[dict] = []
+    for msg_id in gmail_client.search("from:news.bloomberg.com newer_than:1d"):
+        try:
+            msg = gmail_client.get_message(msg_id)
+            subject = (msg.get("subject") or "").strip()
+            if not subject:
+                continue
+            ts = _parse_pubdate(msg.get("date") or "")
+            if ts is None:
+                continue
+            summary = _clean_email_body(msg.get("plaintext") or "")[:200]
+            out.append({
+                "id":       _stable_id(msg_id, subject),
+                "datetime": ts.isoformat(),
+                "headline": _strip_html(subject),
+                "summary":  summary,
+                "source":   "Bloomberg Email",
+                "url":      "",
+                "category": "bloomberg-email",
+            })
+        except Exception as e:  # noqa: BLE001 — one bad email shouldn't kill the rest
+            log.warning("email-news %s failed: %s", msg_id, e)
+            continue
+    log.info("email-news: %d items", len(out))
+    return out
+
+
+# Motley Fool emails are login-teasers (no ticker), so a new-rec email can only
+# trigger a "refresh MF in-session" nudge, not deliver a pick. This pure matcher
+# separates genuine new-rec notifications from MF's marketing blast.
+_MF_REC_PATTERNS = (
+    "new recommendation",
+    "buy alert",
+    "new stock advisor",
+    "our next recommendation",
+    "new buy",
+)
+_MF_MARKETING_WORDS = (
+    "epic",
+    "order",
+    "password",
+    "% off",
+    "upgrade",
+    "sale",
+    "expires",
+    "confirmed",
+)
+
+
+def mf_new_rec_emails(messages: list[dict]) -> list[dict]:
+    """Filter a list of `{"subject", "sender"}` dicts to the genuine Motley Fool
+    new-recommendation emails. Pure — no I/O.
+
+    Match requires: sender is fool.com AND the subject hits a rec pattern AND the
+    subject contains NO marketing word (epic/order/password/% off/upgrade/...).
+    """
+    out: list[dict] = []
+    for m in messages or []:
+        sender = str(m.get("sender", "") or "").lower()
+        subject = str(m.get("subject", "") or "").lower()
+        if "fool.com" not in sender:
+            continue
+        if not any(p in subject for p in _MF_REC_PATTERNS):
+            continue
+        if any(w in subject for w in _MF_MARKETING_WORDS):
+            continue
+        out.append(m)
     return out
