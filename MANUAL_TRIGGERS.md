@@ -32,6 +32,7 @@ phone or desktop, and bypass the need to remember any commands.
 | Generate WSR Monday NOW | `gh workflow run wsr-full.yml -R xynkro/CasaaFinance -f dry=false` |
 | Pick up new WSR/Lite uploads in Drive | `gh workflow run poll-drive-wsr.yml -R xynkro/CasaaFinance` |
 | Run market scan for fresh option recommendations | `gh workflow run market-scan.yml -R xynkro/CasaaFinance` |
+| Mirror Sheet → Firestore (private read path) NOW | `gh workflow run mirror-firestore.yml -R xynkro/CasaaFinance` |
 
 ---
 
@@ -94,3 +95,4 @@ So the workflow is:
 | daily-brief | Mon-Fri 07:03 | `3 23 * * 0-4` |
 | wsr-lite | Wed/Fri 19:33 | `33 11 * * 3,5` |
 | wsr-full | Sun 19:37 | `37 11 * * 0` |
+| mirror-firestore | Every 15 min | `*/15 * * * *` |

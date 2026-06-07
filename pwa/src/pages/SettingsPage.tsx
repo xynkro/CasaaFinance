@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Settings } from "../settings";
 import type { ApiUsageRow } from "../data";
 import { ApiUsageCard } from "../cards/ApiUsageCard";
-import { LogOut, DollarSign, LayoutGrid, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check, Clock, Eye, CheckCircle, XCircle, AlertTriangle, Info, Zap, Hourglass } from "lucide-react";
+import { LogOut, DollarSign, LayoutGrid, Home, Sun, Type, Layers, Droplets, Smartphone, ArrowUpFromLine, ArrowDownFromLine, Copy, Check, Clock, Eye, CheckCircle, XCircle, AlertTriangle, Info, Zap, Hourglass, User as UserIcon } from "lucide-react";
 
 const TAB_NAMES = ["Home", "Portfolio", "Options", "Decisions", "Review", "Settings"];
 
@@ -733,12 +733,19 @@ export function SettingsPage({
   onUpdate,
   onLogout,
   apiUsage,
+  authMode = "pin",
+  userEmail = null,
 }: {
   settings: Settings;
   onUpdate: (patch: Partial<Settings>) => void;
   onLogout: () => void;
   apiUsage?: ApiUsageRow[];
+  /** 'firestore' = Google sign-in (private read path); 'pin' = legacy PIN gate. */
+  authMode?: "pin" | "firestore";
+  /** Signed-in Google email, shown in the Account row when in firestore mode. */
+  userEmail?: string | null;
 }) {
+  const isFirestore = authMode === "firestore";
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
       {/* Run a cloud job on demand */}
@@ -873,14 +880,25 @@ export function SettingsPage({
       {/* Account */}
       <div className="glass rounded-2xl p-5">
         <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-2">Account</h3>
+        {isFirestore && userEmail && (
+          <div className="flex items-center gap-3 py-3 border-b border-white/5">
+            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0">
+              <UserIcon size={16} className="text-indigo-300" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[length:var(--t-2xs)] text-slate-500 uppercase tracking-wider">Signed in as</div>
+              <div className="text-[length:var(--t-sm)] font-medium text-slate-200 truncate">{userEmail}</div>
+            </div>
+          </div>
+        )}
         <button
           onClick={onLogout}
-          className="flex items-center gap-3 w-full py-3 text-red-400 hover:text-red-300 transition-colors"
+          className="flex items-center gap-3 w-full py-3 text-red-400 hover:text-red-300 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/40 rounded-lg"
         >
           <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center">
             <LogOut size={16} />
           </div>
-          <span className="text-[length:var(--t-sm)] font-medium">Lock app</span>
+          <span className="text-[length:var(--t-sm)] font-medium">{isFirestore ? "Sign out" : "Lock app"}</span>
         </button>
       </div>
 

@@ -75,7 +75,22 @@ const GIDS: Record<string, string> = {
   iv_surface_scan: "1665887293",
 };
 
+// Data source flag. 'gviz' (default) = public Google Sheet CSV; 'firestore'
+// = private Firestore mirror behind Google sign-in. Anything other than the
+// exact string 'firestore' falls back to gviz so the public path keeps
+// working until cutover. firebase.ts is loaded via dynamic import ONLY in
+// firestore mode, so the gviz default never pulls in (or initialises) the
+// Firebase SDK.
+const DATA_SOURCE = import.meta.env.VITE_DATA_SOURCE;
+const USE_FIRESTORE = DATA_SOURCE === "firestore";
+
 async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
+  // fetchTab's key IS the sheet tab name (= Firestore doc id), so it maps
+  // straight onto the mirror doc.
+  if (USE_FIRESTORE) {
+    const { readFirestoreTab } = await import("./lib/firebase");
+    return readFirestoreTab<T>(tab as string);
+  }
   const res = await fetch(csvUrl(GIDS[tab]));
   if (!res.ok) throw new Error(`Sheet fetch failed: ${tab} (${res.status})`);
   const text = await res.text();
@@ -85,6 +100,11 @@ async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
 
 /** Fetch a tab by sheet name (for tabs without a known GID). */
 async function fetchTabByName<T>(sheetName: string): Promise<T[]> {
+  // The sheet name is also the Firestore doc id under the mirror contract.
+  if (USE_FIRESTORE) {
+    const { readFirestoreTab } = await import("./lib/firebase");
+    return readFirestoreTab<T>(sheetName);
+  }
   const res = await fetch(csvUrlByName(sheetName));
   if (!res.ok) throw new Error(`Sheet fetch failed: ${sheetName} (${res.status})`);
   const text = await res.text();

@@ -1,0 +1,23 @@
+rules_version = '2';
+
+// Private read path for the FinancePWA serving-mirror.
+//
+// The `tabs` collection holds the mirrored Google Sheet data (portfolio
+// holdings, P&L, etc.). It is PRIVATE: only the two allowlisted Google accounts
+// may read, and NO client may write — the mirror writes via the Admin SDK
+// (firebase-admin / service account), which bypasses these rules.
+//
+// Replace the two placeholder emails with the real allowlisted addresses before
+// deploying (see docs/runbooks/setup-firebase.md).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /tabs/{doc} {
+      allow read: if request.auth != null
+                  && request.auth.token.email in [
+                       'xynkro@gmail.com',
+                       'sarah.sanusi@gmail.com'
+                     ];
+      allow write: if false;  // only the Admin SDK (service account) writes
+    }
+  }
+}

@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { fetchDashboard, type DashboardData } from "./data";
 import type { TechnicalScoreRow } from "./data";
 import { PinGate } from "./PinGate";
 import { usePinAuth } from "./lib/usePinAuth";
 import { useSettings } from "./settings";
+import { LoadingState, ErrorState, NotAuthorized } from "./components/AsyncStates";
 import { TabBar } from "./components/TabBar";
 import { PullToRefresh } from "./components/PullToRefresh";
 import { HomePage } from "./pages/HomePage";
@@ -21,7 +22,23 @@ import { RefreshCw, Search } from "lucide-react";
 const TAB_TITLES = ["Home", "Portfolio", "Options", "Scanner", "Insider", "Decisions", "Review", "Settings"];
 const SETTINGS_TAB = 7;
 
-function Dashboard() {
+// Private read path: when VITE_DATA_SOURCE==='firestore', the dashboard sits
+// behind Google sign-in instead of the localStorage PIN. The gate component
+// is lazy-loaded so the Firebase SDK is only pulled in on the private path.
+const USE_FIRESTORE = import.meta.env.VITE_DATA_SOURCE === "firestore";
+const FirebaseGate = lazy(() => import("./FirebaseGate"));
+
+/** Detect a Firestore permission denial — the signal that a signed-in user
+ *  isn't on the allowlist (rules deny the read). */
+function isPermissionError(msg: string | null | undefined): boolean {
+  if (!msg) return false;
+  return /permission-denied|insufficient permissions|missing or insufficient/i.test(msg);
+}
+
+/** Auth context handed down from the Firestore gate (null in PIN/gviz mode). */
+type AuthCtx = { email: string | null; signOut: () => void } | null;
+
+function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
   const { settings, update: updateSettings } = useSettings();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,9 +85,21 @@ function Dashboard() {
   }, [tab]);
 
   const handleLogout = () => {
+    // Firestore mode: sign out of Firebase (auth-state change re-renders the
+    // gate to the sign-in screen). PIN/gviz mode: clear the PIN session.
+    if (authCtx) {
+      authCtx.signOut();
+      return;
+    }
     localStorage.removeItem("casaa_pin_ok");
     window.location.reload();
   };
+
+  // A hard failure with no usable data yet (the in-component fetchDashboard
+  // catch surfaces errors via data.error while returning empty collections).
+  const loadFailed = !loading && data?.error != null;
+  // Firestore + permission denial == signed in but not on the allowlist.
+  const notAuthorized = USE_FIRESTORE && loadFailed && isPermissionError(data?.error);
 
   const pendingCount = (data?.decisions ?? []).filter(
     (d) => d.status?.toLowerCase() === "pending" || d.status?.toLowerCase() === "watching",
@@ -179,12 +208,33 @@ function Dashboard() {
             onUpdate={updateSettings}
             onLogout={handleLogout}
             apiUsage={data?.apiUsage ?? []}
+            authMode={authCtx ? "firestore" : "pin"}
+            userEmail={authCtx?.email ?? null}
           />
         );
       default:
         return null;
     }
   };
+
+  // Signed in but not allowlisted (Firestore rules denied the read).
+  if (notAuthorized) {
+    return <NotAuthorized email={authCtx?.email} onSignOut={authCtx?.signOut} />;
+  }
+
+  // First load failed with no usable data — full-screen error + retry. Once
+  // data has loaded at least once, a later refresh error shows the inline
+  // banner instead (handled below) so the user keeps the last-good view.
+  if (loadFailed && lastRefresh === null) {
+    return (
+      <div className="app-shell">
+        <div className="bg-layer" />
+        <main className="app-content flex items-center justify-center">
+          <ErrorState message={data?.error ?? undefined} onRetry={load} />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
@@ -276,8 +326,35 @@ function Dashboard() {
   );
 }
 
-export default function App() {
+/** PIN-gated app (gviz / dev path) — unchanged from before the private read path. */
+function PinGatedApp() {
   const { authed, grant } = usePinAuth();
   if (!authed) return <PinGate onSuccess={grant} />;
   return <Dashboard />;
+}
+
+/** Google-sign-in-gated app (firestore path). */
+function FirestoreGatedApp() {
+  return (
+    <Suspense
+      fallback={
+        <div className="h-screen flex flex-col items-center justify-center relative">
+          <div className="bg-layer" aria-hidden="true" />
+          <div className="w-full max-w-sm">
+            <LoadingState rows={2} label="Loading…" />
+          </div>
+        </div>
+      }
+    >
+      <FirebaseGate>
+        {({ user, signOut }) => (
+          <Dashboard authCtx={{ email: user.email, signOut }} />
+        )}
+      </FirebaseGate>
+    </Suspense>
+  );
+}
+
+export default function App() {
+  return USE_FIRESTORE ? <FirestoreGatedApp /> : <PinGatedApp />;
 }

@@ -39,6 +39,18 @@ jobs:
           # Stamp the build with the short commit SHA — visible in app header
           # so we can verify which build a device is loading.
           VITE_BUILD: ${{ github.sha }}
+          # Private read path (Firebase). All public-safe → repo VARIABLES, not
+          # secrets. Empty until Caspar sets them → VITE_DATA_SOURCE undefined →
+          # data.ts falls back to the gviz path, so the build is unchanged today.
+          # Cutover = set these 7 repo variables (Settings → Variables → Actions)
+          # incl. VITE_DATA_SOURCE=firestore, then redeploy.
+          VITE_DATA_SOURCE: ${{ vars.VITE_DATA_SOURCE }}
+          VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
         run: |
           npm ci --legacy-peer-deps
           export VITE_BUILD="${GITHUB_SHA:0:7}"

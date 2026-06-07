@@ -16,6 +16,21 @@ Cowork workflows (Daily, WSR)
 
 Full design: `docs/plans/2026-04-15-portfolio-pwa-design.md`
 
+### Private read path (Firebase Auth + Firestore mirror)
+
+The PWA originally read the Sheet via the **public** gviz CSV endpoint, which
+leaked portfolio data to anyone who view-sourced the bundle. The private read
+path closes this: `scripts/mirror_to_firestore.py` runs every 15 min
+(`.github/workflows/mirror-firestore.yml`) and copies the 39 PWA-needed tabs into
+private Firestore docs (`tabs/{name} = { rows, updatedAt, rowCount, sourceHash,
+chunks }`), hash-diffed so unchanged tabs aren't rewritten. The PWA reads those
+docs behind Google sign-in; `firestore.rules` allows reads only to an allowlist
+and blocks all client writes (the Admin SDK writes). The Sheet stays the
+hand-editable source of truth. The mirror is **inert until
+`FIREBASE_SERVICE_ACCOUNT_JSON` is set**, so it's safe to ship before setup.
+Design: `docs/plans/2026-06-07-private-read-path-design.md` · Setup:
+`docs/runbooks/setup-firebase.md`.
+
 ## Repo layout
 
 ```

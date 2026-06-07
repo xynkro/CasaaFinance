@@ -33,3 +33,13 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Sensitive data + local DBs / tooling state — never commit (2026-06-06 security audit)
+PortfolioGrabs/
+*.db
+*.rvf
+*.rvf.lock
+# Office temp lock files (e.g. from generating the mindmap deck)
+~$*
+# stray large media in repo root
+51132802981_e748ed1ebd_o.jpg

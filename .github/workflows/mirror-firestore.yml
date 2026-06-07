@@ -1,0 +1,37 @@
+name: Mirror Sheet → Firestore (private read path)
+
+on:
+  schedule:
+    # Every 15 min — matches the PWA poll cadence; staleness ≤15 min is acceptable.
+    # Inert (no-op, exit 0) until FIREBASE_SERVICE_ACCOUNT_JSON secret is set.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-firestore
+  cancel-in-progress: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      # Firestore admin write credential (service-account JSON). Unset → inert.
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+      # Sheet read credential — same secret every other read workflow uses.
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Mirror PWA tabs to Firestore
+        run: |
+          set -euo pipefail
+          python scripts/mirror_to_firestore.py
