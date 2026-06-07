@@ -67,18 +67,8 @@ sys.path.insert(0, str(ROOT))
 
 
 def _setup_logging() -> logging.Logger:
-    log_path = ROOT / ".state" / "push-brief.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("push-brief")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(fh)
-        sh = logging.StreamHandler()
-        sh.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(sh)
-    return logger
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("push-brief", ".state/push-brief.log")
 
 
 def _validate_payload(payload: dict, logger: logging.Logger) -> tuple[bool, str]:

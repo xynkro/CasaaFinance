@@ -79,18 +79,8 @@ MIN_PRICE       = 10.0    # tastytrade: $10 floor for wheel/income targets
 
 
 def _setup_logging() -> logging.Logger:
-    log_path = ROOT / ".state" / "market-scan.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("market-scan")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(fh)
-        sh = logging.StreamHandler()
-        sh.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(sh)
-    return logger
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("market-scan", ".state/market-scan.log")
 
 
 def _fetch_wsb_live(logger: logging.Logger) -> list[str]:

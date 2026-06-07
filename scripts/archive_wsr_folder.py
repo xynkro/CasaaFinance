@@ -37,19 +37,9 @@ DATE_RE = re.compile(r"^(\d{8})[_-]")
 
 
 def setup_logging() -> logging.Logger:
-    log_path = ROOT / ".state" / "wsr-archive.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("wsr-archive")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.FileHandler(log_path)
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-        # Also echo to stderr for LaunchAgent log capture
-        sh = logging.StreamHandler()
-        sh.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(sh)
-    return logger
+    # FileHandler at .state/wsr-archive.log + stderr echo (LaunchAgent capture).
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("wsr-archive", ".state/wsr-archive.log")
 
 
 def parse_date_from_name(name: str) -> str:

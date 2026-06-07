@@ -284,18 +284,8 @@ class TickerStats:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _setup_logging() -> logging.Logger:
-    log_path = ROOT / ".state" / "screen-gov-confluence.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("screen-gov-confluence")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(fh)
-        sh_ = logging.StreamHandler()
-        sh_.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(sh_)
-    return logger
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("screen-gov-confluence", ".state/screen-gov-confluence.log")
 
 
 def _safe_float(s: str) -> float:

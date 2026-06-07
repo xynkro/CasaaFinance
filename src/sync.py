@@ -73,21 +73,14 @@ def load_env() -> None:
 
 
 def setup_logging() -> logging.Logger:
-    root = Path(__file__).resolve().parent.parent
-    log_path = root / os.environ.get("SYNC_LOG", ".state/sync.log")
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("sync")
-    logger.setLevel(logging.INFO)
-    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
-    # Avoid duplicate handlers on re-import
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
-        sh_ = logging.StreamHandler(sys.stderr)
-        sh_.setFormatter(fmt)
-        logger.addHandler(sh_)
-    return logger
+    # FileHandler at .state/sync.log (overridable via $SYNC_LOG) + stderr echo,
+    # both with the timestamped format. Idempotent on re-import.
+    if __package__ in (None, ""):
+        from src.logging_util import setup_file_logging  # type: ignore
+    else:
+        from .logging_util import setup_file_logging
+    logfile = os.environ.get("SYNC_LOG", ".state/sync.log")
+    return setup_file_logging("sync", logfile, stream_fmt="%(asctime)s %(levelname)s %(message)s")
 
 
 # ---------- result container ----------

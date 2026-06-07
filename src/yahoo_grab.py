@@ -49,18 +49,8 @@ ACCOUNTS = {
 
 
 def _setup_logging() -> logging.Logger:
-    log_path = ROOT / ".state" / "yahoo-grab.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("yahoo-grab")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(fh)
-        sh = logging.StreamHandler()
-        sh.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(sh)
-    return logger
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("yahoo-grab", ".state/yahoo-grab.log")
 
 
 def _yahoo_symbol(ticker: str) -> str:

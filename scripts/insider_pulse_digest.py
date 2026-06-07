@@ -44,18 +44,8 @@ UNMAPPED_LOOKBACK_DAYS = 7
 
 
 def _setup_logging() -> logging.Logger:
-    log_path = ROOT / ".state" / "insider-pulse-digest.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("insider-pulse-digest")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(fh)
-        sh_ = logging.StreamHandler()
-        sh_.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(sh_)
-    return logger
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("insider-pulse-digest", ".state/insider-pulse-digest.log")
 
 
 def _read_today_signals(client, today_iso: str) -> list[dict]:

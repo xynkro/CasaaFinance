@@ -35,22 +35,14 @@ sys.path.insert(0, str(ROOT))
 
 
 def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("daily-brief")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    # Also keep a state log file when filesystem is writable
-    try:
-        log_path = ROOT / ".state" / "daily-brief-cron.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(fh)
-    except OSError:
-        pass
-    return logger
+    # stderr + best-effort FileHandler (writable FS only), both timestamped.
+    from src.logging_util import setup_file_logging
+    return setup_file_logging(
+        "daily-brief",
+        ".state/daily-brief-cron.log",
+        stream_fmt="%(asctime)s %(levelname)s %(message)s",
+        file_optional=True,
+    )
 
 
 def gather_sheet_state(logger: logging.Logger) -> dict:

@@ -30,21 +30,9 @@ TICKERS = {
 
 
 def _setup_logging() -> logging.Logger:
-    log_path = ROOT / ".state" / "macro-grab.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("macro-grab")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        try:
-            fh = logging.FileHandler(log_path)
-            fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-            logger.addHandler(fh)
-        except OSError:
-            pass
-        sh = logging.StreamHandler()
-        sh.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(sh)
-    return logger
+    # FileHandler is best-effort (read-only cloud FS degrades to stderr-only).
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("macro-grab", ".state/macro-grab.log", file_optional=True)
 
 
 def fetch_macro(logger: logging.Logger) -> dict[str, float]:

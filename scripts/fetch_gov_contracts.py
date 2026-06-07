@@ -40,18 +40,8 @@ UNMAPPED_FLAG_THRESHOLD = 5_000_000  # $5M+
 
 
 def _setup_logging() -> logging.Logger:
-    log_path = ROOT / ".state" / "fetch-gov-contracts.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger("fetch-gov-contracts")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(fh)
-        sh_ = logging.StreamHandler()
-        sh_.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(sh_)
-    return logger
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("fetch-gov-contracts", ".state/fetch-gov-contracts.log")
 
 
 def _row_from_award(award: dict, ticker: str) -> S.GovContractRow:

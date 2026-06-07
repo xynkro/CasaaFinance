@@ -263,13 +263,9 @@ SEED_DATA: list[tuple[str, str, str, str]] = [
 
 
 def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("init-recipient-map")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
+    # stderr-only, no timestamp — keeps the original short format.
+    from src.logging_util import setup_file_logging
+    return setup_file_logging("init-recipient-map", None, fmt="%(levelname)s %(message)s")
 
 
 def _build_rows(seed: list[tuple]) -> list[S.RecipientTickerMapRow]:
