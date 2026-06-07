@@ -265,8 +265,17 @@ def mirror_tabs(read_tab: Callable[[str], list[dict]], db: Any,
         try:
             results[name] = mirror_tab(read_tab, db, name, cap=cap)
         except Exception as e:  # noqa: BLE001 — isolate per tab, keep going
-            log.error("tab %s failed: %s — skipping (last-good doc preserved)", name, e)
-            results[name] = "error"
+            # A tab that simply doesn't exist in the Sheet yet (an optional tab
+            # whose pipeline hasn't created it — e.g. macro_lean, curated_picks)
+            # is NOT a failure: the PWA already tolerates its absence (.catch ->
+            # []). gspread raises WorksheetNotFound; match by class name so the
+            # generic core stays gspread-free.
+            if type(e).__name__ == "WorksheetNotFound":
+                log.info("tab %s not in Sheet yet — skipping (benign)", name)
+                results[name] = "missing"
+            else:
+                log.error("tab %s failed: %s — skipping (last-good doc preserved)", name, e)
+                results[name] = "error"
     return results
 
 
@@ -374,9 +383,10 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     written = sum(1 for v in results.values() if v in ("written", "empty"))
     unchanged = sum(1 for v in results.values() if v == "unchanged")
+    missing = sum(1 for v in results.values() if v == "missing")
     errored = sum(1 for v in results.values() if v == "error")
-    log.info("mirror summary: %d written, %d unchanged, %d errored (of %d tabs)",
-             written, unchanged, errored, len(results))
+    log.info("mirror summary: %d written, %d unchanged, %d missing, %d errored (of %d tabs)",
+             written, unchanged, missing, errored, len(results))
 
     if errored == 0:
         return 0

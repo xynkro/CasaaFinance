@@ -203,6 +203,25 @@ def test_bad_tab_does_not_delete_last_good_doc():
     assert db.docs["macro"] == prior               # untouched, not deleted
 
 
+def test_missing_worksheet_is_skip_not_error():
+    # A tab absent from the Sheet (gspread raises WorksheetNotFound) is benign:
+    # status "missing", NOT "error" — so an optional tab that doesn't exist yet
+    # (macro_lean, curated_picks) can't fail the run.
+    class WorksheetNotFound(Exception):
+        pass
+
+    def read(name):
+        if name == "curated_picks":
+            raise WorksheetNotFound("curated_picks")
+        return [{"a": 1}]
+
+    db = FakeDB()
+    res = mir.mirror_tabs(read, db, tabs=["macro", "curated_picks"])
+    assert res["macro"] == "written"
+    assert res["curated_picks"] == "missing"
+    assert "curated_picks" not in db.docs
+
+
 # ---------- exit codes (main) ----------
 
 def test_main_inert_without_key_exits_zero(monkeypatch, caplog):
@@ -238,6 +257,24 @@ def test_main_partial_failure_exit_one(monkeypatch):
     monkeypatch.setattr(mir, "PWA_TABS", ["macro", "broken"])
     assert mir.main([]) == 1
     assert "macro" in db.docs and "broken" not in db.docs
+
+
+def test_main_missing_tabs_exit_zero(monkeypatch):
+    # 1 written + 1 missing (no real errors) → exit 0, not 1.
+    class WorksheetNotFound(Exception):
+        pass
+
+    def read(name):
+        if name == "curated_picks":
+            raise WorksheetNotFound("curated_picks")
+        return [{"a": 1}]
+
+    db = FakeDB()
+    monkeypatch.setattr(mir, "_load_env", lambda: None)
+    monkeypatch.setattr(mir, "_db", lambda: db)
+    monkeypatch.setattr(mir, "_default_read_tab", read)
+    monkeypatch.setattr(mir, "PWA_TABS", ["macro", "curated_picks"])
+    assert mir.main([]) == 0
 
 
 def test_main_all_failed_exit_two(monkeypatch):
