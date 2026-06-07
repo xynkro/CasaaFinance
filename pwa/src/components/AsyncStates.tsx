@@ -10,6 +10,7 @@
  * action is a real keyboard-focusable <button>.
  */
 import { AlertTriangle, RefreshCw, Inbox, ShieldX, LogIn } from "lucide-react";
+import { ActionButton } from "./ui/ActionButton";
 
 /* ─── LoadingState ─────────────────────────────────────────────────────────
    Shimmer skeleton standing in for content that's still loading. Marked
@@ -120,14 +121,9 @@ export function ErrorState({
         <p className="text-[length:var(--t-sm)] text-slate-400 mt-1 leading-relaxed break-words">{message}</p>
       </div>
       {onRetry && (
-        <button
-          onClick={onRetry}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium text-[length:var(--t-sm)] text-slate-100 transition-all active:scale-95 hover:border-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-          style={{ background: "var(--surface-bright)", border: "1px solid var(--border-bright)" }}
-        >
-          <RefreshCw size={15} aria-hidden="true" />
+        <ActionButton onClick={onRetry} icon={<RefreshCw size={15} aria-hidden="true" />}>
           Retry
-        </button>
+        </ActionButton>
       )}
     </div>
   );

@@ -34,13 +34,10 @@ import {
 import { evaluateTrigger } from "../data";
 import { DecisionActionRow } from "../cards/DecisionActionRow";
 import { StockDetail } from "../components/StockDetail";
+import { ConvictionDots, StatusPill, resolveStatus, DECISION_STATUS } from "../components/ui";
 import { daysAgo, fmtExpiry } from "../lib/dates";
 import {
   Target,
-  Clock,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
   ChevronRight,
   Copy,
   Check,
@@ -81,66 +78,6 @@ function fmtPct(v: string | number | undefined): string {
   return `${n.toFixed(1)}%`;
 }
 
-const STATUS_CONFIG: Record<string, {
-  icon: typeof Target;
-  bg: string;
-  text: string;
-  border: string;
-  label: string;
-}> = {
-  pending: {
-    icon: Clock,
-    bg: "bg-amber-500/10",
-    text: "text-amber-400",
-    border: "border-amber-500/20",
-    label: "Pending",
-  },
-  watching: {
-    icon: Target,
-    bg: "bg-blue-500/10",
-    text: "text-blue-400",
-    border: "border-blue-500/20",
-    label: "Watching",
-  },
-  filled: {
-    icon: CheckCircle,
-    bg: "bg-emerald-500/10",
-    text: "text-emerald-400",
-    border: "border-emerald-500/20",
-    label: "Filled",
-  },
-  killed: {
-    icon: XCircle,
-    bg: "bg-red-500/10",
-    text: "text-red-400",
-    border: "border-red-500/20",
-    label: "Killed",
-  },
-  expired: {
-    icon: AlertTriangle,
-    bg: "bg-slate-500/10",
-    text: "text-slate-400",
-    border: "border-slate-500/20",
-    label: "Expired",
-  },
-};
-
-const DEFAULT_STATUS = STATUS_CONFIG.pending;
-
-function ConvictionDots({ level }: { level: number }) {
-  return (
-    <div className="flex gap-0.5">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <div
-          key={i}
-          className={`w-1.5 h-1.5 rounded-full ${
-            i <= level ? "bg-indigo-400" : "bg-slate-700"
-          }`}
-        />
-      ))}
-    </div>
-  );
-}
 
 /**
  * Phased deployment plan row — shows total qty + tranche breakdown for any rec.
@@ -630,8 +567,7 @@ function DecisionCard({
   insider?: InsiderSummary;
   exposurePosture?: ExposurePostureRow | null;
 }) {
-  const status = STATUS_CONFIG[decision.status?.toLowerCase()] ?? DEFAULT_STATUS;
-  const Icon = status.icon;
+  const status = resolveStatus(decision.status);
   const conv = Math.round(Number(decision.conv) || 0);
   const showOptionsSpec = !!decision.strategy && OPTIONS_STRATEGIES.includes(decision.strategy);
   // Real-time trigger evaluation (only meaningful for status="watching").
@@ -676,10 +612,7 @@ function DecisionCard({
               the next WSR re-emission. Renders null when dormant. */}
           <TriggerBadge evaluation={triggerEval} />
           <AgeChip date={decision.date} />
-          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full ${status.bg}`}>
-            <Icon size={12} className={status.text} />
-            <span className={`text-[length:var(--t-xs)] font-semibold ${status.text}`}>{status.label}</span>
-          </div>
+          <StatusPill status={decision.status} />
           <ChevronRight size={14} className="text-slate-600" />
         </div>
       </div>
@@ -1114,7 +1047,7 @@ export function DecisionsPage({
             {/* Summary pills */}
             <div className="flex gap-2 overflow-x-auto no-scrollbar py-1 -mx-1 px-1">
               {Object.entries(counts).map(([status, count]) => {
-                const cfg = STATUS_CONFIG[status] ?? DEFAULT_STATUS;
+                const cfg = DECISION_STATUS[status] ?? resolveStatus(status);
                 return (
                   <div
                     key={status}

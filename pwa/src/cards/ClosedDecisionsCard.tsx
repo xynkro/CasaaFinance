@@ -1,10 +1,8 @@
 import { useState, useMemo } from "react";
 import type { DecisionRow } from "../data";
 import { Card } from "./Card";
+import { ConvictionDots, StatusPill, resolveStatus } from "../components/ui";
 import {
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
   Target,
   TrendingUp,
   ChevronRight,
@@ -356,28 +354,8 @@ function BucketBreakdown({ rows }: { rows: BucketRow[] }) {
 
 // ---------- Decision-by-decision list ----------
 
-const STATUS_VIEW: Record<string, { icon: typeof CheckCircle; bg: string; text: string; border: string; label: string }> = {
-  filled:  { icon: CheckCircle,  bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/20", label: "Filled" },
-  killed:  { icon: XCircle,      bg: "bg-red-500/10",     text: "text-red-400",     border: "border-red-500/20",     label: "Killed" },
-  expired: { icon: AlertTriangle, bg: "bg-slate-500/10",  text: "text-slate-400",   border: "border-slate-500/20",   label: "Expired" },
-};
-
-function ConvictionDots({ level }: { level: number }) {
-  return (
-    <div className="flex gap-0.5">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <div
-          key={i}
-          className={`w-1.5 h-1.5 rounded-full ${i <= level ? "bg-indigo-400" : "bg-slate-700"}`}
-        />
-      ))}
-    </div>
-  );
-}
-
 function DecisionListItem({ row, onTap }: { row: DecisionRow; onTap: () => void }) {
-  const status = STATUS_VIEW[(row.status || "").toLowerCase()] ?? STATUS_VIEW.expired;
-  const Icon = status.icon;
+  const status = resolveStatus(row.status);
   const conv = Math.round(num(row.conv));
   const conf = Math.max(0, Math.min(1, num(row.thesis_confidence)));
   const confPct = conf * 100;
@@ -416,10 +394,7 @@ function DecisionListItem({ row, onTap }: { row: DecisionRow; onTap: () => void 
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${status.bg}`}>
-            <Icon size={10} className={status.text} />
-            <span className={`text-[length:var(--t-2xs)] font-semibold ${status.text}`}>{status.label}</span>
-          </div>
+          <StatusPill status={row.status} size="sm" />
           <ChevronRight size={12} className="text-slate-600" />
         </div>
       </div>
@@ -471,7 +446,7 @@ function DecisionListItem({ row, onTap }: { row: DecisionRow; onTap: () => void 
 // ---------- Thesis modal ----------
 
 function ThesisModal({ row, onClose }: { row: DecisionRow; onClose: () => void }) {
-  const status = STATUS_VIEW[(row.status || "").toLowerCase()] ?? STATUS_VIEW.expired;
+  const status = resolveStatus(row.status);
   const Icon = status.icon;
   return (
     <div

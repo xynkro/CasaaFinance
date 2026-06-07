@@ -1,6 +1,7 @@
 import type { OptionRow, PositionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
 import { numeric } from "../data";
 import { Card } from "./Card";
+import { Chip } from "../components/ui";
 import { CircleDot, AlertTriangle, TrendingUp, TrendingDown, Shield, Info, Zap } from "lucide-react";
 import { useState } from "react";
 
@@ -55,9 +56,9 @@ const WHEEL_LEG_LABEL: Record<string, string> = {
 function MoneynessChip({ value }: { value: string }) {
   const style = MONEYNESS_STYLE[value] ?? "bg-slate-500/15 text-slate-400 border-slate-500/20";
   return (
-    <span className={`px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold border ${style}`}>
+    <Chip pad="md" tone="bold" className={`border ${style}`}>
       {value || "?"}
-    </span>
+    </Chip>
   );
 }
 
@@ -396,14 +397,14 @@ export function WheelCard({
         </div>
         <div className="flex items-center gap-2">
           {highRisk > 0 && (
-            <span className="px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-red-500/15 text-red-400 border border-red-500/20">
+            <Chip pad="md" tone="bold" className="border bg-red-500/15 text-red-400 border-red-500/20">
               {highRisk} HIGH
-            </span>
+            </Chip>
           )}
           {medRisk > 0 && (
-            <span className="px-2 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/20">
+            <Chip pad="md" tone="bold" className="border bg-amber-500/15 text-amber-400 border-amber-500/20">
               {medRisk} MED
-            </span>
+            </Chip>
           )}
           <span className="text-[length:var(--t-2xs)] text-slate-600">{options.length} positions</span>
         </div>

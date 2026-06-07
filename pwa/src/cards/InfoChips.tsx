@@ -6,6 +6,7 @@ import type {
   TriggerEvaluation,
 } from "../data";
 import { Calendar, ArrowDownRight, ArrowUpRight, Megaphone, Users, Zap, Hourglass } from "lucide-react";
+import { Chip } from "../components/ui";
 
 /**
  * Phase 6 — small chips that surface Finnhub-derived context on
@@ -44,14 +45,15 @@ export function EarningsBadge({
     : earnings.hour === "amc" ? "AMC"
     : earnings.hour === "dmh" ? "DMH" : "";
   return (
-    <span
+    <Chip
       title={`Earnings ${earnings.date} ${hourLabel}${earnings.eps_estimate ? ` · est $${earnings.eps_estimate}` : ""}`}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-semibold tabular-nums"
+      icon={<Calendar size={10} />}
+      tone="semibold"
+      tabular
       style={{ background: bg, border: `1px solid ${border}`, color }}
     >
-      <Calendar size={10} />
       ER {earnings.date.slice(5)}{hourLabel ? ` ${hourLabel}` : ""}
-    </span>
+    </Chip>
   );
 }
 
@@ -77,18 +79,14 @@ export function AnalystChip({ analyst }: { analyst?: AnalystConsensusRow }) {
   const s = Number(analyst.sell_count) || 0;
   const ss = Number(analyst.strong_sell_count) || 0;
   return (
-    <span
+    <Chip
       title={`Wall St: ${sb} SB / ${b} B / ${h} H / ${s} S / ${ss} SS  (${total} analysts, ${label})`}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-medium tabular-nums"
-      style={{
-        background: `${color}1a`,
-        border: `1px solid ${color}33`,
-        color,
-      }}
+      icon={<Users size={10} />}
+      color={color}
+      tabular
     >
-      <Users size={10} />
       {label.replace("_", " ")}
-    </span>
+    </Chip>
   );
 }
 
@@ -104,14 +102,13 @@ export function NewsSentimentDot({ news }: { news?: NewsSummary }) {
   else if (score <= -0.15 || score >= 0.15) { color = "#fbbf24"; label = "Mixed news"; }
   else return null; // neutral & low signal — don't add visual noise
   return (
-    <span
+    <Chip
       title={`${label} (worst ${news.worst_score.toFixed(2)} / best ${news.best_score.toFixed(2)} over 72h, ${news.count_72h} articles): "${news.latest_headline.slice(0, 100)}"`}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-medium"
+      icon={<Megaphone size={10} />}
       style={{ background: `${color}18`, border: `1px solid ${color}33`, color }}
     >
-      <Megaphone size={10} />
       {label.replace(" news", "")}
-    </span>
+    </Chip>
   );
 }
 
@@ -191,13 +188,13 @@ export function InsiderFlowIcon({ insider }: { insider?: InsiderSummary }) {
   const Icon = isBuy ? ArrowUpRight : ArrowDownRight;
   const millions = (Math.abs(insider.net_buy_value) / 1_000_000).toFixed(1);
   return (
-    <span
+    <Chip
       title={`Insider net ${isBuy ? "buy" : "sell"} $${(Math.abs(insider.net_buy_value) / 1000).toFixed(0)}k last 7d (largest: ${insider.largest_name} $${(insider.largest_value / 1000).toFixed(0)}k)`}
-      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-medium tabular-nums"
+      icon={<Icon size={10} />}
+      tabular
       style={{ background: `${color}18`, border: `1px solid ${color}33`, color }}
     >
-      <Icon size={10} />
       {isBuy ? "Insider buy" : "Insider sell"} ${millions}M
-    </span>
+    </Chip>
   );
 }
