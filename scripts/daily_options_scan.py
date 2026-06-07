@@ -670,18 +670,40 @@ def fundamental_gate(ticker: str, logger: logging.Logger) -> tuple[bool, str]:
     return True, "pass"
 
 
-def technical_conviction_gate(ticker: str, logger: logging.Logger) -> tuple[bool, int, dict]:
+def technical_conviction_gate(
+    ticker: str, logger: logging.Logger, yt=None,
+) -> tuple[bool, int, dict]:
     """
     Technical gates + conviction for discovery universe tickers.
     Uses compute_indicators() and compute_scores() for vol-adjusted gating.
     Returns (pass, conviction_0_100, context_dict).
+
+    The third element is the FULL _technical_context() dict (not the bare
+    indicators), i.e. {hv30, rsi_14, support, resistance, _indicators, _scores}.
+    That makes it directly reusable as scan_ticker(precomputed_ctx=...) so the
+    discovery path fetches the 250d history ONCE here instead of refetching the
+    identical bars inside scan_ticker. On any reject the returned ctx is still
+    the same shape (possibly with empty _indicators) — harmless, since rejects
+    never reach scan_ticker.
+
+    `yt` may be injected (shared yfinance Ticker) so the fast_info quote and the
+    250d history come off one object; defaults to a fresh Ticker when omitted.
     """
     import yfinance as yf
     from src.indicators import compute_indicators
     from src.technical_score import compute_scores
 
+    if yt is None:
+        try:
+            yt = yf.Ticker(ticker)
+        except Exception:
+            return False, 0, {}
+
+    # ONE 250d fetch. Build the SAME dict shape _technical_context() returns so
+    # the result threads straight into scan_ticker(precomputed_ctx=...) and the
+    # discovery path never refetches these bars. The >=50-bar floor is the gate's
+    # own (stricter than _technical_context's >=20), so it's enforced here.
     try:
-        yt = yf.Ticker(ticker)
         hist = yt.history(period="250d", interval="1d", auto_adjust=True)
         if hist.empty or len(hist) < 50:
             return False, 0, {}
@@ -689,9 +711,27 @@ def technical_conviction_gate(ticker: str, logger: logging.Logger) -> tuple[bool
         return False, 0, {}
 
     ind = compute_indicators(hist)
+    if not ind:
+        return False, 0, {}
+    scores = compute_scores(ind)
+    ctx = {
+        # Flat compute_indicators keys at top level preserve the original ctx
+        # contract (close, sma_20/50/200, rsi_14, swing_low/high,
+        # volatility_annual, vol_avg_20, …) for every existing consumer; the
+        # explicit rounded fields below override their raw counterparts.
+        **ind,
+        "hv30": round(ind.get("volatility_annual", 0) * 100, 1),
+        "rsi_14": round(ind.get("rsi_14", 50), 1),
+        "support": round(ind.get("support", 0), 2),
+        "resistance": round(ind.get("resistance", 0), 2),
+        # Nested copies the dedup path reuses as scan_ticker(precomputed_ctx=…).
+        "_indicators": ind,
+        "_scores": scores,
+    }
+
     price = ind.get("close", 0)
     if price <= 0:
-        return False, 0, {}
+        return False, 0, ctx
 
     sma50 = ind.get("sma_50", 0)
     sma200 = ind.get("sma_200", 0)
@@ -701,9 +741,9 @@ def technical_conviction_gate(ticker: str, logger: logging.Logger) -> tuple[bool
 
     # Gates
     if sma50 > 0 and price < sma50:
-        return False, 0, ind
+        return False, 0, ctx
     if sma200 > 0 and price < sma200:
-        return False, 0, ind
+        return False, 0, ctx
 
     # Vol-adjusted RSI bounds
     vol = ind.get("volatility_annual", 0.30)
@@ -711,17 +751,16 @@ def technical_conviction_gate(ticker: str, logger: logging.Logger) -> tuple[bool
     rsi_low = max(20, 30 - vol_shift)
     rsi_high = min(85, 75 + vol_shift)
     if rsi < rsi_low or rsi > rsi_high:
-        return False, 0, ind
+        return False, 0, ctx
     if swing_low > 0 and price < swing_low * 1.03:
-        return False, 0, ind
+        return False, 0, ctx
     if avg_vol < 200_000:
-        return False, 0, ind
+        return False, 0, ctx
 
-    scores = compute_scores(ind)
     csp_score = scores.get("CSP", 0)
     conviction = max(0, min(100, int((csp_score + 100) / 2)))
 
-    return True, conviction, ind
+    return True, conviction, ctx
 
 
 def _long_call_quality(
@@ -843,6 +882,7 @@ def scan_ticker(
     earnings_days_away: int = -1,
     macro: dict | None = None,
     is_discovery: bool = False,
+    precomputed_ctx: dict | None = None,
 ) -> list[dict[str, Any]]:
     """Return CSP + CC + LONG_CALL + spread candidates for a single ticker.
 
@@ -862,6 +902,14 @@ def scan_ticker(
     is_discovery: True if ticker is from the FinViz discovery universe
         (vs the user's watchlist). Discovery tickers get vol-adjusted
         CSP OTM range; watchlist tickers keep the standard range.
+    precomputed_ctx: an already-built _technical_context() dict
+        ({hv30, rsi_14, support, resistance, _indicators, _scores}). When
+        supplied (the discovery path passes the ctx from
+        technical_conviction_gate), scan_ticker SKIPS its own 250d
+        _technical_context() refetch and reuses these bars — same data, one
+        fewer 250d download per discovery ticker. Omit it (watchlist path) to
+        fetch fresh as before. The ATM-IV injection + score recompute below
+        still run on this ctx's _indicators exactly as on a freshly-fetched one.
     """
     import yfinance as yf
     try:
@@ -891,7 +939,15 @@ def scan_ticker(
     except Exception:
         return []
 
-    tech_ctx = _technical_context(yt)
+    # Reuse the gate's already-computed 250d context when threaded in (discovery
+    # path); otherwise fetch fresh (watchlist path). Same data either way — this
+    # just avoids the redundant second 250d download per discovery ticker. An
+    # empty/defaulted precomputed_ctx (missing _indicators) falls back to a
+    # fetch so behaviour can never silently degrade.
+    if precomputed_ctx and precomputed_ctx.get("_indicators"):
+        tech_ctx = precomputed_ctx
+    else:
+        tech_ctx = _technical_context(yt)
     hv30 = tech_ctx["hv30"]
 
     # Inject ATM IV into indicators so iv_rv_ratio signal contributes to
@@ -1937,10 +1993,12 @@ def main() -> int:
 
     # 4) Technical conviction gate on discovery survivors
     discovery_final: list[str] = []
+    discovery_ctx: dict[str, dict] = {}  # ticker → gate's 250d ctx, reused by scan_ticker
     for ticker in discovery_survivors:
         ok, conv, ctx = technical_conviction_gate(ticker, logger)
         if ok:
             discovery_final.append(ticker)
+            discovery_ctx[ticker] = ctx
         else:
             logger.debug(f"  {ticker}: technical reject")
     logger.info(f"  Discovery technical: {len(discovery_final)} of {len(discovery_survivors)} passed")
@@ -2114,7 +2172,8 @@ def main() -> int:
             earnings_away = ed.get("earnings_days_away", -1)
             cands = scan_ticker(ticker, logger,
                                 earnings_days_away=earnings_away, macro=macro,
-                                is_discovery=True)
+                                is_discovery=True,
+                                precomputed_ctx=discovery_ctx.get(ticker))
             # Discovery tickers only produce CSP (HARVEST_CSP) — no CC/spreads
             harvest_cands = [c for c in cands if c.get("strategy") == "HARVEST_CSP"]
             all_candidates.extend(harvest_cands)
