@@ -14,6 +14,9 @@ Goal: make the PWA read your data **privately** so you can restrict the public S
 
 ## 3. Enable Google sign-in (~1 min)
 - **Build → Authentication → Get started → Sign-in method → Google → Enable** → set support email → Save.
+- **⚠️ REQUIRED: authorize the PWA's domain.** Auth only allows sign-in from listed domains (default: `localhost`, `*.firebaseapp.com`). The PWA is served from GitHub Pages, so add it:
+  **Authentication → `Settings` tab → Authorized domains → Add domain → `xynkro.github.io`.**
+  (Without this, "Continue with Google" fails with `auth/unauthorized-domain`.)
 
 ## 4. Allowlist your two emails (~1 min)
 - These go in `firestore.rules` (I generate the file). Tell me the two Google accounts that may sign in:
