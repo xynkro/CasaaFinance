@@ -180,10 +180,3 @@ def resolve(recipient_name: str, fuzzy: bool = True) -> str:
     return ""
 
 
-def reload_map() -> int:
-    """Force-reload the recipient map (e.g. after init_recipient_map ran).
-
-    Returns the new entry count.
-    """
-    _load_map.cache_clear()
-    return len(_load_map())

@@ -66,16 +66,6 @@ def gross_gex(options: Iterable[dict], spot: float, r: float = DEFAULT_R) -> flo
     return sum(abs(signed_dollar_gamma(o, spot, r)) for o in options)
 
 
-def gex_by_strike(options: Iterable[dict], spot: float,
-                  r: float = DEFAULT_R) -> dict[float, float]:
-    """Aggregate signed dealer dollar-gamma per strike (calls + puts netted)."""
-    agg: dict[float, float] = {}
-    for o in options:
-        k = float(o["strike"])
-        agg[k] = agg.get(k, 0.0) + signed_dollar_gamma(o, spot, r)
-    return agg
-
-
 def _wall(options: Iterable[dict], spot: float, right: str,
           side: str, r: float) -> Optional[float]:
     """Strike with the largest |dealer dollar-gamma| for one option right,

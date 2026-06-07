@@ -758,9 +758,9 @@ def format_calibration_report(results: dict) -> str:
 def _send_telegram(report: str):
     """Send feedback report to Telegram."""
     try:
-        from src.telegram import send
+        from src.telegram import send, OPTIONS_INTEL_TOPIC
         # Use the options intel topic (closest fit for quantitative signals)
-        send(report, topic="options_intel")
+        send(report, message_thread_id=OPTIONS_INTEL_TOPIC)
         logger.info("✓ Sent Telegram report")
     except Exception as e:
         logger.warning(f"Telegram send failed: {e}")

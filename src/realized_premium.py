@@ -148,24 +148,3 @@ def realized_option_premium_per_share(
     return net / shares
 
 
-def adjusted_basis(
-    avg_cost: float,
-    open_leg_credit_per_share: float,
-    realized_premium_per_share: float,
-) -> float:
-    """Effective wheel cost basis per share, floored at 0.
-
-    Subtracts BOTH premium sources from the raw stock cost:
-      * `open_leg_credit_per_share` — premium on currently-open short legs
-        (daily_tracker's ticker_credits, from the live grab);
-      * `realized_premium_per_share` — premium from CLOSED cycles
-        (:func:`realized_option_premium_per_share`).
-    The two are disjoint (the realized calc excludes open legs), so they add.
-
-    Floored at 0: cumulative premium can take the effective basis down to
-    break-even but never negative. A negative basis would corrupt the
-    downstream covered-call gate — trading_rules.cc_allowed() multiplies the
-    basis by 1.15, so a negative basis yields a negative strike floor and would
-    wave through a loss-locking CC.
-    """
-    return max(0.0, avg_cost - open_leg_credit_per_share - realized_premium_per_share)

@@ -54,14 +54,6 @@ def _post(path: str, body: dict | None = None) -> dict:
     return r.json()
 
 
-def _delete(path: str) -> dict | None:
-    r = requests.delete(_url(path), headers=_headers(), timeout=15)
-    r.raise_for_status()
-    if r.status_code == 204:
-        return None
-    return r.json()
-
-
 # ────────────────────────────────────────────────────────────────────
 # Read — account, positions, orders
 # ────────────────────────────────────────────────────────────────────
@@ -124,11 +116,6 @@ def get_orders(
         "limit": limit,
         "direction": direction,
     })
-
-
-def get_order(order_id: str) -> dict:
-    """Get a single order by ID."""
-    return _get(f"orders/{order_id}")
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -345,64 +332,3 @@ def submit_mleg_order(
         legs, qty, limit_price, time_in_force, client_order_id))
 
 
-def get_option_positions() -> list[dict]:
-    """Open positions that are options (asset_class == 'us_option')."""
-    return [p for p in get_positions() if p.get("asset_class") == "us_option"]
-
-
-def cancel_order(order_id: str) -> None:
-    """Cancel an open order by ID."""
-    _delete(f"orders/{order_id}")
-
-
-def cancel_all_orders() -> list[dict]:
-    """Cancel all open orders. Returns list of cancelled orders."""
-    r = requests.delete(
-        _url("orders"),
-        headers=_headers(),
-        timeout=15,
-    )
-    r.raise_for_status()
-    return r.json() if r.status_code != 207 else r.json()
-
-
-def close_position(symbol: str) -> dict:
-    """Liquidate an entire position."""
-    return _delete(f"positions/{symbol.upper()}")
-
-
-# ────────────────────────────────────────────────────────────────────
-# Helpers — portfolio summary, NLV, buying power
-# ────────────────────────────────────────────────────────────────────
-
-def portfolio_value() -> float:
-    """Current portfolio value (equity)."""
-    return float(get_account()["portfolio_value"])
-
-
-def buying_power() -> float:
-    """Available buying power."""
-    return float(get_account()["buying_power"])
-
-
-def cash() -> float:
-    """Cash balance."""
-    return float(get_account()["cash"])
-
-
-def is_market_open() -> bool:
-    """Whether US market is currently open for trading."""
-    clock = _get("clock")
-    return clock.get("is_open", False)
-
-
-def next_market_open() -> str:
-    """ISO timestamp of next market open."""
-    clock = _get("clock")
-    return clock.get("next_open", "")
-
-
-def next_market_close() -> str:
-    """ISO timestamp of next market close."""
-    clock = _get("clock")
-    return clock.get("next_close", "")

@@ -9,8 +9,6 @@ Both require sufficient history (MIN_HISTORY_DAYS).
 """
 from __future__ import annotations
 
-import math
-
 MIN_HISTORY_DAYS = 30
 
 
@@ -38,32 +36,3 @@ def compute_iv_percentile(iv_current: float, iv_history: list[float]) -> float:
         return -1.0
     below = sum(1 for v in clean if v < iv_current)
     return round(below / len(clean) * 100, 1)
-
-
-def fetch_iv_history(ticker: str, lookback_days: int = 252) -> list[float]:
-    """
-    Build IV history proxy from rolling 30-day HV.
-
-    yfinance doesn't provide historical IV directly. Best available proxy
-    is rolling 30-day annualised vol from close prices. This is a rough
-    proxy but better than no history at all.
-
-    Returns list of daily annualised vol estimates (most recent last).
-    """
-    import yfinance as yf
-
-    try:
-        yt = yf.Ticker(ticker)
-        hist = yt.history(period="1y", interval="1d", auto_adjust=True)
-        if hist.empty or len(hist) < 60:
-            return []
-
-        closes = hist["Close"].dropna()
-        # Rolling 30-day annualised vol as IV proxy
-        log_rets = closes.pct_change().dropna().apply(
-            lambda x: math.log(1 + x) if x > -1 else 0
-        )
-        rolling_vol = log_rets.rolling(30).std() * math.sqrt(252)
-        return [round(float(v), 4) for v in rolling_vol.dropna().tolist()]
-    except Exception:
-        return []

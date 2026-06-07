@@ -58,52 +58,6 @@ def _resolve_model(alias: str) -> str:
     return {"opus": MODEL_OPUS, "sonnet": MODEL_SONNET, "haiku": MODEL_HAIKU}.get(alias, alias)
 
 
-def synthesize(
-    system: str,
-    user_prompt: str,
-    model: str = "opus",
-    max_tokens: int = 2048,
-    temperature: float = 0.5,
-    expect_json: bool = True,
-) -> dict | str:
-    """
-    Run the THINKING step. Default Opus 4.7. Returns parsed JSON if `expect_json`,
-    otherwise raw text. The prompt should explicitly ask for JSON in a fenced block
-    when expect_json=True.
-
-    Cost budget: keep `max_tokens` tight (~2048). Synthesis should be COMPRESSED.
-    """
-    client = _client()
-    model_id = _resolve_model(model)
-    LOGGER.info(f"synthesize() → {model_id} (max_tokens={max_tokens})")
-
-    resp = client.messages.create(
-        model=model_id,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        system=system,
-        messages=[{"role": "user", "content": user_prompt}],
-    )
-
-    text = resp.content[0].text if resp.content else ""
-    LOGGER.info(
-        f"synthesis usage: in={resp.usage.input_tokens} out={resp.usage.output_tokens} "
-        f"stop_reason={resp.stop_reason}"
-    )
-
-    if not expect_json:
-        return text
-
-    # Extract JSON from response (may be in fenced block or naked)
-    json_text = _extract_json(text)
-    if not json_text:
-        raise ValueError(f"synthesize() expected JSON but got:\n{text[:500]}")
-    try:
-        return json.loads(json_text)
-    except json.JSONDecodeError as e:
-        raise ValueError(f"synthesize() returned invalid JSON: {e}\n{json_text[:500]}")
-
-
 def format_markdown(
     template_path: str | Path,
     synthesis_json: dict | str,
@@ -171,32 +125,3 @@ def _strip_outer_fences(text: str) -> str:
     return m.group(1) if m else text
 
 
-# ── Public token-usage tracking helper for cost auditing ──────────────────────
-
-class CostTracker:
-    """Accumulate input/output tokens across a run; print summary at end."""
-
-    PRICES_PER_M = {  # USD per 1M tokens
-        "opus":   {"in": 15.0, "out": 75.0},
-        "sonnet": {"in":  3.0, "out": 15.0},
-        "haiku":  {"in":  0.80, "out": 4.0},
-    }
-
-    def __init__(self) -> None:
-        self.records: list[tuple[str, int, int]] = []
-
-    def add(self, model_alias: str, input_tokens: int, output_tokens: int) -> None:
-        self.records.append((model_alias, input_tokens, output_tokens))
-
-    def summary(self) -> dict:
-        total_cost = 0.0
-        per_model: dict[str, dict[str, float]] = {}
-        for alias, ti, to in self.records:
-            p = self.PRICES_PER_M.get(alias, {"in": 0, "out": 0})
-            cost = (ti * p["in"] + to * p["out"]) / 1_000_000
-            total_cost += cost
-            slot = per_model.setdefault(alias, {"input": 0, "output": 0, "cost": 0})
-            slot["input"]  += ti
-            slot["output"] += to
-            slot["cost"]   += cost
-        return {"total_cost_usd": round(total_cost, 4), "per_model": per_model}
