@@ -283,11 +283,6 @@ class TickerStats:
 # Sheet readers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _setup_logging() -> logging.Logger:
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("screen-gov-confluence", ".state/screen-gov-confluence.log")
-
-
 def _safe_float(s: str) -> float:
     try:
         return float(s)
@@ -1151,7 +1146,8 @@ def main() -> int:
     p.add_argument("--dry", action="store_true", help="Print plan, no sheet write")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("screen-gov-confluence", ".state/screen-gov-confluence.log")
     logger.info(f"screen_gov_confluence start (dry={args.dry})")
 
     load_env()

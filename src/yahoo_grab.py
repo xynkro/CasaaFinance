@@ -48,11 +48,6 @@ ACCOUNTS = {
 }
 
 
-def _setup_logging() -> logging.Logger:
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("yahoo-grab", ".state/yahoo-grab.log")
-
-
 def _yahoo_symbol(ticker: str) -> str:
     """Convert internal ticker → Yahoo Finance symbol."""
     if ticker in SGX_TICKERS:
@@ -261,7 +256,8 @@ def main() -> int:
     ap.add_argument("--sarah",  action="store_true", help="Only update Sarah's account")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("yahoo-grab", ".state/yahoo-grab.log")
     logger.info("=== yahoo-grab start ===")
 
     target_accounts = list(ACCOUNTS.keys())

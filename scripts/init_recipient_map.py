@@ -262,12 +262,6 @@ SEED_DATA: list[tuple[str, str, str, str]] = [
 ]
 
 
-def _setup_logging() -> logging.Logger:
-    # stderr-only, no timestamp — keeps the original short format.
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("init-recipient-map", None, fmt="%(levelname)s %(message)s")
-
-
 def _build_rows(seed: list[tuple]) -> list[S.RecipientTickerMapRow]:
     """Convert SEED_DATA tuples to typed RecipientTickerMapRow rows.
 
@@ -308,7 +302,9 @@ def main() -> int:
                    help="Clear sheet and re-seed (otherwise upsert)")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    # stderr-only, no timestamp — keeps the original short format.
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("init-recipient-map", None, fmt="%(levelname)s %(message)s")
 
     rows = _build_rows(SEED_DATA)
     logger.info(f"Built {len(rows)} unique mapping rows from {len(SEED_DATA)} seed entries")

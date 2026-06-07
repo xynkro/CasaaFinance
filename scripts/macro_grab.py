@@ -29,12 +29,6 @@ TICKERS = {
 }
 
 
-def _setup_logging() -> logging.Logger:
-    # FileHandler is best-effort (read-only cloud FS degrades to stderr-only).
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("macro-grab", ".state/macro-grab.log", file_optional=True)
-
-
 def fetch_macro(logger: logging.Logger) -> dict[str, float]:
     """Pull each indicator's latest close via yfinance.download (1-day intraday)."""
     import yfinance as yf
@@ -82,7 +76,9 @@ def main() -> int:
     ap.add_argument("--dry", action="store_true", help="Print what would be written, no sheet change")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    # FileHandler is best-effort (read-only cloud FS degrades to stderr-only).
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("macro-grab", ".state/macro-grab.log", file_optional=True)
     logger.info("=== macro-grab start ===")
 
     values = fetch_macro(logger)

@@ -39,11 +39,6 @@ PWA_URL = "https://xynkro.github.io/CasaaFinance/"
 UNMAPPED_FLAG_THRESHOLD = 5_000_000  # $5M+
 
 
-def _setup_logging() -> logging.Logger:
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("fetch-gov-contracts", ".state/fetch-gov-contracts.log")
-
-
 def _row_from_award(award: dict, ticker: str) -> S.GovContractRow:
     """Convert a raw USAspending award dict to a typed GovContractRow."""
     raw_name = us.get_recipient_name(award)
@@ -122,7 +117,8 @@ def main() -> int:
                    help="ISO end date (YYYY-MM-DD); default = yesterday SGT")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("fetch-gov-contracts", ".state/fetch-gov-contracts.log")
     logger.info(f"fetch_gov_contracts start (dry={args.dry}, days={args.days})")
 
     end_dt = (

@@ -100,11 +100,6 @@ def _max_position_usd(nlv: float, ticker: str) -> float:
     return nlv * pct / 100.0
 
 
-def _setup_logging() -> logging.Logger:
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("execute-decisions", ".state/execute-decisions.log")
-
-
 def show_status(logger: logging.Logger) -> int:
     """Print account summary + positions. Read-only."""
     load_env()
@@ -318,7 +313,8 @@ def main() -> int:
     p.add_argument("--status", action="store_true", help="Show account + positions")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("execute-decisions", ".state/execute-decisions.log")
     load_env()
 
     if args.status:

@@ -34,17 +34,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
-def _setup_logging() -> logging.Logger:
-    # stderr + best-effort FileHandler (writable FS only), both timestamped.
-    from src.logging_util import setup_file_logging
-    return setup_file_logging(
-        "daily-brief",
-        ".state/daily-brief-cron.log",
-        stream_fmt="%(asctime)s %(levelname)s %(message)s",
-        file_optional=True,
-    )
-
-
 def gather_sheet_state(logger: logging.Logger) -> dict:
     """Read the slow-moving state — positions, snapshots, macro, options book —
     from Sheets so the brain has full context."""
@@ -260,7 +249,14 @@ def main() -> int:
     ap.add_argument("--date", default=None, help="Override date (YYYY-MM-DD); default = today UTC")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    # stderr + best-effort FileHandler (writable FS only), both timestamped.
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging(
+        "daily-brief",
+        ".state/daily-brief-cron.log",
+        stream_fmt="%(asctime)s %(levelname)s %(message)s",
+        file_optional=True,
+    )
     logger.info("=== generate_daily_brief start ===")
 
     today_iso = args.date or date.today().isoformat()

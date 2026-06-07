@@ -66,11 +66,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 
-def _setup_logging() -> logging.Logger:
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("push-brief", ".state/push-brief.log")
-
-
 def _validate_payload(payload: dict, logger: logging.Logger) -> tuple[bool, str]:
     """Return (ok, error_msg). All briefs need at least type, date, raw_md."""
     btype = payload.get("type")
@@ -307,7 +302,8 @@ def _push_wsr(payload: dict, logger: logging.Logger, no_drive: bool = False) -> 
 
 def push_brief(payload: dict, no_drive: bool = False) -> dict:
     """Public API. Returns dict with {sheet_tab, drive_file_id, drive_url, ok, error}."""
-    logger = _setup_logging()
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("push-brief", ".state/push-brief.log")
     ok, err = _validate_payload(payload, logger)
     if not ok:
         logger.error(f"Validation failed: {err}")

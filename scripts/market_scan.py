@@ -78,11 +78,6 @@ MAX_PRICE       = 650     # skip ultra-high priced stocks (cash req too big)
 MIN_PRICE       = 10.0    # tastytrade: $10 floor for wheel/income targets
 
 
-def _setup_logging() -> logging.Logger:
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("market-scan", ".state/market-scan.log")
-
-
 def _fetch_wsb_live(logger: logging.Logger) -> list[str]:
     """Pull most-mentioned tickers from WSB via Reddit public JSON (no auth)."""
     import re
@@ -430,7 +425,8 @@ def main() -> int:
     ap.add_argument("--no-live-wsb", action="store_true", help="Skip live Reddit WSB fetch")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("market-scan", ".state/market-scan.log")
     logger.info("=== market-scan start ===")
 
     result = run_scan(

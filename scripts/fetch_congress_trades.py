@@ -42,11 +42,6 @@ PWA_URL = "https://xynkro.github.io/CasaaFinance/"
 DEFAULT_LOOKBACK_DAYS = 14
 
 
-def _setup_logging() -> logging.Logger:
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("fetch-congress-trades", ".state/fetch-congress-trades.log")
-
-
 def _load_existing_filing_ids(client) -> set[str]:
     """Read existing filing_ids from congress_trades sheet for dedup."""
     ss = sh._open_sheet(client)
@@ -99,7 +94,8 @@ def main() -> int:
                    help="Max pages to scrape (default 30, ~12 rows each)")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("fetch-congress-trades", ".state/fetch-congress-trades.log")
     logger.info(f"fetch_congress_trades start (dry={args.dry}, days={args.days})")
 
     since = (date.today() - timedelta(days=args.days)).isoformat()

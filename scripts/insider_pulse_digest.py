@@ -43,11 +43,6 @@ FILING_LOOKBACK_DAYS = 3
 UNMAPPED_LOOKBACK_DAYS = 7
 
 
-def _setup_logging() -> logging.Logger:
-    from src.logging_util import setup_file_logging
-    return setup_file_logging("insider-pulse-digest", ".state/insider-pulse-digest.log")
-
-
 def _read_today_signals(client, today_iso: str) -> list[dict]:
     """Read top-N gov_confluence_signals rows for today, sorted by score."""
     ss = sh._open_sheet(client)
@@ -172,7 +167,8 @@ def main() -> int:
     p.add_argument("--dry", action="store_true", help="Print plan, no Telegram send")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    from src.logging_util import setup_file_logging
+    logger = setup_file_logging("insider-pulse-digest", ".state/insider-pulse-digest.log")
     logger.info(f"insider_pulse_digest start (dry={args.dry})")
 
     use_fallback = False
