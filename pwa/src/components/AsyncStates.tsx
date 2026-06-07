@@ -9,7 +9,7 @@
  * announced via role + aria-live, decorative chrome is aria-hidden, and every
  * action is a real keyboard-focusable <button>.
  */
-import { AlertTriangle, RefreshCw, Inbox, ShieldX, LogIn } from "lucide-react";
+import { AlertTriangle, RefreshCw, Inbox, ShieldX } from "lucide-react";
 import { ActionButton } from "./ui/ActionButton";
 
 /* ─── LoadingState ─────────────────────────────────────────────────────────
@@ -134,9 +134,23 @@ export function ErrorState({
    SignInScreen). Mirrors PinGate's layout (bg-layer + centred glass card). */
 function FullScreenShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="h-screen flex flex-col items-center justify-center px-6 relative">
+    <div className="h-screen flex flex-col items-center justify-center px-6 relative overflow-hidden">
       <div className="bg-layer" aria-hidden="true" />
-      {children}
+      {/* Branded hero splash behind the gate card. */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 bg-cover bg-center"
+        style={{ backgroundImage: `url(${import.meta.env.BASE_URL}hero.jpg)`, opacity: 0.5 }}
+      />
+      <div
+        aria-hidden="true"
+        className="absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(115% 75% at 50% 35%, rgba(10,18,31,0.35) 0%, rgba(10,18,31,0.78) 65%, rgba(10,18,31,0.94) 100%)",
+        }}
+      />
+      <div className="relative z-10 w-full flex flex-col items-center">{children}</div>
     </div>
   );
 }
@@ -205,12 +219,11 @@ export function SignInScreen({
   return (
     <FullScreenShell>
       <div className="glass-bright rounded-3xl p-8 w-full max-w-sm flex flex-col items-center gap-6 fade-up">
-        <div
-          aria-hidden="true"
-          className="w-16 h-16 rounded-2xl flex items-center justify-center bg-indigo-500/15 text-indigo-400"
-        >
-          <LogIn size={28} />
-        </div>
+        <img
+          src={`${import.meta.env.BASE_URL}icon-192.png`}
+          alt="Casaa Finance"
+          className="w-20 h-20 rounded-[1.4rem] shadow-lg shadow-black/50 ring-1 ring-white/10"
+        />
 
         <div className="text-center">
           <h1 className="text-[length:var(--t-xl)] font-bold text-slate-100 mb-1">Casaa Finance</h1>
