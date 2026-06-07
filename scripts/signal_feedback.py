@@ -26,11 +26,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any, Optional
 
 import yfinance as yf
 
@@ -103,6 +105,79 @@ def _parse_float(s: str, default: float = 0.0) -> float:
         return float(s)
     except (ValueError, TypeError):
         return default
+
+
+# ── Firestore decision write-back (the real-user feedback loop) ──────────────
+# The PWA mirrors every fill/kill/defer into the `decisions` Firestore
+# collection (doc id = decision_key = date|account|ticker|strategy|strike).
+# These are the user's ACTUAL choices — the missing half of the feedback loop,
+# which until now lived only in the PWA's localStorage and was invisible to the
+# engine. We read them here via firebase-admin so signal_feedback can grade what
+# the user did, not just what the scanner emitted.
+
+_FIREBASE_ENV_KEY = "FIREBASE_SERVICE_ACCOUNT_JSON"
+
+
+def _decisions_db() -> Optional[Any]:
+    """Return an initialized Firestore client, or None when inert.
+
+    Inert path (no log noise beyond one info line): `FIREBASE_SERVICE_ACCOUNT_JSON`
+    unset → return None, so the whole decisions-read is a clean no-op. This is the
+    SAME inert-without-key pattern as scripts/mirror_to_firestore._db() and the
+    project's gmail_client / news_aggregator credentials — committing this changes
+    nothing until the service-account JSON is present in the environment.
+
+    With the key present, init firebase-admin from the service-account JSON and
+    return a Firestore client. firebase-admin is imported lazily so this module
+    (and its tests) import cleanly without the package installed.
+    """
+    sa_json = os.environ.get(_FIREBASE_ENV_KEY)
+    if not sa_json:
+        logger.info("%s unset — decisions read-back is inert (no-op)", _FIREBASE_ENV_KEY)
+        return None
+
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+
+    info = json.loads(sa_json)
+    cred = credentials.Certificate(info)
+    # Guard against re-init if something already initialized the default app
+    # (e.g. mirror_to_firestore ran in the same process).
+    try:
+        app = firebase_admin.get_app()
+    except ValueError:
+        app = firebase_admin.initialize_app(cred)
+    return firestore.client(app)
+
+
+def read_user_decisions(db: Optional[Any] = None) -> dict[str, dict]:
+    """Read the `decisions` Firestore collection → {decision_key: decision_doc}.
+
+    Returns an EMPTY dict when inert (no service-account key) or on any read
+    error — never raises, so an unavailable Firestore can't break the Sheet-based
+    grading. Each value is the decision doc the PWA wrote, shape roughly:
+        { key, status (filled|killed|deferred), ticker, strategy, account,
+          strike?, ts, user?, note?, fillPrice?, qty?, updatedAt }
+
+    Pass `db` to inject a (mock) client in tests; otherwise it builds one via
+    `_decisions_db()` (inert without the key).
+    """
+    if db is None:
+        db = _decisions_db()
+    if db is None:
+        return {}
+
+    out: dict[str, dict] = {}
+    try:
+        for snap in db.collection("decisions").stream():
+            data = snap.to_dict() or {}
+            key = str(data.get("key") or getattr(snap, "id", "") or "")
+            if key:
+                out[key] = data
+    except Exception as e:  # noqa: BLE001 — best-effort; never fatal
+        logger.warning("decisions read-back failed: %s", e)
+        return {}
+    return out
 
 
 # ── Price fetching ─────────────────────────────────────────────────────────
@@ -246,6 +321,14 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
     # 1. Read scan_results
     scan_rows = _read_tab(client, S.ScanResultRow.TAB_NAME)
     logger.info(f"Read {len(scan_rows)} rows from scan_results")
+
+    # 1b. Read the user's REAL fill/kill/defer decisions from Firestore (the
+    # write-back / feedback loop). ADDITIONAL input — does NOT replace or alter
+    # the Sheet-based grading below. Empty dict when inert (no service-account
+    # key) or on any read error, so this can never break the existing pipeline.
+    user_decisions = read_user_decisions()
+    if user_decisions:
+        logger.info(f"Read {len(user_decisions)} real user decisions from Firestore")
 
     # 2. Read existing signal_outcomes to avoid re-processing
     existing_outcomes = set()
@@ -485,8 +568,9 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
         sh.append_rows(client, S.SignalOutcomeRow.TAB_NAME, outcome_rows)
         logger.info(f"✓ Wrote {len(outcome_rows)} rows to signal_outcomes")
 
-    # 7. Compute signal accuracy report
-    report = _build_report(new_outcomes, signal_hits, stats)
+    # 7. Compute signal accuracy report (carries the real-user-decisions section)
+    report = _build_report(new_outcomes, signal_hits, stats,
+                           user_decisions=user_decisions)
 
     # 8. Send Telegram summary
     if not dry:
@@ -495,17 +579,61 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
         logger.info(f"[DRY] Telegram report:\n{report}")
 
 
+# ── Real-user-decisions summary (feedback loop) ─────────────────────────────
+
+def _summarize_user_decisions(user_decisions: dict[str, dict]) -> str:
+    """Render a short report section for the user's REAL fill/kill/defer choices.
+
+    `user_decisions` is the {decision_key: doc} map from read_user_decisions().
+    Returns "" when empty (inert / no decisions) so the section vanishes cleanly.
+
+    This is the EXPOSURE half of the feedback loop: the scanner-pick grading
+    above measures what the engine PROPOSED; this measures what the user
+    ACTUALLY did. Counting fill/kill/defer is the first, safe consumption of the
+    real decisions — it changes no grading rule.
+
+    TODO(grading-hook): the precise grading integration is intentionally NOT
+    invented here. The next step is to JOIN these real decisions onto the
+    scan_results / signal_outcomes picks by decision_key (date|account|ticker|
+    strategy|strike) and grade SELECTION skill — e.g. did the user FILL the
+    picks that went on to WIN and KILL the ones that went on to LOSE? That needs
+    a deliberate decision on the matching window and the success metric, so it is
+    left as a clean hook rather than a guessed rule. The data is now read and
+    exposed; wiring it into the win-rate math is a follow-up.
+    """
+    if not user_decisions:
+        return ""
+    by_status: dict[str, int] = defaultdict(int)
+    for doc in user_decisions.values():
+        status = str(doc.get("status", "") or "unknown").lower()
+        by_status[status] += 1
+    parts = [f"{by_status[s]} {s}" for s in sorted(by_status)]
+    return (
+        f"🧑 Real user decisions: {len(user_decisions)} recorded "
+        f"({', '.join(parts)})"
+    )
+
+
 # ── Signal accuracy analysis ──────────────────────────────────────────────
 
 def _build_report(
     outcomes: list[S.SignalOutcomeRow],
     signal_hits: dict[str, list[tuple[float, float]]],
     stats: dict,
+    user_decisions: dict[str, dict] | None = None,
 ) -> str:
-    """Build a text report of signal accuracy findings."""
+    """Build a text report of signal accuracy findings.
+
+    `user_decisions` (optional) is the real fill/kill/defer choices from
+    read_user_decisions(); when present a short summary section is appended. It
+    is purely additive — it never alters the Sheet-derived win-rate / calibration.
+    """
+    decisions_section = _summarize_user_decisions(user_decisions or {})
+
     total = stats.get("win", 0) + stats.get("loss", 0) + stats.get("scratch", 0)
     if total == 0:
-        return "No outcomes to report."
+        base = "No outcomes to report."
+        return f"{base}\n\n{decisions_section}" if decisions_section else base
 
     win_rate = stats["win"] / total * 100
     avg_pnl = sum(o.outcome_pnl_pct for o in outcomes) / len(outcomes)
@@ -587,6 +715,11 @@ def _build_report(
         lines.append("")
         lines.append(f"⚠️ Small sample ({total} picks) — findings are directional, not conclusive.")
         lines.append(f"Need ≥50 picks per strategy for reliable weight calibration.")
+
+    # Real-user-decisions section (feedback loop) — additive, never alters grading.
+    if decisions_section:
+        lines.append("")
+        lines.append(decisions_section)
 
     return "\n".join(lines)
 

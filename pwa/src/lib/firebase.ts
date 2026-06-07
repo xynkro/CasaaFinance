@@ -31,6 +31,8 @@ import {
   getFirestore,
   doc,
   getDoc,
+  setDoc,
+  serverTimestamp,
   type Firestore,
 } from "firebase/firestore";
 
@@ -124,4 +126,33 @@ export async function readFirestoreTab<T>(name: string): Promise<T[]> {
   }
 
   return rows;
+}
+
+/**
+ * Write one decision (fill / kill / defer) to the client-writable `decisions`
+ * collection. This is the PWA side of the decision write-back: the backend
+ * (signal_feedback) reads this collection via the Admin SDK to grade the user's
+ * ACTUAL choices, closing the feedback loop that previously lived only in
+ * localStorage.
+ *
+ * Security: `decisions` is the ONLY client-writable surface (see firestore.rules
+ * — read+write gated on the same two-email allowlist as the read-only `tabs`).
+ * `merge: true` so a later re-record of the same key updates in place rather
+ * than clobbering. We stamp `updatedAt` (server clock — authoritative ordering)
+ * and `user` (who recorded it) on top of whatever the caller passes.
+ *
+ * The doc id is the decision key (date|account|ticker|strategy|strike — the same
+ * compound key `decisionActions.keyForDecision` / the backend `decision_key`
+ * produce), so a decision is addressable from either side.
+ */
+export async function writeDecision(key: string, data: object): Promise<void> {
+  await setDoc(
+    doc(db, "decisions", key),
+    {
+      ...data,
+      updatedAt: serverTimestamp(),
+      user: auth.currentUser?.email ?? null,
+    },
+    { merge: true },
+  );
 }

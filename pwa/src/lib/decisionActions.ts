@@ -93,13 +93,70 @@ function persist(actions: Map<string, DecisionAction>): void {
 }
 
 /**
+ * Decision write-back to Firestore (the feedback loop).
+ *
+ * When VITE_DATA_SOURCE==='firestore', mirror the recorded action to the
+ * client-writable `decisions/{key}` doc so the backend's signal_feedback can
+ * grade what the user ACTUALLY did. localStorage stays the source of truth /
+ * offline cache; this is an additive write.
+ *
+ * Fail-soft by contract: this is fire-and-forget and every failure path is
+ * swallowed with a console.warn. A Firestore error (offline, rules, quota, a
+ * missing/throwing firebase config) must NEVER break the UI — the localStorage
+ * write in setAction has already succeeded by the time this runs.
+ *
+ * firebase.ts is loaded via dynamic import ONLY in firestore mode (same gating
+ * as data.ts) so the gviz default never pulls in or initialises the Firebase SDK
+ * — and never hits firebase.ts's loud throw when the web config is absent.
+ *
+ * Doc shape: { key, status, ticker, strategy, account, strike?, ts, user?, note? }.
+ * `status` maps the localStorage action vocabulary (filled|killed|deferred) 1:1.
+ * `ts` is the action's recordedAt (client clock); firebase.ts additionally
+ * stamps an authoritative server `updatedAt` and the signed-in `user` email.
+ */
+function writeDecisionToFirestore(action: DecisionAction): void {
+  if (import.meta.env.VITE_DATA_SOURCE !== "firestore") return;
+  void (async () => {
+    try {
+      const { writeDecision } = await import("./firebase");
+      const doc: Record<string, unknown> = {
+        key: action.decisionKey,
+        status: action.action,
+        ticker: action.ticker,
+        strategy: action.strategy,
+        account: action.account,
+        ts: action.recordedAt,
+      };
+      // Strike is embedded in the compound key; surface it as a field too when
+      // we can recover a finite value (last pipe-segment of decisionKey).
+      const strikeStr = action.decisionKey.split("|").pop();
+      const strikeNum = strikeStr !== undefined ? Number(strikeStr) : NaN;
+      if (Number.isFinite(strikeNum)) doc.strike = strikeNum;
+      if (action.fillPrice !== undefined) doc.fillPrice = action.fillPrice;
+      if (action.qty !== undefined) doc.qty = action.qty;
+      if (action.notes) doc.note = action.notes;
+      await writeDecision(action.decisionKey, doc);
+    } catch (err) {
+      // Never throw — localStorage already persisted; Firestore is best-effort.
+      console.warn("decision write-back to Firestore failed (cache intact):", err);
+    }
+  })();
+}
+
+/**
  * Upsert a new action (replaces any existing action for the same
  * decision). Returns the updated map so callers can re-render.
+ *
+ * In firestore mode this ALSO mirrors the action to the `decisions` collection
+ * (fail-soft) so the backend can grade real user choices — see
+ * writeDecisionToFirestore. The localStorage write below is always the
+ * authoritative, synchronous path.
  */
 export function setAction(action: DecisionAction): Map<string, DecisionAction> {
   const all = getActions();
   all.set(action.decisionKey, action);
   persist(all);
+  writeDecisionToFirestore(action);
   return all;
 }
 

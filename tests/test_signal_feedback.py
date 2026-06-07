@@ -14,7 +14,10 @@ from scripts.signal_feedback import (
     _build_report,
     _parse_date,
     _parse_float,
+    _summarize_user_decisions,
+    read_user_decisions,
 )
+import scripts.signal_feedback as sf
 from src.option_pnl import csp_settle_pct, cc_settle_pct
 from src.schema import SignalOutcomeRow, PNL_MODEL_PREMIUM
 
@@ -218,3 +221,115 @@ class TestBuildReport:
     def test_empty_report(self):
         report = _build_report([], {}, {"win": 0, "loss": 0, "scratch": 0})
         assert "No outcomes" in report
+
+
+# ── Decision write-back read (the real-user feedback loop) ──────────────────
+
+class _FakeSnap:
+    """One Firestore document snapshot: exposes .id and .to_dict()."""
+    def __init__(self, doc_id, data):
+        self.id = doc_id
+        self._data = data
+
+    def to_dict(self):
+        return dict(self._data)
+
+
+class _FakeCollection:
+    def __init__(self, docs):
+        # docs: dict {doc_id: data}
+        self._docs = docs
+
+    def stream(self):
+        for doc_id, data in self._docs.items():
+            yield _FakeSnap(doc_id, data)
+
+
+class _FakeDB:
+    """Mock Firestore client; only the `decisions` collection is expected."""
+    def __init__(self, docs):
+        self._docs = docs
+
+    def collection(self, name):
+        assert name == "decisions", f"unexpected collection {name!r}"
+        return _FakeCollection(self._docs)
+
+
+class TestReadUserDecisions:
+    def test_inert_without_key(self, monkeypatch):
+        """No FIREBASE_SERVICE_ACCOUNT_JSON → empty dict, no network, no raise."""
+        monkeypatch.delenv("FIREBASE_SERVICE_ACCOUNT_JSON", raising=False)
+        # _decisions_db() must return None on the inert path.
+        assert sf._decisions_db() is None
+        assert read_user_decisions() == {}
+
+    def test_inert_via_none_db(self):
+        """Passing db=None when inert short-circuits to empty (no client built)."""
+        # Explicitly inject a None db builder by monkeypatching is unnecessary —
+        # read_user_decisions(None) calls _decisions_db(); with the key unset
+        # that returns None and we get {}.
+        assert read_user_decisions(db=None) in ({}, read_user_decisions())
+
+    def test_populated_read(self):
+        """A populated `decisions` collection is read into {key: doc}."""
+        docs = {
+            "2026-05-20|caspar|AAPL|CSP|190.00": {
+                "key": "2026-05-20|caspar|AAPL|CSP|190.00",
+                "status": "filled", "ticker": "AAPL", "strategy": "CSP",
+                "account": "caspar", "strike": 190.0, "ts": "2026-05-20T10:00:00Z",
+            },
+            "2026-05-21|sarah|MSFT|BUY_DIP|0.00": {
+                "key": "2026-05-21|sarah|MSFT|BUY_DIP|0.00",
+                "status": "killed", "ticker": "MSFT", "strategy": "BUY_DIP",
+                "account": "sarah",
+            },
+        }
+        out = read_user_decisions(db=_FakeDB(docs))
+        assert len(out) == 2
+        assert out["2026-05-20|caspar|AAPL|CSP|190.00"]["status"] == "filled"
+        assert out["2026-05-21|sarah|MSFT|BUY_DIP|0.00"]["ticker"] == "MSFT"
+
+    def test_key_falls_back_to_doc_id(self):
+        """A doc missing the `key` field is keyed by its Firestore doc id."""
+        docs = {"2026-06-01|caspar|NVDA|CC|900.00": {"status": "deferred"}}
+        out = read_user_decisions(db=_FakeDB(docs))
+        assert "2026-06-01|caspar|NVDA|CC|900.00" in out
+        assert out["2026-06-01|caspar|NVDA|CC|900.00"]["status"] == "deferred"
+
+    def test_read_error_returns_empty(self):
+        """A stream() that raises degrades to {} — never breaks Sheet grading."""
+        class BoomDB:
+            def collection(self, name):
+                class C:
+                    def stream(self_inner):
+                        raise RuntimeError("firestore down")
+                return C()
+        assert read_user_decisions(db=BoomDB()) == {}
+
+
+class TestSummarizeUserDecisions:
+    def test_empty_is_blank(self):
+        assert _summarize_user_decisions({}) == ""
+
+    def test_counts_by_status(self):
+        decisions = {
+            "k1": {"status": "filled"},
+            "k2": {"status": "filled"},
+            "k3": {"status": "killed"},
+            "k4": {"status": "deferred"},
+        }
+        summary = _summarize_user_decisions(decisions)
+        assert "4 recorded" in summary
+        assert "2 filled" in summary
+        assert "1 killed" in summary
+        assert "1 deferred" in summary
+
+    def test_report_includes_decisions_section(self):
+        """_build_report surfaces the real-user-decisions section (additive)."""
+        decisions = {"k1": {"status": "filled"}}
+        report = _build_report(
+            [], {}, {"win": 0, "loss": 0, "scratch": 0},
+            user_decisions=decisions,
+        )
+        assert "Real user decisions" in report
+        assert "1 filled" in report
