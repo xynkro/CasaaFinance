@@ -403,8 +403,9 @@ export function StockDetail({
       >
         <button
           onClick={onClose}
-          className="flex items-center gap-1 py-1 pr-2 active:opacity-60"
+          className="flex items-center gap-1 py-2 pr-2 -my-1 rounded-lg active:opacity-60 focusable"
           style={{ color: "rgb(var(--accent-rgb))" }}
+          aria-label="Back"
         >
           <ChevronLeft size={20} />
           <span className="text-[length:var(--t-sm)] font-medium">Back</span>
@@ -418,7 +419,7 @@ export function StockDetail({
           </div>
         </div>
 
-        <button onClick={onClose} className="p-2 rounded-xl active:opacity-60" style={{ color: "rgb(100 116 139)" }}>
+        <button onClick={onClose} className="p-2 rounded-xl active:opacity-60 focusable" style={{ color: "rgb(100 116 139)" }} aria-label="Close">
           <X size={18} />
         </button>
       </div>

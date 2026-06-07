@@ -17,13 +17,12 @@
  */
 export { ConvictionDots, type ConvictionDotsProps } from "./ConvictionDots";
 export { Chip, type ChipProps } from "./Chip";
+export { StatusPill, type StatusPillProps } from "./StatusPill";
 export {
-  StatusPill,
-  type StatusPillProps,
   DECISION_STATUS,
   resolveStatus,
   type DecisionStatusConfig,
-} from "./StatusPill";
+} from "./statusConfig";
 export { DeltaText, type DeltaTextProps } from "./DeltaText";
 export { SectionLabel, type SectionLabelProps } from "./SectionLabel";
 export { ActionButton, type ActionButtonProps } from "./ActionButton";

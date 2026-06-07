@@ -27,7 +27,8 @@ export function PaperStatusCard({
   return (
     <button
       onClick={onOpen}
-      className="w-full text-left rounded-2xl border border-dashed border-amber-500/30 bg-amber-500/[0.06] px-3.5 py-3 flex items-center gap-3 transition-transform active:scale-[0.99]"
+      className="w-full text-left rounded-2xl border border-dashed border-amber-500/30 bg-amber-500/[0.06] px-3.5 py-3 flex items-center gap-3 transition-transform active:scale-[0.99] focusable"
+      aria-label="Open paper auto-trader"
     >
       <FlaskConical size={16} className="text-amber-400 shrink-0" />
       <div className="min-w-0 flex-1">

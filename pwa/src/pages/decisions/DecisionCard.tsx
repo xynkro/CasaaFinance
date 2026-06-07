@@ -496,7 +496,8 @@ export function DecisionCard({
       tabIndex={0}
       onClick={onTap}
       onKeyDown={onKey}
-      className={`w-full text-left glass rounded-2xl p-4 border ${status.border} active:bg-white/3 transition-colors cursor-pointer`}
+      aria-label={`${decision.ticker} decision — ${status.label}. Open details`}
+      className={`w-full text-left glass rounded-2xl p-4 border ${status.border} active:bg-white/3 cursor-pointer focusable press`}
     >
       {/* Header: ticker + status */}
       <div className="flex items-center justify-between mb-3">

@@ -294,7 +294,40 @@ body::before {
    Card jump every time the user tapped a button or long-pressed text
    inside it, AND shifted hit areas mid-touch (causing the off-by-one
    tap bug on Strategy Notes). Specific pressable buttons opt into their
-   own active feedback via Tailwind `active:scale-*` or bg tint. */
+   own active feedback via Tailwind `active:scale-*` or bg tint, or the
+   opt-in `.press` utility below. */
+
+/* ─── Interaction utilities ──────────────────────────────────────────────── */
+
+/* Shared focus-visible ring — keyboard/switch-control affordance.
+   Apply to any interactive control (buttons, role=button cards) that was
+   relying on `active:` alone. Uses the accent so it reads as "selected"
+   on the dark UI; never shows on mouse/touch (focus-visible only). */
+.focusable {
+  outline: none;
+}
+.focusable:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px rgba(7, 9, 15, 0.9),
+    0 0 0 4px rgba(var(--accent-rgb), 0.65);
+  border-radius: inherit;
+}
+
+/* Opt-in tactile press. Safe to put ONLY on a leaf interactive element
+   (button / role=button card) — never on a `.glass` wrapper that contains
+   other tappables (see the note above). The transform can't shift layout or
+   hit areas; bg/border are included so this composes with `active:bg-*`
+   tints (e.g. DecisionCard) without the transition shorthand clobbering them. */
+.press {
+  transition:
+    transform 0.13s var(--ease-out),
+    background-color 0.13s var(--ease-out),
+    border-color 0.13s var(--ease-out);
+}
+.press:active {
+  transform: scale(0.985);
+}
 
 /* ─── Typography utilities ───────────────────────────────────────────────── */
 
@@ -408,15 +441,26 @@ body::before {
 }
 .pop-in { animation: popIn 0.35s var(--spring) both; }
 
+/* Page-level entrance — fires on tab switch (keyed container in App.tsx).
+   Lighter + faster than fadeUp so the whole-page swap reads as a smooth
+   settle, not a re-stagger; the in-page fade-up cards still cascade on top. */
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter { animation: pageEnter 0.34s var(--ease-out) both; }
+
 /* ─── Reduced motion ─────────────────────────────────────────────────────── */
 /* Respect iOS "Reduce Motion" — outdoor sun-reading session win. Strips the
    fade/slide/scale entrance animations and clamps any remaining transition
    to ~instant. The user gets the same content without the motion stack. */
 @media (prefers-reduced-motion: reduce) {
-  .fade-up, .slide-in, .scale-in, .pop-in, .pulse-glow, .shimmer,
-  .fade-up-1, .fade-up-2, .fade-up-3, .fade-up-4 {
+  .fade-up, .slide-in, .scale-in, .pop-in, .pulse-glow, .shimmer, .page-enter,
+  .fade-up-1, .fade-up-2, .fade-up-3, .fade-up-4, .fade-up-5 {
     animation: none !important;
   }
+  /* Neutralise the opt-in press transform so nothing scales under reduced motion. */
+  .press:active { transform: none !important; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;

@@ -49,7 +49,8 @@ export function StickyTabs({
               <button
                 key={t.key}
                 onClick={() => onChange(t.key)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-[14px] transition-all duration-250"
+                aria-pressed={isActive}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-[14px] transition-[background,color,box-shadow,border-color] duration-250 focusable"
                 style={{
                   WebkitTapHighlightColor: "transparent",
                   background: isActive

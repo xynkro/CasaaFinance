@@ -79,7 +79,7 @@ export function DailyBriefCard({
       <button
         type="button"
         onClick={onOpen}
-        className="block w-full text-left active:opacity-80 transition-opacity"
+        className="block w-full text-left active:opacity-80 transition-opacity focusable rounded-2xl"
         aria-label="Open full daily brief"
       >
         {/* Header — matches Weekly Strategy card exactly */}

@@ -63,8 +63,9 @@ export function TabBar({
               key={tab.label}
               ref={(el) => { btnRefs.current[i] = el; }}
               onClick={() => onChange(i)}
-              className="flex-1 flex flex-col items-center gap-[3px] pt-2 pb-1.5 relative"
+              className="flex-1 flex flex-col items-center gap-[3px] pt-2 pb-1.5 relative rounded-xl focusable"
               style={{ WebkitTapHighlightColor: "transparent" }}
+              aria-current={isActive ? "page" : undefined}
             >
               {/* Top-edge indicator */}
               <div

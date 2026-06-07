@@ -243,23 +243,33 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
       {/* Header */}
       <header className="app-header">
         <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex items-baseline gap-2.5">
-            <h1 className="text-[length:var(--t-lg)] font-semibold tracking-[-0.02em] text-white leading-none">
-              {TAB_TITLES[tab]}
-            </h1>
-            <span className="text-[length:var(--t-xs)] text-slate-500 font-medium">Casaa Finance</span>
-            <span className="text-[8px] text-slate-700 font-mono">b{import.meta.env.VITE_BUILD ?? "dev"}</span>
-            {lastRefresh && (
-              <span className="text-[8px] text-slate-700 font-mono">
-                {lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            )}
+          <div className="flex items-center gap-2.5 min-w-0">
+            {/* App logo mark — small + tasteful, ties the running app to the
+                sign-in gate brand. Decorative (the title carries the label). */}
+            <img
+              src={`${import.meta.env.BASE_URL}icon-192.png`}
+              alt=""
+              aria-hidden="true"
+              className="w-[22px] h-[22px] rounded-[7px] shrink-0 ring-1 ring-white/10 shadow-sm shadow-black/40"
+            />
+            <div className="flex items-baseline gap-2.5 min-w-0">
+              <h1 className="text-[length:var(--t-lg)] font-semibold tracking-[-0.02em] text-white leading-none">
+                {TAB_TITLES[tab]}
+              </h1>
+              <span className="text-[length:var(--t-xs)] text-slate-500 font-medium">Casaa Finance</span>
+              <span className="text-[8px] text-slate-700 font-mono">b{import.meta.env.VITE_BUILD ?? "dev"}</span>
+              {lastRefresh && (
+                <span className="text-[8px] text-slate-700 font-mono">
+                  {lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              )}
+            </div>
           </div>
           {tab !== SETTINGS_TAB && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               <button
                 onClick={() => setLookupOpen(true)}
-                className="flex items-center justify-center w-9 h-9 rounded-xl transition-all active:scale-90"
+                className="relative flex items-center justify-center w-9 h-9 rounded-xl transition-[transform,border-color] active:scale-90 focusable before:absolute before:-inset-1"
                 style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
                 aria-label="Analyse ticker"
               >
@@ -268,7 +278,7 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
               <button
                 onClick={() => load()}
                 disabled={loading}
-                className="flex items-center justify-center w-9 h-9 rounded-xl transition-all disabled:opacity-30 active:scale-90"
+                className="relative flex items-center justify-center w-9 h-9 rounded-xl transition-[transform,border-color] disabled:opacity-30 active:scale-90 focusable before:absolute before:-inset-1"
                 style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
                 aria-label="Refresh"
               >
@@ -292,7 +302,13 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
               {data.error}
             </div>
           )}
-          {renderPage()}
+          {/* Keyed by tab so each switch re-fires the page-enter keyframe —
+              gives the whole-page swap a smooth settle instead of a hard cut.
+              The in-page fade-up cards still cascade on top. Reduced-motion
+              strips the animation (see index.css). */}
+          <div key={tab} className="page-enter">
+            {renderPage()}
+          </div>
         </PullToRefresh>
       </main>
 

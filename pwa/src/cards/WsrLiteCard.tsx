@@ -84,7 +84,7 @@ export function WsrLiteCard({
       <button
         type="button"
         onClick={onOpen}
-        className="block w-full text-left active:opacity-80 transition-opacity"
+        className="block w-full text-left active:opacity-80 transition-opacity focusable rounded-2xl"
         aria-label="Open mid-week pulse"
       >
         {/* Header */}
