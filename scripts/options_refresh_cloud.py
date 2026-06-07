@@ -52,6 +52,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 
 # Reuse the same SGX list daily_tracker uses (Caspar's account holds these
@@ -63,16 +64,6 @@ SGX_TICKERS: set[str] = {"C6L", "G3B", "ES3"}
 # recent row is older than this are dropped (they're either closed-out or
 # stale enough that we shouldn't resurrect them every refresh).
 OPTIONS_LOOKBACK_DAYS: int = 7
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("options-refresh-cloud")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 def _yahoo_symbol(ticker: str) -> str:
@@ -273,7 +264,7 @@ def main() -> int:
     ap.add_argument("--dry", action="store_true", help="Print, do not write to sheet")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("options-refresh-cloud")
     logger.info("=== options-refresh-cloud start ===")
 
     from src.sync import load_env

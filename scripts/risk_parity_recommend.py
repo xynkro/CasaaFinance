@@ -67,6 +67,7 @@ from typing import Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src import schema as S          # noqa: E402
 from src import sheets as sh         # noqa: E402
@@ -116,16 +117,6 @@ BOND_CLASSES = {"bond_long", "bond_intermediate"}
 
 
 # --- helpers ---------------------------------------------------------------
-
-def setup_logger() -> logging.Logger:
-    logger = logging.getLogger("risk_parity_recommend")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler(sys.stderr)
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
-
 
 def _to_float(v, default: float = 0.0) -> float:
     if v in (None, ""):
@@ -817,7 +808,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_env()
-    logger = setup_logger()
+    logger = setup_logging("risk_parity_recommend")
 
     today = S.now_sgt_date()
     logger.info(f"risk_parity_recommend start (date={today}, dry={args.dry})")

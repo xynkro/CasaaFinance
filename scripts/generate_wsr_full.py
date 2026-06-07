@@ -17,16 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("wsr-full")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
+from src.logging_util import setup_logging  # noqa: E402
 
 
 def gather_state(logger: logging.Logger) -> dict:
@@ -192,7 +183,7 @@ def main() -> int:
                     help="Date the WSR is for (typically tomorrow Monday). Default: tomorrow.")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("wsr-full")
     logger.info("=== generate_wsr_full start ===")
     target_iso = args.date or (date.today() + timedelta(days=1)).isoformat()
 

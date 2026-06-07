@@ -56,6 +56,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src.sync import load_env       # noqa: E402
 from src import sheets as sh        # noqa: E402
@@ -76,16 +77,6 @@ COMMAND_RE = re.compile(
     r"^\s*[~/](portfolio|positions|snapshot)\b",
     re.IGNORECASE,
 )
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("telegram-portfolio-responder")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 def _user_to_account() -> dict[int, str]:
@@ -319,7 +310,7 @@ def main() -> int:
     p.add_argument("--reset", action="store_true", help="Reset offset to 0 (replay last 24h)")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("telegram-portfolio-responder")
     logger.info(f"telegram_portfolio_responder start (dry={args.dry}, reset={args.reset})")
 
     load_env()

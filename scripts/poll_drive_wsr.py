@@ -31,16 +31,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("poll-drive-wsr")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
+from src.logging_util import setup_logging  # noqa: E402
 
 
 def _list_drive_md_files(drive_svc, folder_id: str) -> list[dict]:
@@ -171,7 +162,7 @@ def main() -> int:
     ap.add_argument("--force-id", default=None, help="Re-process a specific Drive file ID")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("poll-drive-wsr")
     logger.info("=== poll_drive_wsr start ===")
 
     from src.sync import load_env

@@ -32,6 +32,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src.sync import load_env  # noqa: E402
 from src import sheets as sh   # noqa: E402
@@ -81,16 +82,6 @@ NEGATIVE_KEYWORDS = {
 }
 
 NEUTRAL_THRESHOLD = 0.15  # |score| < this → neutral label
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("finnhub-news-insider")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 def _fh_get(path: str, params: dict, logger: logging.Logger,
@@ -373,7 +364,7 @@ def main() -> int:
                    help="Cap universe size for quick testing (0 = no cap)")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("finnhub-news-insider")
     logger.info(f"finnhub_news_insider start (dry={args.dry})")
 
     load_env()

@@ -54,6 +54,8 @@ sys.path.insert(0, str(_PROJECT_ROOT))
 from src import schema as S          # noqa: E402
 from src import sheets as sh         # noqa: E402
 from src.sync import load_env        # noqa: E402
+from src.bsm import norm_cdf         # noqa: E402
+from src.logging_util import setup_logging  # noqa: E402
 
 
 # ──────────────────── Tunables ────────────────────────────────────────────
@@ -89,11 +91,6 @@ from src.trading_rules import TICKER_BUCKET, bucket_for as _bucket_for  # noqa: 
 
 # ──────────────────── Math helpers ────────────────────────────────────────
 
-def _norm_cdf(x: float) -> float:
-    """Standard-normal CDF using math.erf — no scipy dependency."""
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-
-
 def bs_delta(S: float, K: float, T: float, sigma: float, r: float, right: str) -> float:
     """Black-Scholes delta. `right` is 'C' or 'P'. Returns signed delta."""
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
@@ -103,8 +100,8 @@ def bs_delta(S: float, K: float, T: float, sigma: float, r: float, right: str) -
     except (ValueError, ZeroDivisionError):
         return 0.0
     if right == "C":
-        return _norm_cdf(d1)
-    return _norm_cdf(d1) - 1.0
+        return norm_cdf(d1)
+    return norm_cdf(d1) - 1.0
 
 
 def _realized_vol_annual(closes: list[float], lookback: int = 60) -> float:
@@ -122,18 +119,6 @@ def _realized_vol_annual(closes: list[float], lookback: int = 60) -> float:
     var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
     daily_vol = math.sqrt(max(var, 0.0))
     return daily_vol * math.sqrt(252.0)
-
-
-# ──────────────────── Logger ──────────────────────────────────────────────
-
-def setup_logger() -> logging.Logger:
-    logger = logging.getLogger("options_yield_screener")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler(sys.stderr)
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 # ──────────────────── Universe loading ────────────────────────────────────
@@ -778,7 +763,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_env()
-    logger = setup_logger()
+    logger = setup_logging("options_yield_screener")
     today_iso = S.now_sgt_date()
     logger.info(f"options_yield_screener start (date={today_iso}, dry={args.dry})")
 

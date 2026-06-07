@@ -44,6 +44,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src.sync import load_env  # noqa: E402
 from src import sheets as sh   # noqa: E402
@@ -70,16 +71,6 @@ TURNS_RE    = re.compile(r'"num_turns":\s*(\d+)')
 DURATION_RE = re.compile(r'"duration_ms":\s*(\d+)')
 ISERR_RE    = re.compile(r'"is_error":\s*(true|false)')
 SGT = timezone(timedelta(hours=8))
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("api-usage-scrape")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 def _gh_json(args: list[str]) -> dict | list:
@@ -217,7 +208,7 @@ def main() -> int:
     p.add_argument("--dry", action="store_true")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("api-usage-scrape")
     logger.info(f"api_usage_scrape start (limit={args.limit}, dry={args.dry})")
 
     load_env()

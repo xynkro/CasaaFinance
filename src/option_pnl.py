@@ -28,12 +28,14 @@ from __future__ import annotations
 
 import math
 
+from src.bsm import norm_cdf
+
+# Backwards-compat alias: scripts/backtest_scoring.py re-imports ``_norm_cdf``
+# from this module. The canonical home is now src.bsm.
+_norm_cdf = norm_cdf
+
 _RF = 0.04          # risk-free rate
 _RT_COST = 0.02     # round-trip commission + slippage, $/share
-
-
-def _norm_cdf(x: float) -> float:
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
 def _bsm_put(S: float, K: float, T: float, sigma: float, r: float = _RF) -> float:
@@ -41,7 +43,7 @@ def _bsm_put(S: float, K: float, T: float, sigma: float, r: float = _RF) -> floa
         return max(0.0, K - S)
     d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
     d2 = d1 - sigma * math.sqrt(T)
-    return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+    return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
 
 
 def _bsm_call(S: float, K: float, T: float, sigma: float, r: float = _RF) -> float:
@@ -49,7 +51,7 @@ def _bsm_call(S: float, K: float, T: float, sigma: float, r: float = _RF) -> flo
         return max(0.0, S - K)
     d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
     d2 = d1 - sigma * math.sqrt(T)
-    return S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
+    return S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
 
 
 # ── Settlement core (REAL strike + premium) ──────────────────────────────────

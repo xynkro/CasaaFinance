@@ -57,6 +57,7 @@ import yaml
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src import schema as S          # noqa: E402
 from src import sheets as sh         # noqa: E402
@@ -395,16 +396,6 @@ def build_audit_rows(
 
 # --- main ------------------------------------------------------------------
 
-def setup_logger() -> logging.Logger:
-    logger = logging.getLogger("risk_parity_audit")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler(sys.stderr)
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
-
-
 def _print_dry_table(rows: list[S.RiskParityAuditRow]) -> None:
     """Compact table print for --dry runs."""
     print(
@@ -430,7 +421,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_env()
-    logger = setup_logger()
+    logger = setup_logging("risk_parity_audit")
 
     today = S.now_sgt_date()
     logger.info(f"risk_parity_audit start (date={today}, dry={args.dry})")

@@ -41,6 +41,7 @@ from typing import Callable, Optional
 # Project-root import shim — works whether invoked as `python scripts/...` or `python -m`.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src import schema as S          # noqa: E402
 from src import sheets as sh         # noqa: E402
@@ -271,16 +272,6 @@ def build_specs() -> list[SkillSpec]:
     ]
 
 
-def setup_logger() -> logging.Logger:
-    logger = logging.getLogger("regime_signals")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler(sys.stderr)
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--dry", "--dry-run", action="store_true",
@@ -288,7 +279,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_env()
-    logger = setup_logger()
+    logger = setup_logging("regime_signals")
 
     today = S.now_sgt_date()
     logger.info(f"regime_signals_run start (date={today}, dry={args.dry})")

@@ -33,6 +33,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from src.bsm import norm_cdf  # noqa: E402
+from src.logging_util import setup_logging  # noqa: E402
+
 # Same thresholds as trading_rules.py CSP_RULES / CC_RULES
 CSP_DTE_RANGE   = (15, 50)
 CC_DTE_RANGE    = (15, 50)
@@ -122,16 +125,6 @@ FALLBACK_HIGH_IV_UNIVERSE = [
     "OXY", "CVX", "XOM", "HAL",
     "ORCL", "SHOP", "SQ", "PYPL",
 ]
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("daily-scan")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 def gather_watchlist(logger: logging.Logger) -> list[str]:
@@ -382,10 +375,6 @@ def _option_mid(row) -> float:
 
 _RISK_FREE = 0.043  # ~4.3% 10-yr yield as of mid-2026
 
-def _norm_cdf(x: float) -> float:
-    """Standard normal CDF via math.erfc — no scipy dependency."""
-    return 0.5 * math.erfc(-x / math.sqrt(2))
-
 def _norm_pdf(x: float) -> float:
     return math.exp(-0.5 * x * x) / math.sqrt(2 * math.pi)
 
@@ -397,9 +386,9 @@ def _bsm_price(S: float, K: float, T: float, sigma: float,
     d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
     d2 = d1 - sigma * math.sqrt(T)
     if right == "C":
-        return S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
+        return S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
     else:
-        return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+        return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
 
 def _bsm_delta(S: float, K: float, T: float, sigma: float,
                right: str = "P", r: float = _RISK_FREE) -> float:
@@ -410,8 +399,8 @@ def _bsm_delta(S: float, K: float, T: float, sigma: float,
         return -1.0 if S < K else 0.0
     d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
     if right == "C":
-        return _norm_cdf(d1)
-    return _norm_cdf(d1) - 1.0
+        return norm_cdf(d1)
+    return norm_cdf(d1) - 1.0
 
 def _implied_vol(price: float, S: float, K: float, T: float,
                  right: str = "P", r: float = _RISK_FREE,
@@ -1892,7 +1881,7 @@ def main() -> int:
     ap.add_argument("--top", type=int, default=HARVEST_UNIVERSE_TOP, help="Discovery universe cap")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("daily-scan")
     logger.info("═══ Unified Options Scanner (watchlist + harvest) ═══")
 
     # ── Macro Gate ────────────────────────────────────────────────────

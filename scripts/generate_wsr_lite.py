@@ -15,16 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("wsr-lite")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
+from src.logging_util import setup_logging  # noqa: E402
 
 
 def gather_state(logger: logging.Logger) -> dict:
@@ -196,7 +187,7 @@ def main() -> int:
     ap.add_argument("--date", default=None)
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("wsr-lite")
     logger.info("=== generate_wsr_lite start ===")
     today_iso = args.date or date.today().isoformat()
 

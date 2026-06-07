@@ -28,6 +28,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from src.bsm import norm_cdf  # noqa: E402
+
 GRAB_DIR = ROOT / "PortfolioGrabs"
 
 # SGX tickers need .SI suffix for Yahoo Finance
@@ -310,11 +312,6 @@ def fetch_indicators(tickers: list[str]) -> dict[str, dict]:
     return result
 
 
-def _norm_cdf(x: float) -> float:
-    """Standard normal CDF."""
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-
-
 def bs_prob_itm(S: float, K: float, T: float, sigma: float, r: float, right: str) -> float:
     """Black-Scholes probability of finishing ITM at expiry (risk-neutral)."""
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
@@ -324,9 +321,9 @@ def bs_prob_itm(S: float, K: float, T: float, sigma: float, r: float, right: str
     except (ValueError, ZeroDivisionError):
         return 0.5
     if right == "C":
-        return _norm_cdf(d2)
+        return norm_cdf(d2)
     else:
-        return _norm_cdf(-d2)
+        return norm_cdf(-d2)
 
 
 def calc_confidence(

@@ -41,6 +41,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src.sync import load_env  # noqa: E402
 from src import sheets as sh   # noqa: E402
@@ -50,16 +51,6 @@ FH_BASE = "https://finnhub.io/api/v1"
 
 # Score weights (matches header docstring)
 WEIGHTS = {"strongBuy": 2, "buy": 1, "hold": 0, "sell": -1, "strongSell": -2}
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("finnhub-analyst")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 def _fh_get(path: str, params: dict, logger: logging.Logger,
@@ -200,7 +191,7 @@ def main() -> int:
     p.add_argument("--limit", type=int, default=0)
     args = p.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("finnhub-analyst")
     logger.info(f"finnhub_analyst start (dry={args.dry})")
 
     load_env()

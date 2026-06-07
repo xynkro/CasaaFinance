@@ -22,6 +22,12 @@ import math
 from datetime import date, datetime, timedelta
 from typing import Any, Optional
 
+from src.bsm import norm_cdf
+
+# Backwards-compat alias: src.portfolio_greeks (and any external caller) still
+# imports ``_norm_cdf`` from this module. The canonical home is now src.bsm.
+_norm_cdf = norm_cdf
+
 # Config
 TARGET_DELTA_CSP = 0.25
 TARGET_DELTA_CC = 0.25
@@ -32,10 +38,6 @@ CATALYST_DELTA_ADJ = 0.10  # target becomes 0.15 instead of 0.25
 # Score thresholds
 MIN_SCORE_TO_STAY = 30   # CSP/CC score must be above this to stay on same ticker
 SWITCH_SCORE_DELTA = 15  # score gap to recommend switching
-
-
-def _norm_cdf(x: float) -> float:
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
 def _norm_pdf(x: float) -> float:
@@ -57,9 +59,9 @@ def bs_delta(S: float, K: float, T: float, sigma: float, r: float, right: str) -
     except (ValueError, ZeroDivisionError):
         return 0.0
     if right == "C":
-        return _norm_cdf(d1)
+        return norm_cdf(d1)
     else:
-        return _norm_cdf(d1) - 1.0
+        return norm_cdf(d1) - 1.0
 
 
 def bs_gamma(S: float, K: float, T: float, sigma: float, r: float) -> float:
@@ -91,10 +93,10 @@ def bs_theta(S: float, K: float, T: float, sigma: float, r: float, right: str) -
         nprime = _norm_pdf(d1)
         term1 = -(S * nprime * sigma) / (2 * math.sqrt(T))
         if right == "C":
-            term2 = -r * K * math.exp(-r * T) * _norm_cdf(d2)
+            term2 = -r * K * math.exp(-r * T) * norm_cdf(d2)
             theta_annual = term1 + term2
         else:  # Put
-            term2 = r * K * math.exp(-r * T) * _norm_cdf(-d2)
+            term2 = r * K * math.exp(-r * T) * norm_cdf(-d2)
             theta_annual = term1 + term2
         return theta_annual / 365  # per calendar day
     except (ValueError, ZeroDivisionError):

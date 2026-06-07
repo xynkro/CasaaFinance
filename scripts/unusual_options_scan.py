@@ -33,6 +33,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 
 # ─── Scanner parameters ────────────────────────────────────────────────────
@@ -65,16 +66,6 @@ DEFAULT_UNIVERSE = [
     # ETFs (broad flow signal)
     "SPY", "QQQ", "IWM", "XLF", "XBI",
 ]
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("uoa-scan")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 @dataclass
@@ -320,7 +311,7 @@ def main() -> int:
     ap.add_argument("--tickers", nargs="+", default=None, help="Override universe")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("uoa-scan")
     logger.info("═══ Unusual Options Activity Scanner ═══")
 
     universe = args.tickers or DEFAULT_UNIVERSE

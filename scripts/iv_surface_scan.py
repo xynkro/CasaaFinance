@@ -35,22 +35,15 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from src.bsm import norm_cdf  # noqa: E402
+from src.logging_util import setup_logging  # noqa: E402
+
 
 # ─── Parameters ───────────────────────────────────────────────────────────────
 MIN_DTE = 14
 MAX_DTE = 120
 MIN_FIT_ROWS = 5       # minimum contracts to attempt surface fit
 RATE_LIMIT_S = 0.5     # sleep between tickers
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("iv-surface-scan")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -230,11 +223,6 @@ def _fit_iv_surface(contracts: list[dict]) -> list[float] | None:
 # 4. Black-Scholes delta
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _norm_cdf(x: float) -> float:
-    """Standard normal CDF using math.erf (no scipy dependency)."""
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
-
 def _bs_delta(spot: float, strike: float, iv: float, dte: int,
               r: float = 0.045, option_type: str = "P") -> float:
     """
@@ -246,9 +234,9 @@ def _bs_delta(spot: float, strike: float, iv: float, dte: int,
         return 0.0
     d1 = (math.log(spot / strike) + (r + 0.5 * iv ** 2) * T) / (iv * math.sqrt(T))
     if option_type == "C":
-        return _norm_cdf(d1)
+        return norm_cdf(d1)
     else:
-        return _norm_cdf(d1) - 1.0
+        return norm_cdf(d1) - 1.0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -363,7 +351,7 @@ def main() -> int:
     ap.add_argument("--tickers", nargs="+", help="Override universe with specific tickers")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("iv-surface-scan")
     logger.info("═══ IV Surface Scanner ═══")
 
     # ── Universe ──

@@ -72,16 +72,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("push-decisions")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
+from src.logging_util import setup_logging  # noqa: E402
 
 
 def _normalise_gates(g: Any) -> str:
@@ -141,7 +132,7 @@ def _decision_key(
 
 
 def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
-    logger = _setup_logging()
+    logger = setup_logging("push-decisions")
 
     date = payload.get("date")
     decisions = payload.get("decisions", [])

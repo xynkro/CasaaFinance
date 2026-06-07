@@ -54,6 +54,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 # Imports after sys.path fix — must come AFTER the path insert above.
 # The src package isn't importable without this.
@@ -94,16 +95,6 @@ TICKER_EXCHANGE: dict[str, str] = {
 
 # SGX tickers — fall back to yfinance with `.SI` suffix.
 SGX_TICKERS = {"C6L", "G3B", "ES3"}
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("tv-price-refresh")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 # --- universe ---------------------------------------------------------------
@@ -285,7 +276,7 @@ def main() -> int:
     p.add_argument("--dry", action="store_true", help="Parse + log only; no sheet write")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("tv-price-refresh")
     logger.info(f"tv_price_refresh start (dry={args.dry})")
 
     load_env()

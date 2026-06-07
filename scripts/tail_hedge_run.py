@@ -34,6 +34,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from src.bsm import norm_cdf  # noqa: E402
+
 # Hedge structure (SPY put-spread).
 SHORT_OTM = 0.05      # short put ~5% below spot
 LONG_OTM = 0.12       # long put ~12% below spot (the wing)
@@ -74,16 +76,12 @@ def put_spread_strikes(spot: float, short_otm: float = SHORT_OTM,
     return float(short), float(long_)
 
 
-def _norm_cdf(x: float) -> float:
-    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
-
-
 def _bsm_put(S: float, K: float, T: float, sigma: float, r: float = RF) -> float:
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return max(0.0, K - S)
     d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
     d2 = d1 - sigma * math.sqrt(T)
-    return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+    return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
 
 
 def spread_debit_per_contract(spot: float, short_k: float, long_k: float,

@@ -23,7 +23,8 @@ import math
 from datetime import date, datetime
 from typing import Any
 
-from src.wheel_continuation import _norm_cdf, bs_gamma, bs_theta, bs_vega
+from src.bsm import norm_cdf
+from src.wheel_continuation import bs_gamma, bs_theta, bs_vega
 
 CONTRACT_MULTIPLIER = 100
 DEFAULT_RF = 0.045
@@ -38,8 +39,8 @@ def _bsm_price(S: float, K: float, T: float, sigma: float, r: float, right: str)
     d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
     d2 = d1 - sigma * math.sqrt(T)
     if right == "C":
-        return S * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
-    return K * math.exp(-r * T) * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+        return S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
+    return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
 
 
 def solve_iv(price: float, S: float, K: float, T: float, right: str,

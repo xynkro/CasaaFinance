@@ -33,6 +33,7 @@ from typing import Callable, Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src import schema as S          # noqa: E402
 from src import sheets as sh         # noqa: E402
@@ -208,16 +209,6 @@ def build_specs() -> list[ScreenerSpec]:
     ]
 
 
-def setup_logger() -> logging.Logger:
-    logger = logging.getLogger("screen_candidates")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler(sys.stderr)
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
-
-
 # ---------------- main ----------------
 
 def main() -> int:
@@ -227,7 +218,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_env()
-    logger = setup_logger()
+    logger = setup_logging("screen_candidates")
 
     if not os.environ.get("FMP_API_KEY"):
         logger.warning("FMP_API_KEY not set — both screeners require it; exiting cleanly")

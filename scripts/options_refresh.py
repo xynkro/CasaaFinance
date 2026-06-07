@@ -29,16 +29,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("options-refresh")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
+from src.logging_util import setup_logging  # noqa: E402
 
 
 def _parse_iso_expiry(s: str) -> date | None:
@@ -57,7 +48,7 @@ def main() -> int:
     ap.add_argument("--dry", action="store_true", help="Print, no sheet write")
     args = ap.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("options-refresh")
     logger.info("=== options-refresh start ===")
 
     from src.sync import load_env

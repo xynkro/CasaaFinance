@@ -45,6 +45,7 @@ from typing import Optional
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src import schema as S          # noqa: E402
 from src import sheets as sh         # noqa: E402
@@ -69,16 +70,6 @@ SKILL_PATH = _resolve_skill_script("exposure-coach", "calculate_exposure.py")
 
 
 # ---------------- helpers ----------------
-
-def setup_logger() -> logging.Logger:
-    logger = logging.getLogger("exposure_posture")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler(sys.stderr)
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
-
 
 def _to_float(v: str | float | int | None, default: float = 0.0) -> float:
     if v in (None, ""):
@@ -286,7 +277,7 @@ def main() -> int:
     args = parser.parse_args()
 
     load_env()
-    logger = setup_logger()
+    logger = setup_logging("exposure_posture")
 
     today = S.now_sgt_date()
     logger.info(f"exposure_posture_run start (date={today}, dry={args.dry})")

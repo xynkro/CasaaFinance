@@ -50,6 +50,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+from src.logging_util import setup_logging  # noqa: E402
 
 from src.sync import load_env  # noqa: E402
 from src import sheets as sh   # noqa: E402
@@ -70,16 +71,6 @@ ECONOMIC_COUNTRY_WHITELIST = {"US", "EU", "CN", "JP", "GB", "DE", "SG"}
 # flags "high" in the Daily Brief.
 IMPACT_RANK = {"low": 0, "medium": 1, "high": 2}
 IMPACT_KEEP_MIN = 1  # medium+
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("finnhub-calendars")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        h = logging.StreamHandler()
-        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logger.addHandler(h)
-    return logger
 
 
 def _fh_get(path: str, params: dict, logger: logging.Logger,
@@ -317,7 +308,7 @@ def main() -> int:
     p.add_argument("--dry", action="store_true", help="Parse + log only; no sheet write")
     args = p.parse_args()
 
-    logger = _setup_logging()
+    logger = setup_logging("finnhub-calendars")
     logger.info(f"finnhub_calendars start (dry={args.dry})")
 
     load_env()
