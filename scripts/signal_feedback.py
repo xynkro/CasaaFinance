@@ -64,6 +64,15 @@ PNL_SCRATCH_EPS = 0.10
 # yfinance rate limiting — pause between ticker downloads
 YF_DELAY_S = 0.3
 
+# Selection-skill grading (_grade_selection_skill — the user-decisions feedback
+# loop). A real fill/kill/defer decision is JOINed to a graded pick by
+# ticker+strategy+strike when the decision lands within this many days of the
+# pick's scan date. Below SELECTION_MIN_GRADED matched WIN/LOSS pairs the metric
+# is suppressed as too noisy to act on. Both are deliberately tunable: widen the
+# window if decisions are logged late, raise the floor before trusting the edge.
+SELECTION_MATCH_WINDOW_DAYS = 10
+SELECTION_MIN_GRADED = 5
+
 
 # ── Sheet reading helpers ──────────────────────────────────────────────────
 
@@ -331,10 +340,12 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
         logger.info(f"Read {len(user_decisions)} real user decisions from Firestore")
 
     # 2. Read existing signal_outcomes to avoid re-processing
+    # Read the full graded history once: its keys drive dedup (unless --force
+    # re-evaluates everything) AND it is the JOIN target for selection grading.
+    historical_outcomes = _read_tab(client, S.SignalOutcomeRow.TAB_NAME)
     existing_outcomes = set()
     if not force:
-        outcomes = _read_tab(client, S.SignalOutcomeRow.TAB_NAME)
-        for o in outcomes:
+        for o in historical_outcomes:
             key = (o.get("scan_date", "")[:10], o.get("ticker", ""),
                    o.get("strategy", ""), o.get("strike", ""), o.get("expiry", ""))
             existing_outcomes.add(key)
@@ -568,9 +579,12 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
         sh.append_rows(client, S.SignalOutcomeRow.TAB_NAME, outcome_rows)
         logger.info(f"✓ Wrote {len(outcome_rows)} rows to signal_outcomes")
 
-    # 7. Compute signal accuracy report (carries the real-user-decisions section)
+    # 7. Compute signal accuracy report (carries the real-user-decisions section
+    #    + selection grade, JOINing decisions onto the full graded history).
+    graded_outcomes = _normalize_outcomes(historical_outcomes, new_outcomes)
     report = _build_report(new_outcomes, signal_hits, stats,
-                           user_decisions=user_decisions)
+                           user_decisions=user_decisions,
+                           graded_outcomes=graded_outcomes)
 
     # 8. Send Telegram summary
     if not dry:
@@ -579,39 +593,228 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
         logger.info(f"[DRY] Telegram report:\n{report}")
 
 
+# ── Selection-skill grading (the user-decisions feedback loop) ──────────────
+
+def _decision_date(key: str, doc: dict) -> datetime | None:
+    """Best-effort date a decision was made.
+
+    Prefer the date embedded in the decision key (``date|account|ticker|
+    strategy|strike`` — the same compound key the PWA and push_decisions.py
+    write), then fall back to the ``ts`` / ``updatedAt`` fields (firebase-admin
+    hands these back as datetimes, but tolerate epoch ms/s and ISO strings too).
+    Returns None when nothing parses — the caller then matches on identity alone.
+    """
+    parts = str(key).split("|")
+    if parts and parts[0]:
+        for fmt in ("%Y-%m-%d", "%Y%m%d"):
+            try:
+                return datetime.strptime(parts[0][:10], fmt)
+            except ValueError:
+                pass
+    for field in ("ts", "updatedAt"):
+        v = doc.get(field)
+        if v in (None, ""):
+            continue
+        if isinstance(v, datetime):
+            return v.replace(tzinfo=None)
+        try:  # epoch seconds or milliseconds
+            n = float(v)
+            return datetime.fromtimestamp(n / 1000.0 if n > 1e12 else n)
+        except (TypeError, ValueError, OSError, OverflowError):
+            pass
+        try:  # ISO-8601 string
+            return datetime.fromisoformat(str(v).replace("Z", "").split("+")[0].strip())
+        except ValueError:
+            pass
+    return None
+
+
+def _decision_fields(key: str, doc: dict) -> tuple[str, str, float, str, datetime | None]:
+    """Extract (ticker, strategy, strike, status, date) from a decision.
+
+    Explicit doc fields win; the compound key is the fallback for each. ``status``
+    accepts the PWA's ``status`` or ``action`` spelling (filled|killed|deferred).
+    """
+    parts = str(key).split("|")
+    ticker = str(doc.get("ticker") or (parts[2] if len(parts) > 2 else "")).upper().strip()
+    strategy = str(doc.get("strategy") or (parts[3] if len(parts) > 3 else "")).upper().strip()
+    raw_strike = doc.get("strike")
+    if raw_strike in (None, ""):
+        raw_strike = parts[4] if len(parts) > 4 else 0
+    try:
+        strike = round(float(raw_strike), 2)
+    except (TypeError, ValueError):
+        strike = 0.0
+    status = str(doc.get("status") or doc.get("action") or "").lower().strip()
+    return ticker, strategy, strike, status, _decision_date(key, doc)
+
+
+def _normalize_outcomes(
+    historical_rows: list[dict] | None,
+    new_rows: list[S.SignalOutcomeRow] | None,
+) -> list[dict]:
+    """Flatten historical sheet rows + this run's new outcomes into one graded
+    list of ``{scan_date, ticker, strategy, strike, outcome}``, de-duplicated on
+    the compound (scan_date, ticker, strategy, strike) key so a pick re-evaluated
+    under --force is never counted twice."""
+    norm: list[dict] = []
+    seen: set[tuple] = set()
+
+    def _add(scan_date, ticker, strategy, strike, outcome) -> None:
+        sd = str(scan_date or "")[:10]
+        tk = str(ticker or "").upper().strip()
+        st = str(strategy or "").upper().strip()
+        try:
+            sk = round(float(strike or 0), 2)
+        except (TypeError, ValueError):
+            sk = 0.0
+        oc = str(outcome or "").upper().strip()
+        if not tk or not oc:
+            return
+        k = (sd, tk, st, f"{sk:.2f}")
+        if k in seen:
+            return
+        seen.add(k)
+        norm.append({"scan_date": sd, "ticker": tk, "strategy": st,
+                     "strike": sk, "outcome": oc})
+
+    for o in (historical_rows or []):
+        _add(o.get("scan_date"), o.get("ticker"), o.get("strategy"),
+             o.get("strike"), o.get("strategy_outcome"))
+    for o in (new_rows or []):
+        _add(o.scan_date, o.ticker, o.strategy, o.strike, o.strategy_outcome)
+    return norm
+
+
+def _grade_selection_skill(
+    user_decisions: dict[str, dict],
+    outcomes: list[dict],
+    *,
+    window_days: int = SELECTION_MATCH_WINDOW_DAYS,
+    min_graded: int = SELECTION_MIN_GRADED,
+) -> dict | None:
+    """Grade the user's SELECTION skill — does discretion beat the raw engine?
+
+    JOINs each real fill/kill/defer decision onto a graded pick (ticker+strategy,
+    strike within $0.01, scan date within ``window_days``; nearest scan date wins)
+    and asks: of the picks that went on to WIN, how often did the user FILL — and
+    of the ones that went on to LOSE, how often did they fill anyway?
+
+    The headline metric is::
+
+        selection_edge = P(fill | WIN) − P(fill | LOSS)     # range −1 … +1
+
+    +1 is perfect discrimination (took every winner, skipped every loser); 0 is
+    no skill (fills winners and losers alike); negative means the discretion is
+    actively anti-selective and the engine should be trusted over it. Only clean
+    WIN/LOSS outcomes are graded — SCRATCHes carry no directional signal.
+
+    Returns None (metric suppressed) when fewer than ``min_graded`` WIN/LOSS pairs
+    match, or when either bucket is empty (the edge is undefined). Otherwise a
+    dict: ``{n, n_win, n_loss, fill_rate_on_winners, fill_rate_on_losers,
+    kill_rate_on_losers, selection_edge}``.
+    """
+    if not user_decisions or not outcomes:
+        return None
+
+    index: dict[tuple[str, str], list[tuple]] = defaultdict(list)
+    for o in outcomes:
+        if o["outcome"] not in ("WIN", "LOSS"):
+            continue
+        index[(o["ticker"], o["strategy"])].append(
+            (_parse_date(o["scan_date"]), o["strike"], o["outcome"]))
+
+    n_win = n_loss = fill_win = fill_loss = kill_loss = 0
+    for key, doc in user_decisions.items():
+        ticker, strategy, strike, status, ddate = _decision_fields(key, doc)
+        if not ticker or not status:
+            continue
+        best_outcome, best_gap = None, None
+        for sd, sk, oc in index.get((ticker, strategy), []):
+            if abs(sk - strike) > 0.01 and not (sk == 0 and strike == 0):
+                continue
+            if sd and ddate:
+                gap = abs((sd - ddate).days)
+                if gap > window_days:
+                    continue
+            else:
+                gap = 0
+            if best_gap is None or gap < best_gap:
+                best_outcome, best_gap = oc, gap
+        if best_outcome is None:
+            continue
+        filled = status == "filled"
+        if best_outcome == "WIN":
+            n_win += 1
+            fill_win += filled
+        else:  # LOSS
+            n_loss += 1
+            fill_loss += filled
+            kill_loss += status == "killed"
+
+    n = n_win + n_loss
+    if n < min_graded or n_win == 0 or n_loss == 0:
+        return None
+    frw = fill_win / n_win
+    frl = fill_loss / n_loss
+    return {
+        "n": n, "n_win": n_win, "n_loss": n_loss,
+        "fill_rate_on_winners": frw,
+        "fill_rate_on_losers": frl,
+        "kill_rate_on_losers": kill_loss / n_loss,
+        "selection_edge": frw - frl,
+    }
+
+
 # ── Real-user-decisions summary (feedback loop) ─────────────────────────────
 
-def _summarize_user_decisions(user_decisions: dict[str, dict]) -> str:
-    """Render a short report section for the user's REAL fill/kill/defer choices.
+def _summarize_user_decisions(
+    user_decisions: dict[str, dict],
+    grade: dict | None = None,
+) -> str:
+    """Render the report section for the user's REAL fill/kill/defer choices.
 
     `user_decisions` is the {decision_key: doc} map from read_user_decisions().
     Returns "" when empty (inert / no decisions) so the section vanishes cleanly.
 
-    This is the EXPOSURE half of the feedback loop: the scanner-pick grading
-    above measures what the engine PROPOSED; this measures what the user
-    ACTUALLY did. Counting fill/kill/defer is the first, safe consumption of the
-    real decisions — it changes no grading rule.
+    Two halves of the feedback loop:
+      • EXPOSURE — a fill/kill/defer count of what the user actually did (vs the
+        scanner-pick grading above, which measures what the engine PROPOSED).
+      • SKILL — when `grade` (from _grade_selection_skill) is supplied, the
+        selection edge: does the user fill the picks that go on to WIN and skip
+        the ones that go on to LOSE? Suppressed upstream when the matched sample
+        is too small, so a present `grade` is always reportable.
 
-    TODO(grading-hook): the precise grading integration is intentionally NOT
-    invented here. The next step is to JOIN these real decisions onto the
-    scan_results / signal_outcomes picks by decision_key (date|account|ticker|
-    strategy|strike) and grade SELECTION skill — e.g. did the user FILL the
-    picks that went on to WIN and KILL the ones that went on to LOSE? That needs
-    a deliberate decision on the matching window and the success metric, so it is
-    left as a clean hook rather than a guessed rule. The data is now read and
-    exposed; wiring it into the win-rate math is a follow-up.
+    This section is purely additive — it never alters the Sheet-derived win-rate
+    or signal calibration.
     """
     if not user_decisions:
         return ""
     by_status: dict[str, int] = defaultdict(int)
     for doc in user_decisions.values():
-        status = str(doc.get("status", "") or "unknown").lower()
+        status = str(doc.get("status") or doc.get("action") or "unknown").lower()
         by_status[status] += 1
     parts = [f"{by_status[s]} {s}" for s in sorted(by_status)]
-    return (
+    lines = [
         f"🧑 Real user decisions: {len(user_decisions)} recorded "
         f"({', '.join(parts)})"
-    )
+    ]
+    if grade:
+        edge = grade["selection_edge"]
+        if edge >= 0.15:
+            verdict = "your discretion ADDS value over the raw engine"
+        elif edge <= -0.15:
+            verdict = "your discretion is ANTI-selective — lean on the engine"
+        else:
+            verdict = "discretion ≈ neutral vs the engine"
+        lines.append(f"🎯 Selection edge: {edge:+.2f} — {verdict}")
+        lines.append(
+            f"   fills winners {grade['fill_rate_on_winners'] * 100:.0f}% vs "
+            f"losers {grade['fill_rate_on_losers'] * 100:.0f}% · "
+            f"kills losers {grade['kill_rate_on_losers'] * 100:.0f}% · "
+            f"graded {grade['n']} ({grade['n_win']}W/{grade['n_loss']}L)"
+        )
+    return "\n".join(lines)
 
 
 # ── Signal accuracy analysis ──────────────────────────────────────────────
@@ -621,14 +824,20 @@ def _build_report(
     signal_hits: dict[str, list[tuple[float, float]]],
     stats: dict,
     user_decisions: dict[str, dict] | None = None,
+    graded_outcomes: list[dict] | None = None,
 ) -> str:
     """Build a text report of signal accuracy findings.
 
     `user_decisions` (optional) is the real fill/kill/defer choices from
-    read_user_decisions(); when present a short summary section is appended. It
-    is purely additive — it never alters the Sheet-derived win-rate / calibration.
+    read_user_decisions(); when present a summary section is appended.
+    `graded_outcomes` (optional) is the normalized WIN/LOSS history from
+    _normalize_outcomes(); with both present, the section also carries the
+    selection-skill edge. Either way the section is purely additive — it never
+    alters the Sheet-derived win-rate / calibration.
     """
-    decisions_section = _summarize_user_decisions(user_decisions or {})
+    grade = (_grade_selection_skill(user_decisions, graded_outcomes)
+             if user_decisions and graded_outcomes else None)
+    decisions_section = _summarize_user_decisions(user_decisions or {}, grade)
 
     total = stats.get("win", 0) + stats.get("loss", 0) + stats.get("scratch", 0)
     if total == 0:

@@ -12,6 +12,10 @@ from scripts.signal_feedback import (
     _eval_cc_outcome,
     _eval_buy_outcome,
     _build_report,
+    _decision_date,
+    _decision_fields,
+    _grade_selection_skill,
+    _normalize_outcomes,
     _parse_date,
     _parse_float,
     _summarize_user_decisions,
@@ -333,3 +337,188 @@ class TestSummarizeUserDecisions:
         )
         assert "Real user decisions" in report
         assert "1 filled" in report
+
+
+# ── Selection-skill grading ──────────────────────────────────────────────────
+
+def _mk_outcome(ticker, strategy, strike, outcome, scan_date="2026-05-01"):
+    """A normalized graded-outcome dict (as _normalize_outcomes emits)."""
+    return {"scan_date": scan_date, "ticker": ticker.upper(),
+            "strategy": strategy.upper(), "strike": round(float(strike), 2),
+            "outcome": outcome.upper()}
+
+
+def _mk_decision(ticker, strategy, strike, status, date="2026-05-01",
+                 account="caspar", **extra):
+    """A {key: doc} pair matching the PWA decision shape."""
+    key = f"{date}|{account}|{ticker.upper()}|{strategy.upper()}|{float(strike):.2f}"
+    doc = {"key": key, "status": status, "ticker": ticker.upper(),
+           "strategy": strategy.upper(), "account": account, "strike": float(strike)}
+    doc.update(extra)
+    return key, doc
+
+
+class TestGradeSelectionSkill:
+    def test_perfect_positive_edge(self):
+        """Fill every winner, kill every loser → edge ≈ +1."""
+        winners = ["AAPL", "MSFT", "NVDA"]
+        losers = ["TSLA", "AMD", "META"]
+        outcomes = ([_mk_outcome(t, "CSP", 100, "WIN") for t in winners]
+                    + [_mk_outcome(t, "CSP", 100, "LOSS") for t in losers])
+        decisions = dict([_mk_decision(t, "CSP", 100, "filled") for t in winners]
+                         + [_mk_decision(t, "CSP", 100, "killed") for t in losers])
+        g = _grade_selection_skill(decisions, outcomes)
+        assert g is not None
+        assert g["n"] == 6 and g["n_win"] == 3 and g["n_loss"] == 3
+        assert g["fill_rate_on_winners"] == 1.0
+        assert g["fill_rate_on_losers"] == 0.0
+        assert g["kill_rate_on_losers"] == 1.0
+        assert g["selection_edge"] == pytest.approx(1.0)
+
+    def test_negative_edge_when_filling_losers(self):
+        """Fill the losers, skip the winners → negative edge (anti-selective)."""
+        winners = ["AAPL", "MSFT", "NVDA"]
+        losers = ["TSLA", "AMD", "META"]
+        outcomes = ([_mk_outcome(t, "CSP", 100, "WIN") for t in winners]
+                    + [_mk_outcome(t, "CSP", 100, "LOSS") for t in losers])
+        decisions = dict([_mk_decision(t, "CSP", 100, "killed") for t in winners]
+                         + [_mk_decision(t, "CSP", 100, "filled") for t in losers])
+        g = _grade_selection_skill(decisions, outcomes)
+        assert g["selection_edge"] == pytest.approx(-1.0)
+        assert g["fill_rate_on_winners"] == 0.0
+        assert g["fill_rate_on_losers"] == 1.0
+
+    def test_insufficient_sample_suppressed(self):
+        """Below SELECTION_MIN_GRADED matched pairs → None (too noisy)."""
+        outcomes = [_mk_outcome("AAPL", "CSP", 100, "WIN"),
+                    _mk_outcome("TSLA", "CSP", 100, "LOSS")]
+        decisions = dict([_mk_decision("AAPL", "CSP", 100, "filled"),
+                          _mk_decision("TSLA", "CSP", 100, "killed")])
+        assert _grade_selection_skill(decisions, outcomes) is None
+        # ...but a lowered floor surfaces it.
+        g = _grade_selection_skill(decisions, outcomes, min_graded=2)
+        assert g is not None and g["n"] == 2
+
+    def test_one_sided_history_suppressed(self):
+        """All winners, no losers → edge undefined → None even past the floor."""
+        outcomes = [_mk_outcome(t, "CSP", 100, "WIN")
+                    for t in ["AAPL", "MSFT", "NVDA", "AMD", "META", "GOOG"]]
+        decisions = dict(_mk_decision(t, "CSP", 100, "filled")
+                         for t in ["AAPL", "MSFT", "NVDA", "AMD", "META", "GOOG"])
+        assert _grade_selection_skill(decisions, outcomes) is None
+
+    def test_empty_inputs(self):
+        assert _grade_selection_skill({}, [_mk_outcome("A", "CSP", 1, "WIN")]) is None
+        assert _grade_selection_skill({dict([_mk_decision("A", "CSP", 1, "filled")][:1]).popitem()[0]: {}}, []) is None
+        assert _grade_selection_skill({}, []) is None
+
+    def test_strike_mismatch_does_not_match(self):
+        """A decision on a different strike is not joined to the outcome."""
+        outcomes = [_mk_outcome("AAPL", "CSP", 100, "WIN")] * 1
+        # Decision on the 200 strike — no matching outcome → no pairs → None.
+        decisions = dict([_mk_decision("AAPL", "CSP", 200, "filled")])
+        assert _grade_selection_skill(decisions, outcomes, min_graded=1) is None
+
+    def test_buy_zero_strike_matches(self):
+        """BUY picks carry strike 0 on both sides and must still join."""
+        outcomes = [_mk_outcome("AAPL", "BUY", 0, "WIN"),
+                    _mk_outcome("TSLA", "BUY", 0, "LOSS")]
+        decisions = dict([_mk_decision("AAPL", "BUY", 0, "filled"),
+                          _mk_decision("TSLA", "BUY", 0, "killed")])
+        g = _grade_selection_skill(decisions, outcomes, min_graded=2)
+        assert g is not None and g["selection_edge"] == pytest.approx(1.0)
+
+    def test_outside_window_does_not_match(self):
+        """A decision logged well outside the match window is not joined."""
+        outcomes = [_mk_outcome("AAPL", "CSP", 100, "WIN", scan_date="2026-05-01")]
+        decisions = dict([_mk_decision("AAPL", "CSP", 100, "filled", date="2026-06-30")])
+        assert _grade_selection_skill(decisions, outcomes, min_graded=1) is None
+        # Same pick decided within the window → joins.
+        near = dict([_mk_decision("AAPL", "CSP", 100, "filled", date="2026-05-04")])
+        # one-sided so still None, but it must at least COUNT — verify via min_graded path
+        outcomes2 = outcomes + [_mk_outcome("TSLA", "CSP", 100, "LOSS", scan_date="2026-05-01")]
+        near.update(dict([_mk_decision("TSLA", "CSP", 100, "killed", date="2026-05-03")]))
+        g = _grade_selection_skill(near, outcomes2, min_graded=2)
+        assert g is not None and g["n"] == 2
+
+    def test_action_field_status_fallback(self):
+        """A doc that carries `action` instead of `status` is still graded."""
+        winners = ["AAPL", "MSFT", "NVDA"]
+        losers = ["TSLA", "AMD", "META"]
+        outcomes = ([_mk_outcome(t, "CSP", 100, "WIN") for t in winners]
+                    + [_mk_outcome(t, "CSP", 100, "LOSS") for t in losers])
+        decisions = {}
+        for t in winners:
+            k, d = _mk_decision(t, "CSP", 100, "ignored")
+            d.pop("status"); d["action"] = "filled"
+            decisions[k] = d
+        for t in losers:
+            k, d = _mk_decision(t, "CSP", 100, "ignored")
+            d.pop("status"); d["action"] = "killed"
+            decisions[k] = d
+        g = _grade_selection_skill(decisions, outcomes)
+        assert g is not None and g["selection_edge"] == pytest.approx(1.0)
+
+    def test_scratch_outcomes_ignored(self):
+        """SCRATCH carries no directional signal → excluded from grading."""
+        outcomes = [_mk_outcome("AAPL", "CSP", 100, "SCRATCH"),
+                    _mk_outcome("TSLA", "CSP", 100, "SCRATCH")]
+        decisions = dict([_mk_decision("AAPL", "CSP", 100, "filled"),
+                          _mk_decision("TSLA", "CSP", 100, "killed")])
+        assert _grade_selection_skill(decisions, outcomes, min_graded=1) is None
+
+
+class TestDecisionParsing:
+    def test_decision_date_from_key(self):
+        d = _decision_date("2026-05-20|caspar|AAPL|CSP|190.00", {})
+        assert d is not None and d.year == 2026 and d.month == 5 and d.day == 20
+
+    def test_decision_date_from_ts_epoch_ms(self):
+        # 2026-05-20T00:00:00Z ≈ 1779580800 s → ms
+        d = _decision_date("nokey", {"ts": 1779580800000})
+        assert d is not None and d.year == 2026
+
+    def test_decision_date_from_iso_string(self):
+        d = _decision_date("nokey", {"updatedAt": "2026-05-20T10:00:00Z"})
+        assert d is not None and d.year == 2026 and d.month == 5
+
+    def test_decision_date_unparseable_is_none(self):
+        assert _decision_date("nokey", {"ts": "not-a-date"}) is None
+
+    def test_decision_fields_prefers_doc_then_key(self):
+        key = "2026-05-20|caspar|AAPL|CSP|190.00"
+        tk, strat, strike, status, _ = _decision_fields(key, {"status": "filled"})
+        assert (tk, strat, strike, status) == ("AAPL", "CSP", 190.0, "filled")
+
+
+class TestNormalizeOutcomes:
+    def test_merges_and_dedupes(self):
+        historical = [{"scan_date": "2026-05-01", "ticker": "aapl", "strategy": "csp",
+                       "strike": "100", "strategy_outcome": "WIN"}]
+        new = [SignalOutcomeRow(
+            scan_date="2026-05-01", eval_date="2026-05-31", ticker="AAPL",
+            strategy="CSP", scan_composite=0, scan_technical=0, strike=100.0,
+            expiry="2026-05-30", dte=29, price_at_scan=100, price_at_eval=101,
+            fwd_return_pct=1.0, strategy_outcome="WIN", outcome_pnl_pct=1.0,
+            pnl_model=PNL_MODEL_PREMIUM)]
+        norm = _normalize_outcomes(historical, new)
+        # Same compound key → collapsed to one, uppercased + numeric strike.
+        assert len(norm) == 1
+        assert norm[0]["ticker"] == "AAPL" and norm[0]["strike"] == 100.0
+
+    def test_skips_blank_rows(self):
+        assert _normalize_outcomes([{"ticker": "", "strategy_outcome": "WIN"}], []) == []
+
+
+def test_build_report_surfaces_selection_edge():
+    """With user_decisions + graded_outcomes, the report shows the edge line."""
+    winners = ["AAPL", "MSFT", "NVDA"]
+    losers = ["TSLA", "AMD", "META"]
+    graded = ([_mk_outcome(t, "CSP", 100, "WIN") for t in winners]
+              + [_mk_outcome(t, "CSP", 100, "LOSS") for t in losers])
+    decisions = dict([_mk_decision(t, "CSP", 100, "filled") for t in winners]
+                     + [_mk_decision(t, "CSP", 100, "killed") for t in losers])
+    report = _build_report([], {}, {"win": 0, "loss": 0, "scratch": 0},
+                           user_decisions=decisions, graded_outcomes=graded)
+    assert "Selection edge: +1.00" in report
+    assert "ADDS value" in report
