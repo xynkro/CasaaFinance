@@ -8,9 +8,11 @@ name: Build Daily Plan — Unified Recommendations
 
 on:
   schedule:
-    # 14:00 UTC — after options-scan (02:35), growth-scan (12:30), gex (13:00);
-    # 30 min before the executor (14:30). Mon-Fri.
-    - cron: "0 14 * * 1-5"
+    # 14:03 UTC — after options-scan (02:35), growth-scan (12:30), gex (13:02);
+    # ~30 min before the executor (14:33). Mon-Fri.
+    # Offset to :03 (was :00) to stagger off trigger-alerts' 14:00 */10 tick
+    # (both write the Sheet) — avoids 429s. Still ahead of the executor.
+    - cron: "3 14 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

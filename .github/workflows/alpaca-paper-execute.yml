@@ -11,8 +11,11 @@ name: Alpaca Paper Executor — Daily
 
 on:
   schedule:
-    # 14:30 UTC = 10:30 ET, ~1h after the US open. Mon-Fri.
-    - cron: "30 14 * * 1-5"
+    # 14:33 UTC = ~10:33 ET, ~1h after the US open. Mon-Fri.
+    # Offset to :33 (was :30) to stagger off the 14:30 sheet-write pileup
+    # (unusual-options-scan, options-refresh, trigger-alerts) — avoids 429s.
+    # Still after build-daily-plan (14:03) so it trades the fresh plan.
+    - cron: "33 14 * * 1-5"
   workflow_dispatch:
     inputs:
       execute:

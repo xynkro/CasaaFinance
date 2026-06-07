@@ -3,7 +3,10 @@ name: Poll Drive WSR — 3x Daily Pickup
 on:
   schedule:
     # 3x daily — WSR uploads are manual, no need for 48 runs/day
-    - cron: "0 6,12,18 * * *"
+    # Offset to :08 (was :00) to stagger off sheet-write pileups: the 12:00 Sun
+    # trio (finnhub-analyst, options-yield) and the 18:00 Mon-Fri trigger-alerts
+    # */10 tick — all write the one Sheet. Avoids 429s; same 3x/day frequency.
+    - cron: "8 6,12,18 * * *"
   workflow_dispatch:
     inputs:
       force_id:

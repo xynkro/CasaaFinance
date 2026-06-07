@@ -4,15 +4,17 @@ on:
   schedule:
     # 4× daily covering pre-mkt, mid-day, close, post-close in US time
     # so the brain has the freshest news at every workflow trigger:
-    #   13:30 UTC = 21:30 SGT  (pre-mkt = 09:30 ET)
-    #   17:00 UTC = 01:00 SGT  (mid-day)
-    #   21:00 UTC = 05:00 SGT  (close)
-    #   02:00 UTC = 10:00 SGT  (post-close, pre WSR Lite)
+    #   13:08 UTC ≈ 21:08 SGT  (pre-mkt)
+    #   17:08 UTC ≈ 01:08 SGT  (mid-day)
+    #   21:08 UTC ≈ 05:08 SGT  (close)
+    #   02:08 UTC ≈ 10:08 SGT  (post-close, pre WSR Lite)
     # 4 × ~5min runs = ~20 min/day. Well within 2000-min free tier.
-    - cron: "30 13 * * *"
-    - cron: "0 17 * * *"
-    - cron: "0 21 * * *"
-    - cron: "0 2 * * *"
+    # Offset to :08 (was :30/:00) so it never co-fires with options-refresh
+    # (:05/:35) or trigger-alerts (*/10) on the shared Sheet — avoids 429s.
+    - cron: "8 13 * * *"
+    - cron: "8 17 * * *"
+    - cron: "8 21 * * *"
+    - cron: "8 2 * * *"
   workflow_dispatch:
     inputs:
       dry:

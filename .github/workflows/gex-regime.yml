@@ -9,8 +9,10 @@ name: GEX Regime — Pre-Market Gamma Map
 
 on:
   schedule:
-    # 13:00 UTC = ~30 min before the US cash open. Mon-Fri.
-    - cron: "0 13 * * 1-5"
+    # 13:02 UTC = ~30 min before the US cash open. Mon-Fri.
+    # Offset to :02 (was :00) to stagger off the 13:00 sheet-write pileup
+    # (iv-surface-scan, finnhub-calendars, trigger-alerts) — avoids 429s.
+    - cron: "2 13 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

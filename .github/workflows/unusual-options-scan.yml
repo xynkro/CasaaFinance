@@ -2,8 +2,10 @@ name: Unusual Options Activity — Daily UOA Scan
 
 on:
   schedule:
-    # 14:30 UTC = 22:30 SGT (after US market close, final volume available)
-    - cron: "30 14 * * 1-5"
+    # 14:36 UTC ≈ 22:36 SGT (after US market close, final volume available)
+    # Offset to :36 (was :30) to stagger off the 14:30 sheet-write pileup
+    # (alpaca-paper-execute, options-refresh, trigger-alerts) — avoids 429s.
+    - cron: "36 14 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

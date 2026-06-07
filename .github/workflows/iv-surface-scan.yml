@@ -2,8 +2,10 @@ name: IV Surface Scan — Volatility Surface
 
 on:
   schedule:
-    # 13:00 UTC = 8:00 AM ET (pre-market, after overnight IV settles)
-    - cron: "0 13 * * 1-5"
+    # 13:04 UTC = ~8:04 AM ET (pre-market, after overnight IV settles)
+    # Offset to :04 (was :00) to stagger off the 13:00 sheet-write pileup
+    # (gex-regime, finnhub-calendars, trigger-alerts) — avoids 429s.
+    - cron: "4 13 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

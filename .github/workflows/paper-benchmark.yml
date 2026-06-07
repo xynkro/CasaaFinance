@@ -8,8 +8,10 @@ name: Paper Benchmark vs SPY — Daily
 
 on:
   schedule:
-    # 21:30 UTC = ~30m after the US close. Mon-Fri.
-    - cron: "30 21 * * 1-5"
+    # 21:33 UTC = ~33m after the US close. Mon-Fri.
+    # Offset to :33 (was :30) to stagger off options-refresh (:35) and
+    # trigger-alerts (:30 */10 tick) at 21:30 — both write the Sheet. Avoids 429s.
+    - cron: "33 21 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

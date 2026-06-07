@@ -2,11 +2,13 @@ name: Finnhub Analyst — Weekly Consensus
 
 on:
   schedule:
-    # Sunday 12:00 UTC (20:00 SGT) — runs ahead of WSR Full at 19:37 SGT
+    # Sunday 12:02 UTC (~20:02 SGT) — runs ahead of WSR Full at 19:37 SGT
     # Wait, that's after — but WSR Full reads from sheets at brain time
-    # so the 12:00 UTC run feeds the same-day WSR Full. Analyst recs
+    # so the 12:02 UTC run feeds the same-day WSR Full. Analyst recs
     # barely shift week-to-week so weekly cadence is plenty.
-    - cron: "0 12 * * 0"
+    # Offset to :02 (was :00) to stagger off the 12:00 Sun sheet-write trio
+    # (options-yield, poll-drive-wsr) — avoids 429s.
+    - cron: "2 12 * * 0"
   workflow_dispatch:
 
 permissions:

@@ -85,14 +85,46 @@ So the workflow is:
 
 ## Cadence summary
 
+SGT = UTC + 8. Minutes are deliberately **staggered** so no two
+sheet-writing workflows fire on the same exact minute — concurrent writes to
+the single Google Sheet trip Sheets API 429s. Keep offsets distinct when
+adding/retiming a workflow (the `*/10` `trigger-alerts` spine occupies every
+:00/:10/:20/:30/:40/:50 of 13:00-21:00 UTC on weekdays, so daily writers in
+that window must avoid those ticks).
+
 | Workflow | Schedule (SGT) | Cron (UTC) |
 |---|---|---|
-| yahoo-grab | Hourly :07 | `7 * * * *` |
-| macro-grab + options-refresh | Hourly :17 | `17 * * * *` |
-| poll-drive-wsr | :13 + :43 hourly | `13,43 * * * *` |
-| market-scan | Daily 10:33 | `33 2 * * *` |
+| yahoo-grab (+ tv_price_refresh) | Mon-Fri :07 & :37, 21:00-05:00 next day | `7,37 13-21 * * 1-5` |
+| macro-grab | 4×/day :17 (08:17/14:17/22:17/06:17) | `17 0,6,14,22 * * *` |
+| options-refresh | Mon-Fri :05 & :35, 21:00-05:30 next day | `5,35 13-21 * * 1-5` |
+| trigger-alerts | Mon-Fri every 10 min, 21:00-05:00 next day | `*/10 13-21 * * 1-5` |
+| poll-drive-wsr | Daily 14:08 / 20:08 / 02:08 | `8 6,12,18 * * *` |
+| market-scan | Daily 10:15 | `15 2 * * *` |
 | daily-options-scan | Mon-Fri 10:35 | `35 2 * * 1-5` |
-| daily-brief | Mon-Fri 07:03 | `3 23 * * 0-4` |
+| gex-regime | Mon-Fri 21:02 | `2 13 * * 1-5` |
+| iv-surface-scan | Mon-Fri 21:04 | `4 13 * * 1-5` |
+| finnhub-calendars | Daily 21:06 | `6 13 * * *` |
+| finnhub-news-insider | Daily 21:08 / 01:08 / 05:08 / 10:08 | `8 13,17,21,2 * * *` |
+| build-daily-plan | Mon-Fri 22:03 | `3 14 * * 1-5` |
+| alpaca-paper-execute | Mon-Fri 22:33 | `33 14 * * 1-5` |
+| unusual-options-scan | Mon-Fri 22:36 | `36 14 * * 1-5` |
+| execute-decisions | Mon-Fri 08:00 | `0 0 * * 1-5` |
+| regime-signals (+ exposure-posture) | Mon-Fri 06:10 next day | `10 22 * * 1-5` |
+| tv-signals | Mon-Fri 06:40 next day | `40 22 * * 1-5` |
+| fetch-gov-contracts | Sun-Thu 06:00 next day | `0 22 * * 0-4` |
+| fetch-congress-trades | Sun-Thu 06:30 next day | `30 22 * * 0-4` |
+| refresh-exit-plans | Daily 06:20 next day | `20 22 * * *` |
+| risk-parity-audit (+ recommend) | Mon-Fri 06:45 next day | `45 22 * * 1-5` |
+| paper-benchmark | Mon-Fri 05:33 next day | `33 21 * * 1-5` |
+| api-usage | Daily 07:30 next day | `30 23 * * *` |
+| screen-gov-confluence | Sun-Thu 07:00 next day | `0 23 * * 0-4` |
+| daily-brief | Sun-Thu 07:03 next day | `3 23 * * 0-4` |
+| tail-hedge | Mon 07:15 next day | `15 23 * * 1` |
+| growth-scan | Mon & Thu 20:30 | `30 12 * * 1,4` |
+| screen-candidates | Sun 19:00 | `0 11 * * 0` |
+| finnhub-analyst | Sun 20:02 | `2 12 * * 0` |
+| options-yield | Sun 20:04 | `4 12 * * 0` |
+| signal-feedback | Sun 22:00 | `0 14 * * 0` |
 | wsr-lite | Wed 19:33 | `33 11 * * 3` |
 | wsr-full | Sun 19:37 | `37 11 * * 0` |
-| mirror-firestore | Every 15 min | `*/15 * * * *` |
+| mirror-firestore | Every 15 min (Firestore, not the Sheet) | `*/15 * * * *` |

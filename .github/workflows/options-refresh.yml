@@ -6,16 +6,19 @@ name: Options Refresh — Every 30min during US market hours
 # moneyness, DTE, assignment_risk, and trend_risk without waiting for the
 # Mac's nightly daily-tracker run.
 #
-# Schedule: every :00 and :30 between 13:00-21:30 UTC, weekdays only.
-#   13:00 UTC = 09:00 ET = market open at 09:30 ET (1 run pre-open)
-#   21:30 UTC = 17:30 ET = 30 min after close
+# Schedule: every :05 and :35 between 13:00-21:35 UTC, weekdays only.
+#   13:05 UTC ≈ 09:05 ET = market open at 09:30 ET (1 run pre-open)
+#   21:35 UTC = 17:35 ET = ~35 min after close
 #   Weekdays only (Mon-Fri).
-# In SGT this is roughly 21:00-05:30 next day — covers every minute of US
-# session plus 30 min buffer either side.
+# In SGT this is roughly 21:05-05:35 next day — covers every minute of US
+# session plus a buffer either side.
+# Offset to :05/:35 (was :00/:30) so it no longer lands on trigger-alerts'
+# */10 ticks (:00/:10/:20/:30/:40/:50) — both write the one Google Sheet, so
+# co-firing risked concurrent-write 429s. Same twice-hourly frequency.
 
 on:
   schedule:
-    - cron: "0,30 13-21 * * 1-5"
+    - cron: "5,35 13-21 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

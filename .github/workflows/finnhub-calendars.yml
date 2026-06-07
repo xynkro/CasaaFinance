@@ -2,10 +2,12 @@ name: Finnhub Calendars — Daily Earnings + Economic
 
 on:
   schedule:
-    # Daily 13:00 UTC = 21:00 SGT — ahead of WSR Lite (Wed/Fri 19:33 SGT)
+    # Daily 13:06 UTC ≈ 21:06 SGT — ahead of WSR Lite (Wed/Fri 19:33 SGT)
     # so the brain reads fresh calendars when synthesizing. Earnings rarely
     # shift mid-day; once-daily refresh is enough.
-    - cron: "0 13 * * *"
+    # Offset to :06 (was :00) to stagger off the 13:00 sheet-write pileup
+    # (gex-regime, iv-surface-scan, trigger-alerts) — avoids 429s.
+    - cron: "6 13 * * *"
   workflow_dispatch:
     inputs:
       dry:

@@ -15,10 +15,12 @@ name: Options Yield Screener — Weekly
 
 on:
   schedule:
-    # 12:00 UTC Sunday = 20:00 SGT Sunday — runs after screen-candidates
-    # at 11:00 UTC and ~37min before wsr-full.yml (19:37 SGT = 11:37 UTC)
+    # 12:04 UTC Sunday ≈ 20:04 SGT Sunday — runs after screen-candidates
+    # at 11:00 UTC and before wsr-full.yml (19:37 SGT = 11:37 UTC)
     # so its rows are fresh when the WSR brain reads them.
-    - cron: "0 12 * * 0"
+    # Offset to :04 (was :00) to stagger off the 12:00 Sun sheet-write trio
+    # (finnhub-analyst, poll-drive-wsr) — avoids 429s.
+    - cron: "4 12 * * 0"
   workflow_dispatch:
     inputs:
       dry:
