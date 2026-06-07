@@ -93,6 +93,6 @@ So the workflow is:
 | market-scan | Daily 10:33 | `33 2 * * *` |
 | daily-options-scan | Mon-Fri 10:35 | `35 2 * * 1-5` |
 | daily-brief | Mon-Fri 07:03 | `3 23 * * 0-4` |
-| wsr-lite | Wed/Fri 19:33 | `33 11 * * 3,5` |
+| wsr-lite | Wed 19:33 | `33 11 * * 3` |
 | wsr-full | Sun 19:37 | `37 11 * * 0` |
 | mirror-firestore | Every 15 min | `*/15 * * * *` |

@@ -2,8 +2,9 @@ name: WSR Lite — Claude Code (Max)
 
 on:
   schedule:
-    # 11:33 UTC Wed/Fri = 19:33 SGT
-    - cron: "33 11 * * 3,5"
+    # 11:33 UTC Wed = 19:33 SGT (Fri run cut 2026-06-07 — was a redundant mid-week
+    # delta-refresh of the Sunday WSR; daily-brief re-anchors triggers Mon-Fri)
+    - cron: "33 11 * * 3"
   workflow_dispatch:
     inputs:
       dry:
