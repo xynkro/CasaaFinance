@@ -766,11 +766,9 @@ def push_to_sheet(results: dict):
         sh.ensure_headers(client, S.WheelNextLegRow.TAB_NAME, S.WheelNextLegRow.HEADERS)
         sh.append_rows(client, S.WheelNextLegRow.TAB_NAME, [w.to_row() for w in wheel])
 
-    # Scan results
-    scan = results.get("scan_results", [])
-    if scan:
-        sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
-        sh.append_rows(client, S.ScanResultRow.TAB_NAME, [s.to_row() for s in scan])
+    # NOTE: scan_results writing was RETIRED from daily_tracker on 2026-06-07
+    # (Tier-3 scanner unification). scripts/daily_options_scan.py is the single
+    # canonical writer of the scan_results tab now.
 
     # Exit plans
     exit_plans = results.get("exit_plans", [])
@@ -788,12 +786,11 @@ def push_to_sheet(results: dict):
     sh.ensure_headers(client, S.MacroRow.TAB_NAME, S.MacroRow.HEADERS)
     sh.append_row(client, S.MacroRow.TAB_NAME, macro.to_row())
 
-    scan = results.get("scan_results", [])
     exit_plans_count = len(results.get("exit_plans", []))
     print(f"  Pushed: snapshot_caspar, {len(pos_c)} caspar positions, "
           f"snapshot_sarah, {len(pos_s)} sarah positions, "
           f"{len(opts)} options, {len(tech)} technical scores, "
-          f"{len(wheel)} wheel next-legs, {len(scan)} scan results, "
+          f"{len(wheel)} wheel next-legs, "
           f"{exit_plans_count} exit plans, macro")
 
 
@@ -1158,94 +1155,23 @@ def main():
         if r.status not in ("HEALTHY", "HOLD"):
             print(f"  {r.account}/{r.ticker} [{r.position_type}] {r.status}: {r.recommendation}")
 
-    # Cross-ticker option scanner — top CSP/CC candidates daily
-    print("Running option scanner...")
-    from src.option_scanner import scan_watchlist
+    # NOTE: cross-ticker CSP/CC scan generation was RETIRED from daily_tracker on
+    # 2026-06-07 (Tier-3 scanner unification). scripts/daily_options_scan.py is now
+    # the SINGLE canonical writer of the scan_results tab — daily_tracker writing it
+    # too (with different strike params + append mode) produced inconsistent,
+    # order-dependent rows for the same ticker/day. daily_tracker keeps all its other
+    # jobs (portfolio snapshot, exit plans, options-defense, wheel next-leg, etc.).
+    # The Kelly sizing engine (option_scanner.realized_kelly_inputs /
+    # _fractional_kelly_size) is unaffected — it still lives in src/option_scanner.py.
+
+    # Per-account cash + VIX are still needed downstream by the options-defense brief
+    # and the wheel next-leg suggestions (both kept). These were previously computed
+    # inside the now-removed scan block, so they are restored here.
     available_cash = {
         "caspar": float(grab.get("accounts", {}).get("caspar", {}).get("summary", {}).get("total_cash", 0)),
         "sarah": float(grab.get("accounts", {}).get("sarah", {}).get("summary", {}).get("total_cash_sgd", 0)),
     }
-    # Count current short options per account for capacity guard
-    short_counts: dict[str, int] = {"caspar": 0, "sarah": 0}
-    for opt in option_rows:
-        if opt.qty < 0:
-            acct_name = opt.account.lower() if hasattr(opt, "account") else "caspar"
-            short_counts[acct_name] = short_counts.get(acct_name, 0) + 1
     vix_val = macro.get("vix", 0) or 0
-    # Realized signal outcomes → per-strategy Kelly sizing (shrunk to prior).
-    # Read the full signal_outcomes history; thin/missing history falls back to
-    # the prior inside scan_watchlist. Guarded — never block the scan on it.
-    outcome_rows: list[dict] = []
-    try:
-        from src import schema as S, sheets as sh
-        ss_out = sh._open_sheet(sh.authenticate())
-        vals = ss_out.worksheet(S.SignalOutcomeRow.TAB_NAME).get_all_values()
-        if len(vals) >= 2:
-            hdr = vals[0]
-            outcome_rows = [dict(zip(hdr, r)) for r in vals[1:] if any(r)]
-        print(f"  signal_outcomes: {len(outcome_rows)} rows for Kelly calibration")
-    except Exception as e:
-        print(f"  signal_outcomes read skipped ({e}) — Kelly uses prior")
-        outcome_rows = []
-    try:
-        scan_results = scan_watchlist(
-            list(indicator_tickers), indicators, technical_scores,
-            SGX_TICKERS, available_cash, today,
-            current_short_count_by_account=short_counts,
-            vix=float(vix_val),
-            outcome_rows=outcome_rows,
-        )
-    except Exception as e:
-        print(f"  scanner error: {e}")
-        scan_results = []
-
-    # Log VIX regime + IV rank gate + post-earnings info
-    from src.option_scanner import classify_vix_regime
-    vix_regime = classify_vix_regime(float(vix_val))
-    print(f"  VIX regime: {vix_regime} (VIX={vix_val})")
-
-    scan_rows = []
-    for r in scan_results:
-        # Surface Kelly sizing + capacity + IV gate + VIX + earnings into notes
-        notes_parts = []
-        if r.get("sizing_note"):
-            notes_parts.append(r["sizing_note"])
-        if r.get("kelly_max_cash") and r["kelly_max_cash"] > 0:
-            notes_parts.append(f"½Kelly max ${r['kelly_max_cash']:.0f}")
-        if r.get("iv_gate_note"):
-            notes_parts.append(r["iv_gate_note"])
-        if r.get("vix_note"):
-            notes_parts.append(r["vix_note"])
-        if r.get("earnings_note"):
-            notes_parts.append(r["earnings_note"])
-        scan_rows.append(S.ScanResultRow(
-            date=r["date"], ticker=r["ticker"], strategy=r["strategy"],
-            right=r["right"], strike=r["strike"], expiry=r["expiry"],
-            dte=r["dte"], delta=r["delta"], premium=r["premium"],
-            bid=r["bid"], ask=r["ask"],
-            annual_yield_pct=r["annual_yield_pct"],
-            cash_required=r["cash_required"], breakeven=r["breakeven"],
-            iv=r["iv"], iv_rank=r["iv_rank"], spread_pct=r["spread_pct"],
-            underlying_last=r["underlying_last"],
-            technical_score=r["technical_score"],
-            composite_score=r["composite_score"],
-            catalyst_flag=r["catalyst_flag"],
-            notes=" | ".join(notes_parts) if notes_parts else "",
-        ))
-    results["scan_results"] = scan_rows
-    # Show top 5 of each strategy
-    top_csp = [r for r in scan_results if r["strategy"] == "CSP"][:5]
-    top_cc = [r for r in scan_results if r["strategy"] == "CC"][:5]
-    print(f"  Top 5 CSP candidates:")
-    for r in top_csp:
-        print(f"    {r['ticker']:<6s} ${r['strike']:>7.2f}P exp {r['expiry']} "
-              f"Δ{r['delta']:+.2f} prem ${r['premium']:>5.2f} "
-              f"yld {r['annual_yield_pct']:>5.1f}% composite {r['composite_score']:>5.1f}")
-    print(f"  Top 5 CC candidates:")
-    for r in top_cc:
-        print(f"    {r['ticker']:<6s} ${r['strike']:>7.2f}C exp {r['expiry']} "
-              f"Δ{r['delta']:+.2f} prem ${r['premium']:>5.2f} "
-              f"yld {r['annual_yield_pct']:>5.1f}% composite {r['composite_score']:>5.1f}")
 
     # Daily options defense — compare today vs yesterday to surface urgent actions
     print("Computing options defense alerts...")

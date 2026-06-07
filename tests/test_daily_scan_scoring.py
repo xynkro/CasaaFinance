@@ -170,3 +170,34 @@ def test_technical_context_fetches_250d():
         assert call_kwargs.kwargs["period"] == "250d"
     else:
         assert call_kwargs.args[0] == "250d"
+
+
+# ── Scanner-unification (Tier 3, 2026-06-07) — lock in intentional CC change ──
+
+def test_cc_delta_is_conservative():
+    """CC target/range must stay CONSERVATIVE (share-keeping) after the Tier-3
+    unification: target 0.15 (was 0.20), range widened DOWN to (0.10, 0.20) so
+    lower-delta calls are selectable — BXM/Tastytrade rationale. Guards against a
+    silent regression back to the old 0.20 target."""
+    from scripts.daily_options_scan import CC_DELTA_TARGET, CC_DELTA_RANGE
+
+    assert CC_DELTA_TARGET == 0.15
+    assert CC_DELTA_RANGE == (0.10, 0.20)
+    # Target must sit inside its band.
+    assert CC_DELTA_RANGE[0] <= CC_DELTA_TARGET <= CC_DELTA_RANGE[1]
+
+
+def test_csp_delta_unchanged_by_cc_change():
+    """The CC change must NOT touch CSP params — CSP target stays 0.25."""
+    from scripts.daily_options_scan import CSP_DELTA_TARGET, CSP_DELTA_RANGE
+
+    assert CSP_DELTA_TARGET == 0.25
+    assert CSP_DELTA_RANGE == (0.15, 0.35)
+
+
+def test_iv_rank_low_gate_constant_present():
+    """The IV-rank low gate ported from option_scanner must exist for the wheel
+    (CSP/CC) annotation path."""
+    from scripts.daily_options_scan import IV_RANK_GATE_LOW
+
+    assert IV_RANK_GATE_LOW == 30

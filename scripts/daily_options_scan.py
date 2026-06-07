@@ -43,11 +43,26 @@ TARGET_DTE      = 35
 CSP_OTM_RANGE   = (0.02, 0.18)   # 2%-18% OTM (coarse pre-filter; delta is the real gate)
 CC_OTM_RANGE    = (0.01, 0.10)   # 1%-10% OTM (coarse pre-filter; delta is the real gate)
 CSP_DELTA_RANGE = (0.15, 0.35)   # short-put |Δ| — PRIMARY strike gate (assignment prob)
-CC_DELTA_RANGE  = (0.15, 0.35)   # short-call |Δ| — PRIMARY strike gate
+CC_DELTA_RANGE  = (0.10, 0.20)   # short-call |Δ| band — widened DOWN so lower-Δ
+                                 # (share-keeping) calls are selectable. BXM index
+                                 # construction + Tastytrade research: a lower-Δ short
+                                 # call is assigned away less often, so the underlying
+                                 # shares are kept more of the time.
 CSP_DELTA_TARGET = 0.25          # select the strike CLOSEST to this Δ within the band
-CC_DELTA_TARGET  = 0.20          # CC favours lower Δ (keep the shares more often)
+CC_DELTA_TARGET  = 0.15          # CONSERVATIVE CC target — BXM/Tastytrade: lower Δ
+                                 # keeps shares more often (less call-away risk) at the
+                                 # cost of slightly thinner premium. Was 0.20.
 MIN_OI          = 50
 MIN_MID         = 0.15       # min option mid-price — $0.05 was letting penny options through
+# IV-rank low gate for the WHEEL paths (CSP/CC). Ported from option_scanner so the
+# wheel strategies retain the "don't sell cheap vol" signal the IC/PCS/CCS paths
+# already enforce (IC_MIN_IVR / CS_MIN_IVR). Volatility Risk Premium: selling
+# premium at a low IV-rank captures almost no edge. iv_rank here is the IV/HV
+# richness score from _estimate_ivr (a ratio-score, NOT a true percentile — see its
+# docstring). SOFT signal only: it tags the candidate with an IV_RANK_LOW note so the
+# reader sees the thin-vol context; it does NOT drop or re-rank the pick (keeping
+# emission behaviour identical to before — no new hard gating on the live path).
+IV_RANK_GATE_LOW = 30        # below this IV/HV richness score: flag IV_RANK_LOW on CSP/CC
 MIN_CSP_YIELD   = 12.0    # annualised %
 MIN_CC_YIELD    = 10.0
 MIN_PRICE       = 10.0    # tastytrade: $10 floor for wheel/income — premiums too thin below this
@@ -999,6 +1014,10 @@ def scan_ticker(
                     spread_pct = (ask - bid) / mid * 100
                 csp_delta, csp_iv = _compute_greeks(r, price, dte, "P")
                 csp_ivr = _estimate_ivr(csp_iv, hv30)
+                # IV-rank low signal (ported from option_scanner): selling a CSP into
+                # cheap vol earns little VRP edge. Soft — annotate, don't drop.
+                csp_iv_note = (f"IV_RANK_LOW ({csp_ivr:.0f}<{IV_RANK_GATE_LOW})"
+                               if 0 < csp_ivr < IV_RANK_GATE_LOW else "")
 
                 # Conviction score: unified scoring CSP score mapped to [0, 100]
                 csp_score_raw = scores.get("CSP", 0)
@@ -1051,7 +1070,7 @@ def scan_ticker(
                     "composite_score": round(conviction, 1),
                     "catalyst_flag": False,
                     "hv30": round(hv30, 1),
-                    "notes": "",
+                    "notes": csp_iv_note,
                     # Harvest-specific fields (used for harvest_scan tab write)
                     "_conviction": conviction,
                     "_sr_context": sr_context,
@@ -1136,6 +1155,10 @@ def scan_ticker(
                 spread_pct = (ask - bid) / mid * 100
             cc_delta, cc_iv = _compute_greeks(r, price, dte, "C")
             cc_ivr = _estimate_ivr(cc_iv, hv30)
+            # IV-rank low signal (ported from option_scanner): writing a CC into cheap
+            # vol earns little premium. Soft — annotate, don't drop.
+            cc_iv_note = (f"IV_RANK_LOW ({cc_ivr:.0f}<{IV_RANK_GATE_LOW})"
+                          if 0 < cc_ivr < IV_RANK_GATE_LOW else "")
             # 0-100 conviction (same mapping as CSP) so composite_score is one
             # comparable scale across all strategies; yield stays in annual_yield_pct.
             cc_conviction = max(0, min(100, int((scores.get("CC", 0) + 100) / 2)))
@@ -1161,7 +1184,7 @@ def scan_ticker(
                 "composite_score": round(cc_conviction, 1),
                 "catalyst_flag": False,
                 "hv30": round(hv30, 1),
-                "notes": "",
+                "notes": cc_iv_note,
             })
     except Exception as e:
         logger.debug(f"  {ticker}: CC error — {e}")
