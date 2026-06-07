@@ -246,8 +246,7 @@ def upsert_news(client, rows: list[S.NewsSentimentRow], logger: logging.Logger) 
         keep.append(r)
     keep.extend(r.to_row() for r in rows)
 
-    ws.clear()
-    ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     logger.info(
         f"✓ news upserted: {len(rows)} new (dropped {dropped_dupe} dupe, "
         f"{dropped_old} >14d)"
@@ -344,8 +343,7 @@ def upsert_insider(client, rows: list[S.InsiderTransactionRow], logger: logging.
         keep.append(r)
     keep.extend(r.to_row() for r in rows)
 
-    ws.clear()
-    ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     logger.info(
         f"✓ insider upserted: {len(rows)} new (dropped {dropped_dupe} dupe, "
         f"{dropped_old} >90d)"

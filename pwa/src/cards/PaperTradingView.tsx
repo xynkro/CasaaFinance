@@ -2,22 +2,15 @@ import type { AlpacaSnapshotRow, AlpacaPositionRow, ParsedOcc, PaperBenchmarkRow
 import { TodaysPlanCard } from "./TodaysPlanCard";
 import { parseOcc } from "../data";
 import { Card } from "./Card";
+import { fmtExpiry } from "../lib/dates";
 import { FlaskConical, TrendingUp, TrendingDown, Bot, Swords } from "lucide-react";
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
-
-const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function money(v: number, dp = 2): string {
   if (!isFinite(v)) return "—";
   const sign = v < 0 ? "-" : "";
   return `${sign}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
-}
-
-function fmtExpiry(iso: string): string {
-  const [, m, d] = (iso || "").split("-").map(Number);
-  if (!m || !d) return iso;
-  return `${SHORT_MONTHS[m - 1]} ${d}`;
 }
 
 const num = (s: string | number | undefined) => {
@@ -133,7 +126,7 @@ function GroupRow({ g }: { g: PosGroup }) {
           <span className={`text-[length:var(--t-2xs)] font-bold ${accent}`}>{g.strategy}</span>
           <span className="text-[length:var(--t-sm)] font-bold text-white">{g.underlying}</span>
           {g.expiry && (
-            <span className="text-[length:var(--t-2xs)] text-slate-500">{fmtExpiry(g.expiry)}</span>
+            <span className="text-[length:var(--t-2xs)] text-slate-500">{fmtExpiry(g.expiry, { accept8: false, requireYear: false, requireMonthRange: false })}</span>
           )}
         </div>
         <div className="text-[length:var(--t-2xs)] text-slate-400 tabular-nums mt-0.5">

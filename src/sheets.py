@@ -12,12 +12,13 @@ Public API:
   ensure_headers(client, ...)    -> create tab + write header row if missing
   append_row(client, tab, row)   -> append a single row to a tab
   append_rows(client, tab, rows) -> append many rows in one batch call
+  upsert_tab(ws, values, ...)    -> ATOMIC full-tab overwrite (no empty window)
 """
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterable, List
+from typing import Any, Iterable, List, Sequence
 
 import gspread
 from gspread.exceptions import WorksheetNotFound
@@ -171,3 +172,72 @@ def append_rows(client: gspread.Client, tab_name: str, rows: Iterable[List[str]]
     ws = ss.worksheet(tab_name)
     ws.append_rows(rows_list, value_input_option="USER_ENTERED")
     return len(rows_list)
+
+
+def upsert_tab(
+    ws: gspread.Worksheet,
+    values: Sequence[Sequence[Any]],
+    *,
+    start: str = "A1",
+    value_input_option: str = "USER_ENTERED",
+) -> None:
+    """
+    ATOMIC full-tab overwrite. Drop-in replacement for the non-atomic idiom
+
+        ws.clear()
+        ws.update("A1", values, value_input_option=...)
+
+    The clear()+update() pair is *not* atomic: a crash, network error, or 429
+    rate-limit landing between the two calls leaves the tab EMPTY. For the
+    trigger_alerts dedup ledgers that means every alert re-fires on the next
+    run. This helper does the whole overwrite in a SINGLE write call, so the
+    tab is never observably empty.
+
+    Strategy
+    --------
+    The new `values` block is written at `start` in one `ws.update(...)`. If the
+    tab previously held MORE rows than `values` has, the stale trailing rows are
+    erased by padding `values` with blank rows (same width) up to the prior row
+    count — that padding rides along in the SAME write. No standalone clear()
+    that opens an empty window. Growing tabs just write the larger block.
+
+    `value_input_option` and `start` mirror what the existing callers passed to
+    `ws.update(...)` so semantics (RAW vs USER_ENTERED) are preserved exactly.
+
+    Notes
+    -----
+    * `values` rows may be ragged; padding rows match the width of the widest
+      written row so the trailing-cell blanking covers every previously-used
+      column.
+    * Empty `values` ([]) blanks the prior occupied range in one write (the
+      faithful atomic analogue of clear() on a tab that only ever held data).
+    """
+    new_rows: List[List[Any]] = [list(r) for r in values]
+
+    # Prior occupied row count: get_all_values() returns the populated range,
+    # so its length is the number of rows currently holding data.
+    try:
+        prior_rows = len(ws.get_all_values())
+    except Exception:
+        prior_rows = 0
+
+    # Width to use when blanking stale tail / prior data: widest row we will
+    # write, falling back to the worksheet's declared column count so we cover
+    # every previously-populated column even when shrinking to nothing.
+    width = max((len(r) for r in new_rows), default=0)
+    if width == 0:
+        width = getattr(ws, "col_count", 0) or 1
+
+    # Pad with blank rows so the single write also overwrites any stale tail
+    # left from a previously-larger tab. Only pads DOWN (shrink case); growing
+    # tabs already cover the prior range.
+    if prior_rows > len(new_rows):
+        blank = [""] * width
+        new_rows.extend([list(blank) for _ in range(prior_rows - len(new_rows))])
+
+    if not new_rows:
+        # Nothing was ever there and nothing to write — no-op (avoids an empty
+        # update payload, which the API rejects).
+        return
+
+    ws.update(new_rows, start, value_input_option=value_input_option)

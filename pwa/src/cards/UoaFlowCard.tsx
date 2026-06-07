@@ -2,20 +2,10 @@ import { useState } from "react";
 import type { UoaAlertRow } from "../data";
 import { numeric } from "../data";
 import { Card } from "./Card";
+import { fmtExpiry } from "../lib/dates";
 import { Activity, ChevronDown, ChevronUp, TrendingUp, TrendingDown } from "lucide-react";
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
-
-const SHORT_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-function fmtExpiry(s: string | undefined): string {
-  if (!s) return "";
-  const parts = s.split("-").map(Number);
-  if (parts.length !== 3) return s;
-  const [, m, d] = parts;
-  if (!m || !d || m < 1 || m > 12) return s;
-  return `${SHORT_MONTHS[m - 1]} ${d}`;
-}
 
 function fmtNotional(n: number): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
@@ -129,7 +119,7 @@ function AlertRow({ alert }: { alert: UoaAlertRow }) {
               </>
             )}
             <span>·</span>
-            <span>{fmtExpiry(alert.expiry)}</span>
+            <span>{fmtExpiry(alert.expiry, { accept8: false, strict3: true, requireYear: false })}</span>
             <span>·</span>
             <span>{dte}d</span>
             <span>·</span>

@@ -1,26 +1,8 @@
 import { useState } from "react";
 import type { HarvestScanRow } from "../data";
 import { Card } from "./Card";
+import { fmtExpiry } from "../lib/dates";
 import { Wheat, ChevronDown, ChevronUp } from "lucide-react";
-
-const SHORT_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-function fmtExpiry(s: string | undefined): string {
-  if (!s) return "—";
-  let y: number, m: number, d: number;
-  if (s.includes("-")) {
-    [y, m, d] = s.split("-").map(Number);
-  } else if (s.length === 8) {
-    // "YYYYMMDD" format from scan
-    y = Number(s.slice(0, 4));
-    m = Number(s.slice(4, 6));
-    d = Number(s.slice(6, 8));
-  } else {
-    return s;
-  }
-  if (!y || !m || !d || m < 1 || m > 12) return s;
-  return `${SHORT_MONTHS[m - 1]} ${d}`;
-}
 
 function convColor(c: number) {
   if (c >= 75) return "text-emerald-400 bg-emerald-500/15 border-emerald-500/30";
@@ -51,7 +33,7 @@ function PickRow({ row }: { row: HarvestScanRow }) {
           {conv}
         </span>
         <span className="text-[length:var(--t-xs)] text-slate-400 ml-auto">
-          ${strike.toFixed(0)}P · {fmtExpiry(row.expiry)}
+          ${strike.toFixed(0)}P · {fmtExpiry(row.expiry, { empty: "—" })}
         </span>
         <span className="text-[length:var(--t-xs)] text-emerald-400 font-mono">${credit.toFixed(2)}</span>
         {expanded ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}

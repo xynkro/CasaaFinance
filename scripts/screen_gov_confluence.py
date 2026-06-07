@@ -1141,8 +1141,7 @@ def _upsert_signals(client, signals: list[S.GovConfluenceSignalRow], logger: log
                     keep.append(r)
 
     keep.extend([s.to_row() for s in signals])
-    ws.clear()
-    ws.update("A1", keep, value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     logger.info(f"  ✓ wrote {len(signals)} signals to {S.GovConfluenceSignalRow.TAB_NAME}")
 
 

@@ -263,8 +263,7 @@ def _push_wsr(payload: dict, logger: logging.Logger, no_drive: bool = False) -> 
             continue  # drop the old row for this date+source — replace below
         keep_rows.append(r)
     keep_rows.append(row.to_row())
-    ws.clear()
-    ws.update("A1", keep_rows, value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep_rows)
     logger.info(f"✓ Sheet write: wsr_summary @ {payload['date']} (source={source})")
 
     drive_url = None

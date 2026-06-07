@@ -121,7 +121,7 @@ def main() -> int:
     keep += [r for r in (existing[1:] if existing else [])
              if r and not (r[date_i][:10] == today and len(r) > src_i and r[src_i] == "motley_fool")]
     keep += [r.to_row() for r in rows]
-    ws.clear(); ws.update("A1", keep, value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     print(f"✓ Wrote {len(rows)} rows to curated_picks")
 
     # Edge-triggered MF pings (new-rec / overlay) by diffing prior vs new rows.

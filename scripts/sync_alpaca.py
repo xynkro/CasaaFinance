@@ -97,8 +97,7 @@ def sync(dry: bool = False) -> dict:
             keep.append(r)
     for pr in pos_rows:
         keep.append(pr.to_row())
-    ws.clear()
-    ws.update("A1", keep, value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     print(f"OK positions_alpaca: {len(pos_rows)} positions")
 
     return {"ok": True, "positions": len(pos_rows)}

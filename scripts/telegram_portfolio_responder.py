@@ -168,8 +168,7 @@ def save_offset(client, offset: int, logger: logging.Logger) -> None:
     keep.append([
         "last", str(offset), S.now_sgt_iso(),
     ])
-    ws.clear()
-    ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     logger.info(f"✓ telegram_offset saved: {offset}")
 
 

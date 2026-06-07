@@ -572,8 +572,7 @@ def upsert_macro_alert_state(
         keep.append(r)
     keep.extend(r.to_row() for r in new_rows)
 
-    ws.clear()
-    ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     logger.info(f"✓ macro_alerts_state upserted: {len(new_rows)} (pruned {pruned} >7d old)")
     return len(new_rows)
 
@@ -596,8 +595,7 @@ def upsert_alert_state(client, rows: list[S.TriggerAlertRow], logger: logging.Lo
         keep.append(r)
     keep.extend(r.to_row() for r in rows)
 
-    ws.clear()
-    ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     logger.info(f"✓ trigger_alerts upserted: {len(rows)}")
     return len(rows)
 
@@ -821,8 +819,7 @@ def main() -> int:
             keep += [r for r in (existing[1:] if existing else []) if r and r[0][:10] != today]
             keep.append(S.MacroLeanRow(date=today, net_lean=net_lean, summary=summary,
                                        updated_at=now_iso).to_row())
-            ws.clear()
-            ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+            sh.upsert_tab(ws, keep)
             logger.info(f"  ✓ macro_lean: {net_lean} ({summary})")
         except Exception as e:
             logger.warning(f"  ✗ macro_lean write failed: {e}")

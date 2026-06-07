@@ -262,9 +262,8 @@ def upsert_live_prices(client, rows_by_ticker: dict[str, dict],
         )
         keep_rows.append(row.to_row())
 
-    # Single bulk write — clear + update is faster than many individual updates.
-    ws.clear()
-    ws.update(values=keep_rows, range_name="A1", value_input_option="USER_ENTERED")
+    # Single atomic bulk write — no clear() window that could leave the tab empty.
+    sh.upsert_tab(ws, keep_rows)
     logger.info(f"✓ live_prices upserted: {len(rows_by_ticker)} tickers (kept {len(keep_rows)-1-len(rows_by_ticker)} unchanged)")
     return len(rows_by_ticker)
 

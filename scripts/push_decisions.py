@@ -229,8 +229,7 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
         logger.info(f"[DRY] would upsert {len(new_rows)} rows (dropped {dropped} stale)")
         return {"ok": True, "added": len(new_rows), "dropped": dropped, "dry": True}
 
-    ws.clear()
-    ws.update("A1", keep_rows, value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep_rows)
     logger.info(f"✓ Upserted {len(new_rows)} decision rows (dropped {dropped} stale)")
     return {"ok": True, "added": len(new_rows), "dropped": dropped}
 

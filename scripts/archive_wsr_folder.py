@@ -157,8 +157,7 @@ def archive_file(source: Path, logger: logging.Logger, force: bool = False) -> b
                         continue
                     keep_rows.append(r)
                 keep_rows.append(wsr_row.to_row())
-                ws_w.clear()
-                ws_w.update("A1", keep_rows, value_input_option="USER_ENTERED")
+                sh.upsert_tab(ws_w, keep_rows)
 
             if is_wsr_lite_file(source):
                 parsed = parse_wsr_lite_md(source, date)

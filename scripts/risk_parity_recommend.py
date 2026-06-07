@@ -759,8 +759,7 @@ def upsert_decisions(
         keep_rows.append(r)
     keep_rows.extend(new_rows)
 
-    ws.clear()
-    ws.update(values=keep_rows, range_name="A1", value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep_rows)
     return {"added": len(new_rows), "dropped": dropped}
 
 

@@ -34,7 +34,7 @@ import {
 import { evaluateTrigger } from "../data";
 import { DecisionActionRow } from "../cards/DecisionActionRow";
 import { StockDetail } from "../components/StockDetail";
-import { daysAgo } from "../lib/dates";
+import { daysAgo, fmtExpiry } from "../lib/dates";
 import {
   Target,
   Clock,
@@ -79,14 +79,6 @@ function fmtPct(v: string | number | undefined): string {
   const n = Number(v);
   if (isNaN(n)) return "—";
   return `${n.toFixed(1)}%`;
-}
-
-function fmtExpiry(expiry: string | undefined): string {
-  if (!expiry) return "—";
-  if (expiry.length === 8 && /^\d+$/.test(expiry)) {
-    return `${expiry.slice(4, 6)}/${expiry.slice(6, 8)}`;
-  }
-  return expiry;
 }
 
 const STATUS_CONFIG: Record<string, {
@@ -244,7 +236,7 @@ function OptionsSpecRow({ decision }: { decision: DecisionRow }) {
           <span className="text-[length:var(--t-xs)] font-semibold text-slate-200 tabular-nums">
             ${strike.toFixed(strike < 10 ? 1 : 0)}{decision.right}
           </span>
-          <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExpiry(decision.expiry)}</span>
+          <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExpiry(decision.expiry, { style: "slash", empty: "—" })}</span>
         </div>
         <span className="text-[length:var(--t-2xs)] font-semibold uppercase tracking-wider" style={{ color: "#818cf8" }}>
           {decision.strategy}

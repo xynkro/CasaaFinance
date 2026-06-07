@@ -141,8 +141,7 @@ def process_drive_file(drive_svc, file_meta: dict, sheet_client, ss, logger: log
         keep_rows.append(r)
     new_row = S.WsrSummaryRow(**parsed).to_row()
     keep_rows.append(new_row)
-    ws.clear()
-    ws.update("A1", keep_rows, value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep_rows)
     logger.info(f"✓ wsr_summary updated: {name} ({src_val})")
 
     # Append to wsr_archive

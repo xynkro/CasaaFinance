@@ -60,10 +60,7 @@ def dedup_tab(ss, tab_name: str, value_col: int | None = None):
 
     kept = sorted(best.items(), key=lambda x: x[0])
     new_data = [header] + [row for _, row in kept]
-    ncols = len(header)
-    col_letter = chr(ord("A") + ncols - 1) if ncols <= 26 else "Z"
-    ws.clear()
-    ws.update(f"A1:{col_letter}{len(new_data)}", new_data, value_input_option="RAW")
+    sh.upsert_tab(ws, new_data, value_input_option="RAW")
     print(f"    {len(rows)} → {keep_count} rows (removed {remove_count})")
 
 

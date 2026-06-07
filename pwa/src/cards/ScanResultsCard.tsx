@@ -1,25 +1,8 @@
 import { useState } from "react";
 import type { ScanResultRow } from "../data";
 import { Card } from "./Card";
+import { fmtExpiry } from "../lib/dates";
 import { TrendingUp, ChevronDown, ChevronUp } from "lucide-react";
-
-const SHORT_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-function fmtExpiry(s: string | undefined): string {
-  if (!s) return "";
-  let y: number, m: number, d: number;
-  if (s.includes("-")) {
-    [y, m, d] = s.split("-").map(Number);
-  } else if (s.length === 8) {
-    y = Number(s.slice(0, 4));
-    m = Number(s.slice(4, 6));
-    d = Number(s.slice(6, 8));
-  } else {
-    return s;
-  }
-  if (!y || !m || !d || m < 1 || m > 12) return s;
-  return `${SHORT_MONTHS[m - 1]} ${d}`;
-}
 
 /** Strategy-specific contract label: "$190P" for puts, "$200C" for calls, "$190P/$185P" for spreads. */
 function contractLabel(row: ScanResultRow): string {

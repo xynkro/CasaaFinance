@@ -179,8 +179,7 @@ def upsert_consensus(client, rows: list[S.AnalystConsensusRow], logger: logging.
         keep.append(r)
     keep.extend(r.to_row() for r in rows)
 
-    ws.clear()
-    ws.update(values=keep, range_name="A1", value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     logger.info(f"✓ analyst consensus upserted: {len(rows)} (dropped {dropped} stale)")
     return len(rows)
 

@@ -2200,8 +2200,7 @@ def main() -> int:
         keep += [r for r in existing[1:]
                  if r and r[0][:10] != today_iso and r[0][:10] >= cutoff]
         keep += harvest_rows
-        ws.clear()
-        ws.update("A1", keep, value_input_option="USER_ENTERED")
+        sh.upsert_tab(ws, keep)
         logger.info(f"✓ harvest_scan: {len(harvest_rows)} fresh rows "
                     f"(pruned stale, kept {len(keep) - 1 - len(harvest_rows)} history)")
     except Exception as e:

@@ -178,8 +178,7 @@ def main() -> int:
     keep = [existing[0]] if existing else [S.GexRegimeRow.HEADERS]
     keep += [r for r in (existing[1:] if existing else []) if r and r[0][:10] != today]
     keep += [r.to_row() for r in rows]
-    ws.clear()
-    ws.update("A1", keep, value_input_option="USER_ENTERED")
+    sh.upsert_tab(ws, keep)
     print(f"\n✓ Wrote {len(rows)} rows to gex_regime")
     return 0
 
