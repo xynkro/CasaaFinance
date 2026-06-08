@@ -39,6 +39,11 @@ PortfolioGrabs/
 *.db
 *.rvf
 *.rvf.lock
+# Quant-audit deliverables — contain the full ledger (NLV/positions/account ids).
+# Repo is PUBLIC, so these stay LOCAL-ONLY. Open them from docs/ on your machine.
+docs/CasaaFinance-Quant-Audit.pptx
+docs/2026-06-08-quant-audit.md
+docs/2026-06-08-quant-audit-findings.json
 # Office temp lock files (e.g. from generating the mindmap deck)
 ~$*
 # stray large media in repo root
