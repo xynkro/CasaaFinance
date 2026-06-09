@@ -169,10 +169,19 @@ export function HarvestContent({
             persistKey="casaa_harvest_strategy_tab"
           />
         </div>
-      ) : (
-        /* Fallback: no scan_results, show harvest picks only */
+      ) : picks.length > 0 ? (
+        /* Fallback: no scan_results strategies, but we have harvest CSP picks. */
         <div className={`fade-up ${activeHarvests.length > 0 ? "fade-up-4" : "fade-up-2"} mt-3`}>
           <HarvestPicksCard picks={picks} />
+        </div>
+      ) : (
+        /* Nothing to show — say so explicitly rather than render blank. */
+        <div className="fade-up fade-up-2 mt-8 text-center px-6">
+          <p className="text-[length:var(--t-sm)] text-slate-400 font-medium">No scan candidates right now</p>
+          <p className="text-[length:var(--t-2xs)] text-slate-600 mt-1.5 leading-relaxed">
+            The last scan found nothing to recommend, or the data hasn’t synced yet.
+            Pull to refresh, or re-run the Options scan from Settings.
+          </p>
         </div>
       )}
     </>

@@ -66,7 +66,12 @@ function latest<T extends { date: string }>(rows: T[]): T | null {
 function latestGroup<T extends { date: string }>(rows: T[]): T[] {
   const l = latest(rows);
   if (!l) return [];
-  return rows.filter((r) => r.date === l.date);
+  // Group by DAY, not the exact date string. Multi-row tabs (scan_results) carry
+  // a per-row HHMMSS audit suffix, so an exact-match would keep only the rows
+  // written in the final second of the run — blanking most of a scan when its
+  // rows straddle a second boundary. Mirrors dedup()'s slice(0,10) normalization.
+  const day = l.date.slice(0, 10);
+  return rows.filter((r) => r.date.slice(0, 10) === day);
 }
 
 function sortByDate<T extends { date: string }>(rows: T[]): T[] {
