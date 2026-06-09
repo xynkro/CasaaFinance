@@ -99,15 +99,39 @@ export function onUser(cb: (user: User | null) => void): () => void {
  * as the existing parsers expect. A missing base doc returns [] (the same
  * empty-tab behaviour the gviz path tolerates via its per-tab catches).
  */
+/**
+ * Coerce every cell of a mirrored row back to a STRING.
+ *
+ * The gviz CSV path (Papa.parse) hands the app every field as a string, and the
+ * whole PWA is built on that contract (e.g. `expiry.slice(4,6)`, `Number(strike)`).
+ * Firestore, however, gets its rows from the backend's `get_all_records()`, which
+ * types numeric cells as numbers and checkboxes as booleans — so `expiry` arrives
+ * as `20260821` (number) and `(20260821).slice(...)` throws "slice is not a
+ * function", white-screening the page. Re-stringifying here restores the gviz
+ * contract for every consumer in one place. Booleans → "TRUE"/"" (gviz checkbox
+ * style); null/undefined → "".
+ */
+function coerceRowToStrings(row: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k in row) {
+    const v = row[k];
+    out[k] =
+      v == null ? "" : typeof v === "boolean" ? (v ? "TRUE" : "") : String(v);
+  }
+  return out;
+}
+
 export async function readFirestoreTab<T>(name: string): Promise<T[]> {
   const baseSnap = await getDoc(doc(db, "tabs", name));
   if (!baseSnap.exists()) return [];
 
   const baseData = baseSnap.data() as {
-    rows?: T[];
+    rows?: Record<string, unknown>[];
     chunks?: number;
   };
-  const rows: T[] = Array.isArray(baseData.rows) ? [...baseData.rows] : [];
+  const rows: Record<string, unknown>[] = Array.isArray(baseData.rows)
+    ? [...baseData.rows]
+    : [];
 
   const chunks = Number(baseData.chunks) || 0;
   if (chunks > 0) {
@@ -120,12 +144,12 @@ export async function readFirestoreTab<T>(name: string): Promise<T[]> {
     );
     for (const snap of chunkSnaps) {
       if (!snap.exists()) continue;
-      const part = snap.data() as { rows?: T[] };
+      const part = snap.data() as { rows?: Record<string, unknown>[] };
       if (Array.isArray(part.rows)) rows.push(...part.rows);
     }
   }
 
-  return rows;
+  return rows.map(coerceRowToStrings) as T[];
 }
 
 /**
