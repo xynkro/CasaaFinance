@@ -2213,7 +2213,9 @@ def main() -> int:
             vix=float(macro.get("vix", 0) or 0),
         )
         _meta_ws = sh.ensure_headers(client, S.ScanMetaRow.TAB_NAME, S.ScanMetaRow.HEADERS)
-        sh.upsert_tab(_meta_ws, [S.ScanMetaRow.HEADERS, _meta.to_row()])
+        # RAW so Sheets stores run_at as the literal ISO string instead of
+        # reinterpreting it as a datetime and reformatting ("2026-06-09 7:02:15").
+        sh.upsert_tab(_meta_ws, [S.ScanMetaRow.HEADERS, _meta.to_row()], value_input_option="RAW")
         logger.info(f"scan_meta: {_meta.status} — {_meta.candidates} candidates @ {_meta.run_at}")
     except Exception as e:  # noqa: BLE001 — heartbeat is non-critical
         logger.warning(f"scan_meta heartbeat failed (non-fatal): {e}")

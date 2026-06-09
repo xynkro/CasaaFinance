@@ -2,13 +2,20 @@ import type { ScanMetaRow, ScanResultRow } from "../data";
 import { Card } from "./Card";
 import { RefreshCw, AlertTriangle } from "lucide-react";
 
-/** run_at is written naive-UTC by the CI scanner ("…T02:56:51"); treat a
- *  suffix-less stamp as UTC so the relative time is correct on the user's
- *  device. */
+/** run_at is written naive-UTC by the CI scanner. It arrives either as ISO
+ *  ("…T07:02:15") or, when Google Sheets reinterprets it, space-separated with
+ *  an unpadded hour ("2026-06-09 7:02:15"). Normalise both to a Z-suffixed ISO
+ *  so the relative time is correct on the user's device. */
+function toUtcMs(s: string): number {
+  if (!s) return NaN;
+  let t = s.trim().replace(" ", "T").replace(/T(\d):/, "T0$1:");
+  if (!/[Z+]/.test(t)) t += "Z";
+  return Date.parse(t);
+}
+
 function relTime(iso: string): string {
-  if (!iso) return "";
-  const ms = Date.parse(/[Z+]/.test(iso) ? iso : `${iso}Z`);
-  if (Number.isNaN(ms)) return iso.slice(0, 16).replace("T", " ");
+  const ms = toUtcMs(iso);
+  if (Number.isNaN(ms)) return (iso || "").slice(0, 16).replace("T", " ");
   const min = Math.max(0, Math.round((Date.now() - ms) / 60000));
   if (min < 1) return "just now";
   if (min < 60) return `${min}m ago`;
