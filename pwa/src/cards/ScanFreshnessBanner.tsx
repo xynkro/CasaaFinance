@@ -42,10 +42,12 @@ export function ScanFreshnessBanner({
     const d = dayOf(r.date);
     if (d > dataDay) dataDay = d;
   }
-  const candidates = Number(scanMeta.candidates) || 0;
+  const lastRunCount = Number(scanMeta.candidates) || 0;  // last run's count (may be a 0-run)
+  const shownCount = scanResults.length;                  // picks actually on screen
   const when = relTime(scanMeta.run_at);
   // Stale ⇒ a scan ran AFTER the data on screen was last written: that run
-  // produced nothing and left the prior candidates frozen.
+  // produced nothing and left the prior candidates frozen. Same-day refreshes
+  // and a same-day 0-run never trip this (the data is still today's).
   const frozen = !!dataDay && !!runDay && dataDay < runDay;
 
   if (frozen) {
@@ -55,12 +57,12 @@ export function ScanFreshnessBanner({
           <AlertTriangle size={15} className="text-amber-400 mt-0.5 shrink-0" />
           <div className="min-w-0">
             <p className="text-[length:var(--t-xs)] font-semibold text-amber-300">
-              Showing scan data from {dataDay} — likely stale
+              Showing {shownCount} pick{shownCount === 1 ? "" : "s"} from {dataDay} — likely stale
             </p>
             <p className="text-[length:var(--t-2xs)] text-slate-400 mt-0.5 leading-relaxed">
-              Last scan ran {when} and found {candidates} candidate{candidates === 1 ? "" : "s"}
+              Last scan ran {when} and found {lastRunCount}
               {scanMeta.status === "HALTED" ? " (macro HALT)" : " (likely a yfinance hiccup)"} — so
-              the picks below are from the last good run. Re-run the Options scan to refresh.
+              the candidates below are from the last good run. Re-run the Options scan to refresh.
             </p>
           </div>
         </div>
@@ -74,9 +76,14 @@ export function ScanFreshnessBanner({
         <RefreshCw size={13} className="text-emerald-400/80 shrink-0" />
         <span className="text-[length:var(--t-2xs)] text-slate-400">
           Scan {when} ·{" "}
-          <span className="text-slate-300 font-semibold tabular-nums">{candidates}</span>{" "}
-          candidate{candidates === 1 ? "" : "s"}
-          {candidates === 0 && scanMeta.status === "NO_CANDIDATES" ? " — no setups this run" : ""}
+          {shownCount > 0 ? (
+            <>
+              <span className="text-slate-300 font-semibold tabular-nums">{shownCount}</span>{" "}
+              candidate{shownCount === 1 ? "" : "s"}
+            </>
+          ) : (
+            <span className="text-slate-300">no candidates this run</span>
+          )}
           {scanMeta.status === "HALTED" ? " · macro HALT" : ""}
         </span>
       </div>
