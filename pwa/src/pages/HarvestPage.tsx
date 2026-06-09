@@ -95,10 +95,11 @@ export function HarvestContent({
   options: OptionRow[];
   loading: boolean;
 }) {
-  if (loading && !harvestScan.length && !scanResults.length && !options.length) {
-    return <div className="py-8 text-center text-slate-500 text-[length:var(--t-sm)]">Loading…</div>;
-  }
-
+  // ⚠️ Rules of Hooks: every hook below MUST run on every render. The loading
+  // early-return lives AFTER all hooks — putting it before them (as it was) made
+  // React render 0 hooks while loading then 2 hooks once data arrived, throwing
+  // "rendered more hooks than during the previous render" and white-screening the
+  // entire app (no error boundary). Hooks first, conditional returns last.
   const picks = harvestScan.filter((r) => r.strategy !== "HALTED");
   const activeHarvests = matchHarvestPositions(options, harvestScan);
 
@@ -125,6 +126,10 @@ export function HarvestContent({
   }, [byStrategy]);
 
   const hasScanData = strategyTabs.length > 0;
+
+  if (loading && !harvestScan.length && !scanResults.length && !options.length) {
+    return <div className="py-8 text-center text-slate-500 text-[length:var(--t-sm)]">Loading…</div>;
+  }
 
   return (
     <>

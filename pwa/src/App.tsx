@@ -5,6 +5,7 @@ import { PinGate } from "./PinGate";
 import { usePinAuth } from "./lib/usePinAuth";
 import { useSettings } from "./settings";
 import { LoadingState, ErrorState, NotAuthorized } from "./components/AsyncStates";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { TabBar } from "./components/TabBar";
 import { PullToRefresh } from "./components/PullToRefresh";
 import { HomePage } from "./pages/HomePage";
@@ -308,7 +309,10 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
               The in-page fade-up cards still cascade on top. Reduced-motion
               strips the animation (see index.css). */}
           <div key={tab} className="page-enter">
-            {renderPage()}
+            {/* Per-tab boundary: a crash in one page shows a recoverable
+                message instead of white-screening the app + killing the tab
+                bar. Keyed by `tab` (parent div), so it resets on navigation. */}
+            <ErrorBoundary>{renderPage()}</ErrorBoundary>
           </div>
         </PullToRefresh>
       </main>
