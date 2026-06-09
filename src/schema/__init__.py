@@ -78,6 +78,8 @@ from .options import (
 from .scan import (
     TechnicalScoreRow,
     ScanResultRow,
+    ScanMetaRow,
+    scan_status,
     ScreenCandidateRow,
     TvSignalRow,
 )
@@ -165,6 +167,8 @@ __all__ = [
     # scan
     "TechnicalScoreRow",
     "ScanResultRow",
+    "ScanMetaRow",
+    "scan_status",
     "ScreenCandidateRow",
     "TvSignalRow",
     # macro

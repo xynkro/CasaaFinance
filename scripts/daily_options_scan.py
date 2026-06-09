@@ -2199,6 +2199,25 @@ def main() -> int:
         logger.info("[DRY] Would write to scan_results + harvest_scan")
         return 0
 
+    # Freshness heartbeat — overwrite the single-row scan_meta tab on EVERY real
+    # run, INCLUDING the zero-candidate / data-failure runs that skip the
+    # scan_results write below. A flaky-yfinance morning otherwise silently
+    # freezes scan_results at the prior good run with no signal; pairing run_at
+    # with the date stamped on the scan_results rows lets the PWA flag that the
+    # candidates on screen are stale. Best-effort: never abort the scan over it.
+    try:
+        _meta = S.ScanMetaRow.build(
+            run_at=datetime.now().isoformat(timespec="seconds"),
+            candidates=len(all_candidates),
+            regime=str(macro.get("regime", "")),
+            vix=float(macro.get("vix", 0) or 0),
+        )
+        _meta_ws = sh.ensure_headers(client, S.ScanMetaRow.TAB_NAME, S.ScanMetaRow.HEADERS)
+        sh.upsert_tab(_meta_ws, [S.ScanMetaRow.HEADERS, _meta.to_row()])
+        logger.info(f"scan_meta: {_meta.status} — {_meta.candidates} candidates @ {_meta.run_at}")
+    except Exception as e:  # noqa: BLE001 — heartbeat is non-critical
+        logger.warning(f"scan_meta heartbeat failed (non-fatal): {e}")
+
     if not all_candidates:
         logger.warning("No candidates met threshold — sheet not updated")
         return 0

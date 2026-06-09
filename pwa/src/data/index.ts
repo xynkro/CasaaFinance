@@ -58,6 +58,7 @@ export type {
   GovConfluenceRow,
   DailyPlanRow,
   MacroLeanRow,
+  ScanMetaRow,
   CuratedPickRow,
   GexRegimeRow,
   AlpacaSnapshotRow,

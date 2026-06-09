@@ -152,6 +152,43 @@ class ScanResultRow:
         ]
 
 
+def scan_status(candidates: int, regime: str) -> str:
+    """Classify a scan run for the freshness marker: HALTED when macro stood the
+    book down, OK when the run produced candidates, NO_CANDIDATES when a clean
+    run found none (the case that silently freezes scan_results)."""
+    if (regime or "").upper() == "HALTED":
+        return "HALTED"
+    return "OK" if candidates > 0 else "NO_CANDIDATES"
+
+
+@dataclass
+class ScanMetaRow:
+    """One-row heartbeat written by daily_options_scan on EVERY real run —
+    including zero-candidate / data-failure runs that skip the scan_results
+    write. Lets the PWA distinguish a fresh-but-empty scan from frozen stale
+    data: when `run_at` is newer than the date stamped on the scan_results
+    rows, the candidates on screen are stale (a recent run found nothing and
+    left the prior data in place). Overwritten in place each run via upsert."""
+    TAB_NAME = "scan_meta"
+    HEADERS = ["run_at", "candidates", "regime", "vix", "status"]
+
+    run_at: str        # ISO timestamp of this run (UTC under CI)
+    candidates: int    # candidates found this run (0 on a bad / halt run)
+    regime: str        # STANDARD | CAUTION | HALTED
+    vix: float
+    status: str        # OK | NO_CANDIDATES | HALTED
+
+    @classmethod
+    def build(cls, *, run_at: str, candidates: int, regime: str, vix: float) -> "ScanMetaRow":
+        return cls(run_at=run_at, candidates=candidates, regime=regime or "",
+                   vix=vix, status=scan_status(candidates, regime))
+
+    def to_row(self, audit: bool = False) -> List[str]:
+        # Single-row tab — no audit ts suffix (run_at is itself the timestamp).
+        return [self.run_at, str(self.candidates), self.regime,
+                _num(self.vix, 1), self.status]
+
+
 @dataclass
 class ScreenCandidateRow:
     """

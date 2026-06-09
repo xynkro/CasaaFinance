@@ -54,6 +54,7 @@ import type {
   GexRegimeRow,
   DailyPlanRow,
   MacroLeanRow,
+  ScanMetaRow,
   CuratedPickRow,
 } from "./types";
 
@@ -135,6 +136,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       dailyPlanRows,
       macroLeanRows,
       curatedPickRows,
+      scanMetaRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -156,6 +158,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTabByName<DailyPlanRow>("daily_plan").catch(() => [] as DailyPlanRow[]),
       fetchTabByName<MacroLeanRow>("macro_lean").catch(() => [] as MacroLeanRow[]),
       fetchTabByName<CuratedPickRow>("curated_picks").catch(() => [] as CuratedPickRow[]),
+      fetchTabByName<ScanMetaRow>("scan_meta").catch(() => [] as ScanMetaRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -252,6 +255,9 @@ export async function fetchDashboard(): Promise<DashboardData> {
       gexRegime: latestGroup(gexRegimeRows),
       dailyPlan: latestGroup(dailyPlanRows),
       macroLean: latest(macroLeanRows),
+      // Single-row heartbeat (upsert-overwritten each run) — no date field to
+      // sort on; take the last row written.
+      scanMeta: scanMetaRows[scanMetaRows.length - 1] ?? null,
       ...(() => {
         const cp = latestGroup(curatedPickRows);
         return {
@@ -297,6 +303,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       gexRegime: [],
       dailyPlan: [],
       macroLean: null,
+      scanMeta: null,
       curatedPicks: [], mfWatchlist: [], mfOverlay: [], mfReference: [],
       error: String(e),
     };

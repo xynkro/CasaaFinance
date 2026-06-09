@@ -148,6 +148,7 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
             uoaAlerts={data?.uoaAlerts ?? []}
             gexRegime={data?.gexRegime ?? []}
             macroLean={data?.macroLean ?? null}
+            scanMeta={data?.scanMeta ?? null}
             mfOverlay={data?.mfOverlay ?? []}
             loading={loading && !data}
           />

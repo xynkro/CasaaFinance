@@ -89,6 +89,7 @@ PWA_TABS: list[str] = [
     "iv_surface_scan",
     "uoa_alerts",
     "scan_results",
+    "scan_meta",
     "paper_benchmark",
     "gex_regime",
     "daily_plan",

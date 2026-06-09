@@ -11,12 +11,14 @@ import type {
   UoaAlertRow,
   GexRegimeRow,
   MacroLeanRow,
+  ScanMetaRow,
   CuratedPickRow,
 } from "../data";
 import { Card } from "../cards/Card";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { GexRegimeBanner } from "../cards/GexRegimeBanner";
 import { MacroLeanBanner } from "../cards/MacroLeanBanner";
+import { ScanFreshnessBanner } from "../cards/ScanFreshnessBanner";
 import { WheelCard } from "../cards/WheelCard";
 import { WheelContinuationCard } from "../cards/WheelContinuationCard";
 import { UoaFlowCard } from "../cards/UoaFlowCard";
@@ -87,6 +89,7 @@ export function OptionsPage({
   uoaAlerts,
   gexRegime,
   macroLean,
+  scanMeta,
   mfOverlay,
   loading,
 }: {
@@ -102,6 +105,7 @@ export function OptionsPage({
   uoaAlerts: UoaAlertRow[];
   gexRegime: GexRegimeRow[];
   macroLean?: MacroLeanRow | null;
+  scanMeta?: ScanMetaRow | null;
   mfOverlay?: CuratedPickRow[];
   loading: boolean;
 }) {
@@ -133,6 +137,14 @@ export function OptionsPage({
 
   return (
     <div className="flex flex-col px-4 pb-4">
+      {/* Last-scan freshness — quiet when current, amber when a recent run left
+          the candidates frozen (the stale-data case). */}
+      {scanMeta && (
+        <div className="fade-up fade-up-1 mb-3">
+          <ScanFreshnessBanner scanMeta={scanMeta} scanResults={scanResults} />
+        </div>
+      )}
+
       {/* Pre-market dealer-gamma regime — the premium-selling risk gate */}
       {gexRegime.length > 0 && (
         <div className="fade-up fade-up-1 mb-3">

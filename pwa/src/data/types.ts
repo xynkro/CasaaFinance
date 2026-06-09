@@ -455,6 +455,18 @@ export interface MacroLeanRow {
   updated_at?: string;
 }
 
+// One-row heartbeat from daily_options_scan, written on EVERY run (even a
+// zero-candidate / data-failure run). `run_at` newer than the scan_results
+// date means the candidates on screen are stale — a recent scan found nothing
+// and left the prior data frozen. Drives the Options freshness banner.
+export interface ScanMetaRow {
+  run_at: string;        // ISO timestamp of the last scan run (UTC)
+  candidates: string;    // count found that run (sheet values are strings)
+  regime?: string;       // STANDARD | CAUTION | HALTED
+  vix?: string;
+  status?: string;       // OK | NO_CANDIDATES | HALTED
+}
+
 // One curated pick from an external human-vetted source (Motley Fool Stock
 // Advisor today). Read in-session via Chrome MCP, classified into a role, fed
 // to the engine as INPUT — never an auto-signal. Every MF surface in the PWA
@@ -832,6 +844,7 @@ export interface DashboardData {
   gexRegime: GexRegimeRow[];             // dealer gamma regime per index (latest day: SPY, QQQ)
   dailyPlan: DailyPlanRow[];             // the unified plan the auto-trader executes (latest day)
   macroLean: MacroLeanRow | null;        // today's macro-surprise lean (tilts the plan sizing)
+  scanMeta: ScanMetaRow | null;          // last scan run heartbeat (freshness — stale-data guard)
   curatedPicks: CuratedPickRow[];        // raw curated picks, latest day (Motley Fool today)
   mfWatchlist: CuratedPickRow[];         // role=watchlist — research, not a buy
   mfOverlay: CuratedPickRow[];           // role=overlay — CSP-entry targets (suggestion-only)

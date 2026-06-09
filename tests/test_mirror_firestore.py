@@ -290,10 +290,11 @@ def test_main_all_failed_exit_two(monkeypatch):
     assert mir.main([]) == 2
 
 
-def test_pwa_tabs_is_the_39_tab_contract():
-    assert len(mir.PWA_TABS) == 39
-    assert len(set(mir.PWA_TABS)) == 39            # no dupes
+def test_pwa_tabs_is_the_40_tab_contract():
+    assert len(mir.PWA_TABS) == 40
+    assert len(set(mir.PWA_TABS)) == 40            # no dupes
     # spot-check both ends + a by-name-only tab
     assert mir.PWA_TABS[0] == "daily_brief_latest"
     assert mir.PWA_TABS[-1] == "curated_picks"
     assert "uoa_alerts" in mir.PWA_TABS
+    assert "scan_meta" in mir.PWA_TABS         # freshness heartbeat
