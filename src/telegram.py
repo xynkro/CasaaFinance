@@ -367,6 +367,88 @@ def ping_trigger_close(
     )
 
 
+def ping_held_news(
+    ticker: str,
+    headline: str,
+    sentiment_score: float,
+    sentiment_label: str = "",
+    source: str = "",
+    url: str = "",
+) -> dict:
+    """
+    Held-name news alert — strong-sentiment fresh headline on a ticker
+    currently HELD (positions tabs). Fired by scripts/trigger_alerts.py
+    from the news_sentiment tab (zero extra Finnhub quota). Before this
+    lane existed, held-name news reached no push channel at all — the
+    tab's only consumer was the PWA mirror.
+
+    Dedup by headline hash in macro_alerts_state; capped per run.
+    """
+    import html
+    body = _strip_source_suffix((headline or "").strip(), source)
+    if len(body) > 200:
+        body = body[:197] + "..."
+    dot = "🔴" if sentiment_score < 0 else "🟢"
+    label_str = f" ({html.escape(sentiment_label)})" if sentiment_label else ""
+    lines = [
+        f"{dot} HELD NEWS · ${html.escape(ticker)} · sentiment {sentiment_score:+.2f}{label_str}",
+        html.escape(body),
+    ]
+    if source and url:
+        lines.append(f'🔗 <a href="{html.escape(url, quote=True)}">{html.escape(source)}</a>')
+    elif source:
+        lines.append(f"source: {html.escape(source)}")
+    elif url:
+        lines.append(html.escape(url))
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=MULTI_DAY_SWING_TOPIC,
+        disable_web_page_preview=True,
+    )
+
+
+def ping_market_pressure(
+    severity: str,                  # "WARN" | "ALERT"
+    spy_pct: float | None,
+    qqq_pct: float | None,
+    worst_held: list[tuple[str, float]] | None = None,
+    posture: str = "",
+) -> dict:
+    """
+    Index-level "time to get out" tape alert. Fired by
+    scripts/trigger_alerts.py when SPY or QQQ day change crosses
+    -1.25% (WARN) / -2.0% (ALERT). One page per severity per day
+    (dedup in macro_alerts_state).
+
+    Args:
+        severity: "WARN" | "ALERT"
+        spy_pct / qqq_pct: day change % (None when missing from feed)
+        worst_held: [(ticker, day_change_pct), ...] worst-first — the
+            text mini-heatmap of held names under pressure
+        posture: latest exposure_posture recommendation, omitted if empty
+    """
+    icon = "🔴" if severity == "ALERT" else "🟠"
+
+    def _idx(name: str, v: float | None) -> str:
+        return f"{name} {v:+.1f}%" if v is not None else f"{name} ?"
+
+    parts = [
+        f"{icon} MARKET PRESSURE ({severity}): {_idx('SPY', spy_pct)} {_idx('QQQ', qqq_pct)}"
+    ]
+    if worst_held:
+        parts.append(
+            "worst held: " + ", ".join(f"{t} {c:+.1f}%" for t, c in worst_held[:5])
+        )
+    if posture:
+        parts.append(f"posture: {posture}")
+    return send(
+        " | ".join(parts),
+        parse_mode="none",
+        message_thread_id=MULTI_DAY_SWING_TOPIC,
+    )
+
+
 # ────────────────────────────────────────────────────────────────────
 # Macro Financial News topic — shared blackout / hot-news lane
 # ────────────────────────────────────────────────────────────────────
@@ -1092,6 +1174,52 @@ def ping_options_defense(
         parse_mode="HTML",
         message_thread_id=OPTIONS_INTEL_TOPIC,
         disable_web_page_preview=True,
+    )
+
+
+def ping_spread_defense(
+    ticker: str,
+    right: str,            # "P" | "C"
+    strike: float,
+    expiry: str,           # "YYYYMMDD"
+    dte: int,
+    underlying: float,
+    level: str,            # "approach" | "breach"
+    label: str = "",       # "PCS 180/190" | "CCS 350/360" | "CSP" | "CC"
+    account: str = "",
+) -> dict:
+    """
+    Short-strike proximity alert for a HELD option leg. Fired by
+    scripts/trigger_alerts.py when the underlying trades into the
+    approach band (puts: ≤ strike×1.03, calls: ≥ strike×0.97) or
+    through the short strike itself (breach). Each level pages once
+    per position per day (dedup in macro_alerts_state).
+
+    Intraday option marks aren't in the 5-min feed, so the message
+    can't show mark-vs-credit — it says so and points at the action.
+    """
+    exp = str(expiry)
+    if len(exp) == 8:
+        exp = f"{exp[4:6]}-{exp[6:]}"
+    r = (right or "").upper()[:1]
+    if level == "breach":
+        head = "🛡️🔴 DEFENSE BREACH"
+        rel = f"{underlying:.2f} {'≤' if r == 'P' else '≥'} short {strike:g}{r}"
+        tail = "Short strike breached — roll/close now."
+    else:
+        head = "🛡️ DEFENSE"
+        if r == "P":
+            rel = f"{underlying:.2f} ≤ short {strike:g}P ×1.03"
+        else:
+            rel = f"{underlying:.2f} ≥ short {strike:g}C ×0.97"
+        tail = "Mark vs credit unknown — review/roll/close."
+    ctx = f"{label} exp {exp}, {dte} DTE" if label else f"exp {exp}, {dte} DTE"
+    if account:
+        ctx += f", {account}"
+    return send(
+        f"{head}: {ticker} {rel} ({ctx}). {tail}",
+        parse_mode="none",
+        message_thread_id=OPTIONS_INTEL_TOPIC,
     )
 
 

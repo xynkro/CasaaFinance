@@ -15,6 +15,16 @@ name: Trigger Alerts — 10-min Telegram
 #   Pre/post-market is excluded — live_prices feed is sparse outside
 #   regular hours and TV consensus doesn't shift much there anyway.
 #
+# NOTE (2026-06): this cron is the BEST-EFFORT BACKUP, not the primary.
+#   GH scheduled runs are throttled under load (4 runs delivered across
+#   the whole 2026-06-09 session) and fire on their own clock relative
+#   to the tv-prices grab, so they can evaluate stale prices. The
+#   PRIMARY is the local launchd agent scripts/com.caspar.trigger-alerts.plist
+#   → scripts/intraday_loop_local.sh, which runs tv_price_refresh.py THEN
+#   trigger_alerts.py every 600s during market hours. Keep this schedule
+#   for away-from-Mac coverage — the dedup ledgers (trigger_alerts +
+#   macro_alerts_state sheets) make double-delivery harmless.
+#
 # Required secrets:
 #   - TELEGRAM_BOT_TOKEN
 #   - TELEGRAM_CHAT_ID  (optional — defaults to "922547929" in src/telegram.py)

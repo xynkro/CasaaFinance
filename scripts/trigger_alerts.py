@@ -1,6 +1,7 @@
 """
 trigger_alerts.py — every-N-min poll that fires Telegram pushes when a
-WATCHING decision transitions into ACT_NOW.
+WATCHING decision transitions into ACT_NOW, plus three held-book lanes
+(spread-defense / held-name news / market pressure).
 
 Mirrors the client-side `evaluateTrigger()` in `pwa/src/data.ts` so a
 user who only opens the app once a day still gets paged at the moment
@@ -8,17 +9,28 @@ the brain's level + all its gates clear simultaneously.
 
 Inputs (all read from Sheets):
   - decision_queue   → all WATCHING rows
-  - live_prices      → ticker → current price (5-min cron)
+  - live_prices      → ticker → current price + day change % (5-min cron)
   - exposure_posture → for "exposure:NEW_ENTRY_ALLOWED" gate
   - tv_signals       → for "tv_daily:BUY", "tv_weekly:BUY" gates
+  - options          → HELD option legs (spread-defense lane)
+  - news_sentiment   → held-name news lane (4×/day Finnhub cache; this
+                       script makes NO Finnhub calls of its own)
 
 Output:
   - trigger_alerts sheet (per-decision state ledger)
+  - macro_alerts_state sheet (per-event dedup ledger, shared by macro +
+    defense + held-news + pressure lanes)
   - Telegram push when state transitions DORMANT/CLOSE/READY → ACT_NOW
     (same row staying ACT_NOW across runs is suppressed)
+  - Telegram defense page when an underlying approaches/breaches a held
+    SHORT strike; held-name strong-sentiment news; SPY/QQQ pressure page
 
-Schedule: every 10 min during US market hours (13:30-21:00 UTC, Mon-Fri)
-plus pre/post market if extended. See .github/workflows/trigger-alerts.yml.
+Schedule: every 10 min during US market hours. PRIMARY: local launchd
+agent scripts/com.caspar.trigger-alerts.plist → intraday_loop_local.sh
+(runs tv_price_refresh THEN this script, so prices are fresh at eval
+time). BACKUP: .github/workflows/trigger-alerts.yml — GH cron is
+best-effort (4 runs delivered across the whole 2026-06-09 session); the
+dedup ledgers make the double-delivery harmless.
 
 Manual run:
   python scripts/trigger_alerts.py        # write + send
@@ -27,12 +39,13 @@ Manual run:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import sys
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +70,60 @@ CLOSE_THRESHOLD_PCT = 0.03
 
 # Public PWA URL for Telegram push. Override via env if rebuilt elsewhere.
 PWA_URL = "https://xynkro.github.io/CasaaFinance/"
+
+# ────────────────────────────────────────────────────────────────────
+# Alert-lane tuning — module-level so tests can import them.
+# ────────────────────────────────────────────────────────────────────
+# Macro hot-news lane caps (hoisted from main() so the held-news lane
+# below can size itself relative to them):
+#   - HOT_NEWS_PING_CAP  : max macro-news pings per cron run
+#   - HOT_NEWS_FRESH_MIN : recency window — only ping news younger than
+#     this. The Finnhub cache holds 24h of news but alerting on hour-old
+#     headlines is just spam. 60min keeps pings actionable.
+HOT_NEWS_PING_CAP = 3
+HOT_NEWS_FRESH_MIN = 60
+
+# Spread-defense lane (incident fix, June 5-9 2026: held put credit
+# spreads sailed through an SPX selloff with ZERO pages because the
+# decision-lane evaluator only covers BUY/SELL strategies and skips
+# spreads as non-directional). For every SHORT leg in the options book:
+#   put  : underlying <= strike × 1.03 → "approach", <= strike → "breach"
+#   call : underlying >= strike × 0.97 → "approach", >= strike → "breach"
+# Each level pages once per (ticker, strike, expiry) per SGT day — the
+# dedup key embeds the day, so a strike that recovers and re-breaches on
+# a later day re-arms naturally.
+DEFENSE_PUT_APPROACH_MULT = 1.03
+DEFENSE_CALL_APPROACH_MULT = 0.97
+
+# Held-name news lane: page on strong-sentiment fresh news for HELD
+# tickers, read from the news_sentiment tab (written 4×/day by
+# finnhub_news_insider.py — this lane adds ZERO new Finnhub calls).
+#   - threshold: |sentiment_score| >= 0.3 (heuristic scale is -1..+1)
+#   - freshness: cadence-aware. The evaluating cron is best-effort (GH
+#     delivered 4 runs across the whole 2026-06-09 session — gaps well
+#     over 2h), so a 60-min window like HOT_NEWS_FRESH_MIN would
+#     silently drop anything that landed inside a cron gap. 2.5h is
+#     wide enough to survive those gaps while staying actionable; the
+#     headline-hash dedup means the wider window can't double-page.
+HELD_NEWS_SENT_THRESHOLD = 0.3
+HELD_NEWS_FRESH_MIN = max(HOT_NEWS_FRESH_MIN, 150)
+HELD_NEWS_PING_CAP = 3  # same flood-protection precedent as HOT_NEWS_PING_CAP
+
+# Market-pressure lane ("time to get out"): SPY/QQQ day-change
+# thresholds in percent. One page per severity per SGT day; an ALERT
+# also marks WARN as fired so a tape easing back into the WARN band
+# doesn't downgrade-page afterwards (WARN→ALERT escalation still pages).
+PRESSURE_WARN_PCT = -1.25
+PRESSURE_ALERT_PCT = -2.0
+PRESSURE_WORST_N = 5  # worst held names shown in the mini-heatmap
+
+
+def _f(v, default: float = 0.0) -> float:
+    """Sheet-cell float parse — '' / None / garbage → default."""
+    try:
+        return float(v) if v not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -336,31 +403,351 @@ def load_portfolio_tickers(client) -> set[str]:
     return out
 
 
-def load_live_prices(client) -> dict[str, float]:
-    """ticker (uppercase) → last_price."""
+def load_live_quotes(client) -> tuple[dict[str, float], dict[str, float]]:
+    """(ticker→last, ticker→day change %) from live_prices.
+
+    One read feeds both the decision lane (last) and the defense /
+    market-pressure lanes (last + change_pct). SPY/QQQ are in the feed
+    as of commit 991f6c7.
+    """
     ss = sh._open_sheet(client)
     try:
         ws = ss.worksheet(S.LivePriceRow.TAB_NAME)
     except Exception:
-        return {}
+        return {}, {}
     rows = ws.get_all_values()
     if len(rows) < 2:
-        return {}
+        return {}, {}
     hdr = rows[0]
     try:
         c_t = hdr.index("ticker")
         c_l = hdr.index("last")
     except ValueError:
-        return {}
-    out: dict[str, float] = {}
+        return {}, {}
+    c_c = hdr.index("change_pct") if "change_pct" in hdr else -1
+    prices: dict[str, float] = {}
+    changes: dict[str, float] = {}
     for r in rows[1:]:
         if len(r) <= max(c_t, c_l):
             continue
+        t = r[c_t].upper()
         try:
-            out[r[c_t].upper()] = float(r[c_l] or 0)
+            prices[t] = float(r[c_l] or 0)
         except (TypeError, ValueError):
             continue
+        if c_c >= 0 and len(r) > c_c and str(r[c_c]).strip() != "":
+            try:
+                changes[t] = float(r[c_c])
+            except (TypeError, ValueError):
+                pass
+    return prices, changes
+
+
+# ════════════════════════════════════════════════════════════════════
+# Spread-defense lane (incident fix) — short-strike proximity on HELD
+# option legs. The decision lane above only covers BUY/SELL strategies;
+# held spreads had INFINITE alert latency by design until this.
+# ════════════════════════════════════════════════════════════════════
+
+def defense_level(right: str, strike: float, underlying: float) -> str:
+    """Return 'breach' | 'approach' | '' for a SHORT option leg.
+
+    Puts : underlying <= strike                              → breach
+           underlying <= strike × DEFENSE_PUT_APPROACH_MULT  → approach
+    Calls: underlying >= strike                              → breach
+           underlying >= strike × DEFENSE_CALL_APPROACH_MULT → approach
+    """
+    if strike <= 0 or underlying <= 0:
+        return ""
+    r = (right or "").strip().upper()[:1]
+    if r == "P":
+        if underlying <= strike:
+            return "breach"
+        if underlying <= strike * DEFENSE_PUT_APPROACH_MULT:
+            return "approach"
+    elif r == "C":
+        if underlying >= strike:
+            return "breach"
+        if underlying >= strike * DEFENSE_CALL_APPROACH_MULT:
+            return "approach"
+    return ""
+
+
+def spread_label(short_leg: dict, all_legs: list[dict]) -> str:
+    """Human label for the structure a short leg belongs to.
+
+    Pairs the short leg with a LONG leg of the same account + ticker +
+    right + expiry → 'PCS 180/190' / 'CCS 350/360' (strikes low/high).
+    Unpaired short put → 'CSP'; unpaired short call → 'CC'. The defense
+    logic only needs the short leg — the label is message context.
+    """
+    r = (short_leg.get("right") or "").strip().upper()[:1]
+    me = (
+        short_leg.get("account") or "",
+        (short_leg.get("ticker") or "").strip().upper(),
+        r,
+        str(short_leg.get("expiry") or ""),
+    )
+    longs = [
+        l for l in all_legs
+        if _f(l.get("qty")) > 0
+        and (
+            l.get("account") or "",
+            (l.get("ticker") or "").strip().upper(),
+            (l.get("right") or "").strip().upper()[:1],
+            str(l.get("expiry") or ""),
+        ) == me
+    ]
+    if longs:
+        kind = "PCS" if r == "P" else "CCS"
+        lo, hi = sorted([_f(short_leg.get("strike")), _f(longs[0].get("strike"))])
+        return f"{kind} {lo:g}/{hi:g}"
+    return "CSP" if r == "P" else "CC"
+
+
+def plan_defense_pings(
+    legs: list[dict],
+    live_prices: dict[str, float],
+    prior_keys: set[str],
+    day: str,
+) -> list[dict]:
+    """Plan defense pings for SHORT legs at/inside the approach band.
+    Pure — testable without Sheets.
+
+    Dedup: event_key = "defense:<TICKER>|<R><strike>|<expiry>|<level>|<day>"
+    in the macro_alerts_state ledger — keyed (ticker, strike, expiry,
+    level) with the SGT day appended, so each level pages ONCE per
+    position per day and a recover-then-re-breach on a later day
+    re-arms. A 'breach' plan also marks the 'approach' key so a gap
+    straight through the strike pages once (the breach), not twice.
+    """
+    # Expired-leg guard: the IBKR grab can carry already-expired legs for
+    # a few days (assignment/settlement lag) — paging defense on those is
+    # noise. SGT runs ~half a day ahead of the US session, so only skip
+    # when the expiry is MORE than 1 day before the SGT date (a leg
+    # expiring "yesterday" SGT can still be live US-time).
+    try:
+        expiry_floor = (date.fromisoformat(day) - timedelta(days=1)).strftime("%Y%m%d")
+    except ValueError:
+        expiry_floor = ""
+
+    plans: list[dict] = []
+    seen: set[str] = set()
+    for leg in legs:
+        if _f(leg.get("qty")) >= 0:
+            continue  # defense logic only needs SHORT legs
+        ticker = (leg.get("ticker") or "").strip().upper()
+        right = (leg.get("right") or "").strip().upper()[:1]
+        strike = _f(leg.get("strike"))
+        expiry = str(leg.get("expiry") or "")
+        if expiry_floor and len(expiry) == 8 and expiry < expiry_floor:
+            continue  # already expired — stale grab row, not a live risk
+        # live_prices is the 5-min feed; fall back to the grab-time
+        # underlying_last only when the feed misses the ticker.
+        underlying = live_prices.get(ticker) or _f(leg.get("underlying_last"))
+        level = defense_level(right, strike, underlying)
+        if not level:
+            continue
+
+        def _key(lv: str) -> str:
+            return f"defense:{ticker}|{right}{strike:g}|{expiry}|{lv}|{day}"
+
+        key = _key(level)
+        if key in prior_keys or key in seen:
+            continue
+        seen.add(key)
+        keys_to_mark = [key]
+        if level == "breach":
+            keys_to_mark.append(_key("approach"))  # breach subsumes approach
+        plans.append({
+            "key": key,
+            "keys_to_mark": keys_to_mark,
+            "ticker": ticker,
+            "right": right,
+            "strike": strike,
+            "expiry": expiry,
+            "dte": int(_f(leg.get("dte"))),
+            "underlying": underlying,
+            "level": level,
+            "label": spread_label(leg, legs),
+            "account": (leg.get("account") or "").lower(),
+        })
+    return plans
+
+
+def load_open_option_legs(client, logger: logging.Logger) -> list[dict]:
+    """Latest-grab rows from the `options` tab as header-keyed dicts
+    (one per leg: ticker/right/strike/expiry/qty/... per S.OptionRow).
+
+    The tab is append-per-grab with audit timestamps in `date`
+    ('YYYY-MM-DDTHHMMSS'), so "open positions" = rows whose date equals
+    the max date value — same exact-timestamp convention as
+    telegram_portfolio_responder.py.
+    """
+    ss = sh._open_sheet(client)
+    try:
+        ws = ss.worksheet(S.OptionRow.TAB_NAME)
+    except Exception:
+        return []
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return []
+    hdr = rows[0]
+    try:
+        c_date = hdr.index("date")
+    except ValueError:
+        return []
+    latest = max((r[c_date] for r in rows[1:] if r and len(r) > c_date), default="")
+    if not latest:
+        return []
+    out: list[dict] = []
+    for r in rows[1:]:
+        if not r or len(r) <= c_date or r[c_date] != latest:
+            continue
+        out.append({hdr[i]: (r[i] if i < len(r) else "") for i in range(len(hdr))})
+    logger.info(f"Loaded {len(out)} open option legs (grab {latest})")
     return out
+
+
+# ════════════════════════════════════════════════════════════════════
+# Held-name news lane — strong-sentiment fresh news on HELD tickers.
+# Reads the news_sentiment tab only (no new Finnhub quota); before this
+# lane, held-name news reached no push channel (its only consumer was
+# the PWA mirror).
+# ════════════════════════════════════════════════════════════════════
+
+def headline_hash(headline: str) -> str:
+    """Stable 16-hex dedup hash of a headline. Case/whitespace
+    normalised so the same story re-pulled under another Finnhub id
+    (or listed under a second held ticker) doesn't re-page."""
+    norm = " ".join((headline or "").lower().split())
+    return hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
+
+
+def held_news_fresh_cutoff(now_sgt: datetime | None = None) -> str:
+    """SGT-iso lower bound ('YYYY-MM-DDTHHMMSS') for fresh held-name
+    news. Lexicographic-comparable with news_sentiment.datetime, which
+    finnhub_news_insider writes SGT-anchored."""
+    now = now_sgt or datetime.now(timezone(timedelta(hours=8)))
+    return (now - timedelta(minutes=HELD_NEWS_FRESH_MIN)).strftime("%Y-%m-%dT%H%M%S")
+
+
+def plan_held_news_pings(
+    news_rows: list[dict],
+    held_tickers: set[str],
+    prior_keys: set[str],
+    fresh_cutoff: str,
+) -> list[dict]:
+    """Plan held-name news pings. Pure — testable without Sheets.
+
+    Page when a HELD ticker has news newer than `fresh_cutoff` with
+    |sentiment_score| >= HELD_NEWS_SENT_THRESHOLD. Dedup key =
+    "heldnews:<headline hash>" in the macro_alerts_state ledger. Capped
+    at HELD_NEWS_PING_CAP per run, strongest sentiment first.
+    """
+    candidates: list[dict] = []
+    seen: set[str] = set()
+    for n in news_rows:
+        ticker = (n.get("ticker") or "").strip().upper()
+        if ticker not in held_tickers:
+            continue
+        if (n.get("datetime") or "") < fresh_cutoff:
+            continue
+        score = _f(n.get("sentiment_score"))
+        if abs(score) < HELD_NEWS_SENT_THRESHOLD:
+            continue
+        key = f"heldnews:{headline_hash(n.get('headline') or '')}"
+        if key in prior_keys or key in seen:
+            continue
+        seen.add(key)
+        candidates.append({
+            "key": key,
+            "ticker": ticker,
+            "headline": n.get("headline") or "",
+            "score": score,
+            "label": n.get("sentiment_label") or "",
+            "source": n.get("source") or "",
+            "url": n.get("url") or "",
+            "datetime": n.get("datetime") or "",
+        })
+    candidates.sort(key=lambda c: abs(c["score"]), reverse=True)
+    return candidates[:HELD_NEWS_PING_CAP]
+
+
+def load_news_sentiment_rows(client) -> list[dict]:
+    """All news_sentiment rows as header-keyed dicts. Freshness /
+    threshold filtering happens in plan_held_news_pings (one read,
+    pure logic downstream)."""
+    ss = sh._open_sheet(client)
+    try:
+        ws = ss.worksheet(S.NewsSentimentRow.TAB_NAME)
+    except Exception:
+        return []
+    rows = ws.get_all_values()
+    if len(rows) < 2:
+        return []
+    hdr = rows[0]
+    return [
+        {hdr[i]: (r[i] if i < len(r) else "") for i in range(len(hdr))}
+        for r in rows[1:] if r
+    ]
+
+
+# ════════════════════════════════════════════════════════════════════
+# Market-pressure lane — SPY/QQQ tape check ("time to get out").
+# ════════════════════════════════════════════════════════════════════
+
+def pressure_severity(spy_chg: float | None, qqq_chg: float | None) -> str:
+    """'ALERT' | 'WARN' | '' from SPY/QQQ day-change %. EITHER index
+    crossing a threshold trips that severity; the worse reading wins."""
+    vals = [v for v in (spy_chg, qqq_chg) if v is not None]
+    if not vals:
+        return ""
+    worst = min(vals)
+    if worst <= PRESSURE_ALERT_PCT:
+        return "ALERT"
+    if worst <= PRESSURE_WARN_PCT:
+        return "WARN"
+    return ""
+
+
+def plan_market_pressure(
+    live_changes: dict[str, float],
+    held_tickers: set[str],
+    prior_keys: set[str],
+    day: str,
+) -> dict | None:
+    """Plan the market-pressure page, or None. Pure — testable.
+
+    Dedup: event_key = "pressure:<day>|<severity>" — one page per
+    severity per SGT day. An ALERT also marks the WARN key so the tape
+    easing back into the WARN band later doesn't downgrade-page;
+    WARN→ALERT escalation still pages (different key). Includes the
+    worst-PRESSURE_WORST_N held names by day change as a mini-heatmap.
+    """
+    spy = live_changes.get("SPY")
+    qqq = live_changes.get("QQQ")
+    sev = pressure_severity(spy, qqq)
+    if not sev:
+        return None
+    key = f"pressure:{day}|{sev}"
+    if key in prior_keys:
+        return None
+    keys_to_mark = [key]
+    if sev == "ALERT":
+        keys_to_mark.append(f"pressure:{day}|WARN")
+    worst = sorted(
+        ((t, live_changes[t]) for t in held_tickers if t in live_changes),
+        key=lambda x: x[1],
+    )[:PRESSURE_WORST_N]
+    return {
+        "key": key,
+        "keys_to_mark": keys_to_mark,
+        "severity": sev,
+        "spy": spy,
+        "qqq": qqq,
+        "worst": worst,
+    }
 
 
 def load_exposure_rec(client) -> str:
@@ -618,7 +1005,7 @@ def main() -> int:
         logger.info("No watching decisions — nothing to do")
         return 0
 
-    live_prices  = load_live_prices(client)
+    live_prices, live_changes = load_live_quotes(client)
     exposure_rec = load_exposure_rec(client)
     tv_daily, tv_weekly = load_tv_recs(client)
     prior_alerts = load_alert_state(client)
@@ -750,15 +1137,9 @@ def main() -> int:
     # Plan macro-news lane (computed pre-dry-return so previews work):
     # 1) Blackout edge trigger — if in window and not already alerted.
     # 2) Hot-news edge trigger — top 3 not-yet-alerted hot headlines.
+    # Flood caps HOT_NEWS_PING_CAP / HOT_NEWS_FRESH_MIN are module-level
+    # constants (top of file) so the held-news lane can reference them.
     # ────────────────────────────────────────────────────────────────
-    # Caps protecting against floods:
-    #   - HOT_NEWS_PING_CAP    : max pings per cron run
-    #   - HOT_NEWS_FRESH_MIN   : recency window — only ping news younger
-    #     than this. The Finnhub cache holds 24h of news but alerting on
-    #     hour-old headlines is just spam. 60min keeps pings actionable.
-    HOT_NEWS_PING_CAP = 3
-    HOT_NEWS_FRESH_MIN = 60
-
     macro_blackout_plan: tuple[str, dict] | None = None
     if in_blackout and blackout_event:
         bo_event_time = blackout_event.get("_t_iso", "")
@@ -767,8 +1148,7 @@ def main() -> int:
             macro_blackout_plan = (bo_key, blackout_event)
 
     # Recency cutoff for news — ISO timestamps from MacroFeed are UTC.
-    from datetime import datetime, timedelta, timezone as _tz
-    fresh_cutoff = (datetime.now(_tz.utc) - timedelta(minutes=HOT_NEWS_FRESH_MIN)).isoformat()
+    fresh_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=HOT_NEWS_FRESH_MIN)).isoformat()
 
     # Gate is HOT_KEYWORDS-based only. The "so what" interpretation layer
     # was deleted — the keyword heuristic produced canned output that read
@@ -855,6 +1235,40 @@ def main() -> int:
                 hits.append(tk)
         return hits
 
+    # ────────────────────────────────────────────────────────────────
+    # Plan the three held-book lanes (spread-defense / held-news /
+    # market-pressure) — added after the June 5-9 2026 incident where
+    # held put credit spreads rode an SPX selloff with zero pages.
+    # All three dedup through the same macro_alerts_state ledger and
+    # are NOT gated by the macro blackout: the blackout exists to stop
+    # ENTRY pings minutes before FOMC/CPI — these are exit-side risk
+    # alerts on positions already held (same reasoning as the macro-news
+    # pings above, which also bypass it).
+    # ────────────────────────────────────────────────────────────────
+    today_sgt = S.now_sgt_date()
+    prior_keys = set(prior_macro_alerts)
+
+    option_legs = load_open_option_legs(client, logger)
+    defense_plan = plan_defense_pings(option_legs, live_prices, prior_keys, today_sgt)
+
+    held_news_plan = plan_held_news_pings(
+        load_news_sentiment_rows(client),
+        portfolio_tickers,
+        prior_keys,
+        held_news_fresh_cutoff(),
+    )
+
+    pressure_plan = plan_market_pressure(
+        live_changes, portfolio_tickers, prior_keys, today_sgt)
+
+    n_short_legs = sum(1 for l in option_legs if _f(l.get("qty")) < 0)
+    logger.info(
+        f"Lane plans: defense={len(defense_plan)} (of {n_short_legs} short legs) | "
+        f"held_news={len(held_news_plan)} | "
+        f"pressure={pressure_plan['severity'] if pressure_plan else 'none'} "
+        f"(SPY {live_changes.get('SPY', '?')}% QQQ {live_changes.get('QQQ', '?')}%)"
+    )
+
     if args.dry:
         for d, ev, cur in fires:
             logger.info(f"  [DRY] would fire ACT_NOW: {d.ticker} {d.account} entry=${d.entry:.2f} → cur=${cur:.2f}  ({ev.direction})")
@@ -871,6 +1285,25 @@ def main() -> int:
                         f"({it['direction']} → {it['lean']})")
         if not macro_blackout_plan and not macro_news_plan and not macro_surprise_plan:
             logger.info("  [DRY] no macro pings queued")
+        for plan in defense_plan:
+            logger.info(
+                f"  [DRY] would fire DEFENSE {plan['level'].upper()}: {plan['ticker']} "
+                f"{plan['underlying']:.2f} vs short {plan['strike']:g}{plan['right']} "
+                f"({plan['label']} exp {plan['expiry']}, {plan['dte']} DTE)"
+            )
+        for n in held_news_plan:
+            logger.info(
+                f"  [DRY] would fire HELD NEWS: {n['ticker']} {n['score']:+.2f} "
+                f"{n['headline'][:70]}"
+            )
+        if pressure_plan:
+            logger.info(
+                f"  [DRY] would fire PRESSURE {pressure_plan['severity']}: "
+                f"SPY {pressure_plan['spy']} QQQ {pressure_plan['qqq']} "
+                f"worst={pressure_plan['worst']}"
+            )
+        if not defense_plan and not held_news_plan and not pressure_plan:
+            logger.info("  [DRY] no defense/held-news/pressure pings queued")
         return 0
 
     # Persist state regardless of whether any fired (so dormant→close
@@ -1031,6 +1464,106 @@ def main() -> int:
             updated_at=now_iso,
         ))
 
+    # ────────────────────────────────────────────────────────────────
+    # Execute the three held-book lanes. Ledger rows are appended ONLY
+    # after a successful send — a failed Telegram naturally retries on
+    # the next run instead of being recorded as alerted.
+    # ────────────────────────────────────────────────────────────────
+
+    # ── Spread-defense lane (incident fix) ──────────────────────────
+    defense_sent = 0
+    for plan in defense_plan:
+        try:
+            tg.ping_spread_defense(
+                ticker=plan["ticker"],
+                right=plan["right"],
+                strike=plan["strike"],
+                expiry=plan["expiry"],
+                dte=plan["dte"],
+                underlying=plan["underlying"],
+                level=plan["level"],
+                label=plan["label"],
+                account=plan["account"],
+            )
+            defense_sent += 1
+            logger.info(
+                f"  ✓ sent DEFENSE {plan['level'].upper()}: {plan['ticker']} "
+                f"{plan['underlying']:.2f} vs short {plan['strike']:g}{plan['right']}"
+            )
+        except Exception as e:
+            logger.warning(f"  ✗ DEFENSE failed: {plan['ticker']} {plan['strike']:g}{plan['right']}: {e}")
+            continue
+        for k in plan["keys_to_mark"]:
+            macro_state_rows.append(S.MacroAlertStateRow(
+                event_key=k,
+                event_type="spread_defense",
+                event_summary=(
+                    f"{plan['ticker']} {plan['underlying']:.2f} vs short "
+                    f"{plan['strike']:g}{plan['right']} {plan['level']} "
+                    f"({plan['label']} exp {plan['expiry']})"
+                )[:200],
+                event_time=now_iso,
+                alerted_at=now_iso,
+                updated_at=now_iso,
+            ))
+
+    # ── Held-name news lane ──────────────────────────────────────────
+    held_news_sent = 0
+    for n in held_news_plan:
+        try:
+            tg.ping_held_news(
+                ticker=n["ticker"],
+                headline=n["headline"],
+                sentiment_score=n["score"],
+                sentiment_label=n["label"],
+                source=n["source"],
+                url=n["url"],
+            )
+            held_news_sent += 1
+            logger.info(f"  ✓ sent HELD NEWS: {n['ticker']} {n['score']:+.2f} {n['headline'][:60]}")
+        except Exception as e:
+            logger.warning(f"  ✗ HELD NEWS failed: {n['ticker']}: {e}")
+            continue
+        macro_state_rows.append(S.MacroAlertStateRow(
+            event_key=n["key"],
+            event_type="held_news",
+            event_summary=f"{n['ticker']} {n['score']:+.2f} {n['headline']}"[:200],
+            event_time=n["datetime"] or now_iso,
+            alerted_at=now_iso,
+            updated_at=now_iso,
+        ))
+
+    # ── Market-pressure lane ─────────────────────────────────────────
+    pressure_sent = 0
+    if pressure_plan:
+        try:
+            tg.ping_market_pressure(
+                severity=pressure_plan["severity"],
+                spy_pct=pressure_plan["spy"],
+                qqq_pct=pressure_plan["qqq"],
+                worst_held=pressure_plan["worst"],
+                posture=exposure_rec,
+            )
+            pressure_sent = 1
+            logger.info(
+                f"  ✓ sent PRESSURE {pressure_plan['severity']}: "
+                f"SPY {pressure_plan['spy']} QQQ {pressure_plan['qqq']}"
+            )
+            for k in pressure_plan["keys_to_mark"]:
+                macro_state_rows.append(S.MacroAlertStateRow(
+                    event_key=k,
+                    event_type="market_pressure",
+                    event_summary=(
+                        f"{pressure_plan['severity']} SPY {pressure_plan['spy']} "
+                        f"QQQ {pressure_plan['qqq']} worst {pressure_plan['worst']}"
+                    )[:200],
+                    event_time=now_iso,
+                    alerted_at=now_iso,
+                    updated_at=now_iso,
+                ))
+        except Exception as e:
+            logger.warning(f"  ✗ PRESSURE failed: {e}")
+
     if macro_state_rows:
         upsert_macro_alert_state(client, macro_state_rows, logger)
 
@@ -1040,6 +1573,9 @@ def main() -> int:
         + (f", {soft_sent}/{len(soft_fires)} close" if include_close else "")
         + (f", {macro_pinged} macro" if macro_pinged else "")
         + (f", {swing_mirrored} swing-mirror" if swing_mirrored else "")
+        + (f", {defense_sent} defense" if defense_sent else "")
+        + (f", {held_news_sent} held-news" if held_news_sent else "")
+        + (f", {pressure_sent} pressure" if pressure_sent else "")
         + (f"; {total_deferred} deferred by macro blackout" if total_deferred else "")
     )
     return 0

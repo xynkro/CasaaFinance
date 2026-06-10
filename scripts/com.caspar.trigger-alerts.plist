@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- PRIMARY intraday trigger loop: every 600s run tv_price_refresh.py
+       then trigger_alerts.py (price grab BEFORE evaluation) via
+       scripts/intraday_loop_local.sh. The script self-guards to US
+       market hours (Mon-Fri 13:25-21:05 UTC) and no-ops otherwise, so
+       the agent itself fires all day at zero cost. The GH Actions
+       trigger-alerts.yml cron stays as the away-from-Mac backup. -->
+  <key>Label</key>
+  <string>com.caspar.trigger-alerts</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/xynkro/Documents/Trading/FinancePWA/scripts/intraday_loop_local.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA</string>
+
+  <!-- Every 10 minutes; the shell script handles the market-hours gate. -->
+  <key>StartInterval</key>
+  <integer>600</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/trigger-alerts-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xynkro/Documents/Trading/FinancePWA/.state/trigger-alerts-stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+  </dict>
+</dict>
+</plist>
