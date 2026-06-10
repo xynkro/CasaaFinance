@@ -1,0 +1,54 @@
+name: IBKR Flex Sync — Headless Positions
+
+# Daily headless position sync for Caspar's account (U6773281) via the IBKR
+# Flex Web Service: token + query id, no TWS, no gateway, no login. Writes the
+# PortfolioGrab JSON and pushes it through `sync.py grab` (positions_caspar /
+# snapshot_caspar / options tabs); Sarah is carried forward from the latest
+# grab (her account isn't in this query — add U16000287 to query 1501198 in
+# the IBKR portal to cover both).
+#
+# 09:08 UTC = 5:08 AM ET: overnight EOD statements are settled, and it is well
+# clear of IBKR's flaky pre-market regeneration window (~12:30-14:00 UTC,
+# observed 1001s on 06-09 and 06-10). The local launchd ibkr-grab (TWS, every
+# 30 min when running) remains the intraday/authoritative path; this cron is
+# the zero-touch daily floor so the book is never days stale again.
+
+on:
+  schedule:
+    - cron: "8 9 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ibkr-flex-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      IB_FLEX_TOKEN:    ${{ secrets.IB_FLEX_TOKEN }}
+      IB_FLEX_QUERY_ID: "1501198"
+      OAUTH_TOKEN_JSON: ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:         ${{ secrets.SHEET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Flex sync (retry through IBKR's transient 1001s)
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== attempt $attempt ==="
+            if python scripts/ibkr_flex_sync.py --sync; then
+              exit 0
+            fi
+            [ "$attempt" -lt 3 ] && sleep 720
+          done
+          echo "Flex statement never generated — leaving last-good positions in place."
+          exit 1

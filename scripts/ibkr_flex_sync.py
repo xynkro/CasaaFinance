@@ -130,11 +130,111 @@ def parse_account(report_xml: str) -> dict:
     return info
 
 
+# ── PortfolioGrab JSON bridge (--sync) ──────────────────────────────────────
+# Maps Flex rows into the exact JSON shape ibkr_grab.build_grab_json produces,
+# so the existing `sync.py grab --json` pipeline (positions_caspar /
+# snapshot_caspar / options tabs) works unchanged. Caspar comes fresh from
+# Flex; Sarah is CARRIED FORWARD from the latest existing grab file (this Flex
+# query covers U6773281 only — never clobber her data with emptiness).
+
+CASPAR_ACCOUNT = "U6773281"
+GRABS_DIR = "PortfolioGrabs"
+
+
+def _flex_stock_row(p: dict, nlv: float) -> dict:
+    mkt_val = p["value"]
+    upl = p["upl"] or round((p["mark"] - p["cost_price"]) * p["qty"], 2)
+    return {
+        "symbol": p["symbol"], "sec_type": "STK", "exchange": "",
+        "qty": p["qty"], "avg_cost": p["cost_price"], "last": p["mark"],
+        "mkt_val": mkt_val, "upl": upl,
+        "weight_pct": round(abs(mkt_val) / nlv * 100, 2) if nlv else 0,
+    }
+
+
+def _flex_option_row(p: dict) -> dict:
+    mult = int(float(p["multiplier"] or 100))
+    # Flex costBasisPrice is PER SHARE; the grab schema (ib_insync averageCost)
+    # carries options PER CONTRACT — scale by the multiplier to match.
+    avg_cost = round(p["cost_price"] * mult, 2)
+    upl = p["upl"] or round((p["mark"] - p["cost_price"]) * p["qty"] * mult, 2)
+    side_dir = "short" if p["qty"] < 0 else "long"
+    side_type = "call" if p["put_call"] == "C" else "put"
+    return {
+        "symbol": p["underlying"] or p["symbol"].split()[0],
+        "sec_type": "OPT", "exchange": "",
+        "qty": p["qty"], "avg_cost": avg_cost, "last": p["mark"],
+        "mkt_val": p["value"], "upl": upl,
+        "side": f"{side_dir}_{side_type}",
+        "right": p["put_call"], "strike": float(p["strike"] or 0),
+        "expiry": str(p["expiry"] or "").replace("-", ""),
+        "multiplier": mult, "avg_cost_credit": abs(avg_cost),
+    }
+
+
+def _latest_grab(root: str) -> dict:
+    """Newest existing PortfolioGrab JSON (for the Sarah carry-forward)."""
+    import glob
+    paths = sorted(glob.glob(os.path.join(root, "*_PortfolioGrab.json")))
+    if not paths:
+        return {}
+    try:
+        return json.loads(open(paths[-1]).read())
+    except Exception:
+        return {}
+
+
+def build_flex_grab(account: dict, positions: list[dict], prev_grab: dict) -> dict:
+    """Assemble the PortfolioGrab JSON: fresh Flex Caspar + carried Sarah."""
+    from datetime import datetime
+    nlv = float(account.get("nlv", 0) or 0)
+    stocks = [_flex_stock_row(p, nlv) for p in positions if p["asset"] == "STK"]
+    options = [_flex_option_row(p) for p in positions if p["asset"] == "OPT"]
+    prev_caspar_summary = ((prev_grab.get("accounts") or {}).get("caspar") or {}).get("summary", {})
+    now = datetime.now()
+    return {
+        "grab_date": now.strftime("%Y-%m-%d"),
+        "grab_timestamp_sgt": now.astimezone().isoformat(),
+        "source": f"IBKR Flex Web Service (EOD statement {account.get('report_date', '?')})",
+        "schema_version": "1.1",
+        "writer": "ibkr_flex_sync.py",
+        "accounts": {
+            "caspar": {
+                "account_id": account.get("account") or CASPAR_ACCOUNT,
+                "base_currency": account.get("currency") or "USD",
+                "summary": {
+                    "net_liquidation": nlv,
+                    "total_cash": float(account.get("cash", 0) or 0),
+                    # Flex EOD statements don't carry margin fields — carry the
+                    # previous grab's values forward rather than writing 0s that
+                    # downstream sizing could misread as "no buying power".
+                    "buying_power": float(prev_caspar_summary.get("buying_power", 0)),
+                    "excess_liquidity": float(prev_caspar_summary.get("excess_liquidity", 0)),
+                    "unrealized_pnl": round(sum(s["upl"] for s in stocks)
+                                            + sum(o["upl"] for o in options), 2),
+                    "realized_pnl": 0.0,
+                    "total_market_value": float(account.get("stock", 0) or 0),
+                },
+                "positions": stocks,
+                "options": options,
+                "trades": [],
+            },
+            # Sarah: this Flex query covers U6773281 only — carry her account
+            # verbatim from the latest grab (same role as ibkr_grab --merge).
+            "sarah": ((prev_grab.get("accounts") or {}).get("sarah")
+                      or {"account_id": "U16000287", "base_currency": "SGD",
+                          "summary": {}, "positions": [], "options": [], "trades": []}),
+        },
+    }
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Headless IBKR position sync via Flex Web Service")
     p.add_argument("--query", default=os.environ.get("IB_FLEX_QUERY_ID", ""),
                    help="Flex Query ID (or env IB_FLEX_QUERY_ID)")
     p.add_argument("--json", action="store_true", help="Print raw parsed JSON")
+    p.add_argument("--sync", action="store_true",
+                   help="Write the PortfolioGrab JSON and push it to the Sheet via sync.py grab")
     args = p.parse_args()
 
     token = os.environ.get("IB_FLEX_TOKEN", "").strip()
@@ -152,6 +252,22 @@ def main() -> int:
     if args.json:
         print(json.dumps({"account": account, "positions": positions}, indent=2))
         return 0
+
+    if args.sync:
+        import subprocess
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        grab = build_flex_grab(account, positions, _latest_grab(os.path.join(root, GRABS_DIR)))
+        out_dir = os.path.join(root, GRABS_DIR)
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{grab['grab_date'].replace('-', '')}_PortfolioGrab.json")
+        with open(out_path, "w") as f:
+            json.dump(grab, f, indent=2)
+        print(f"Saved {out_path} "
+              f"({len(grab['accounts']['caspar']['positions'])} stocks, "
+              f"{len(grab['accounts']['caspar']['options'])} option legs; "
+              f"sarah carried forward)")
+        r = subprocess.run([sys.executable, "src/sync.py", "grab", "--json", out_path], cwd=root)
+        return r.returncode
 
     stk = [p_ for p_ in positions if p_["asset"] == "STK"]
     opt = [p_ for p_ in positions if p_["asset"] == "OPT"]
