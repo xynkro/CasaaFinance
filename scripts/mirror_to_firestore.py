@@ -108,12 +108,15 @@ MAX_DOC_BYTES = 900_000
 DEFAULT_CAP = 400
 
 # Per-tab cap overrides (0 = no cap; chunking handles oversize docs).
-# iv_surface_scan is a SINGLE-DAY full option surface (the backend clears +
-# rewrites each run) that the Scanner page renders per-ticker — the tail-400
+# iv_surface_scan is a SINGLE-DAY option surface (the backend atomically
+# rewrites it each run) that the Scanner page renders per-ticker — the tail-400
 # default silently truncated it to an alphabetical fragment (AAPL kept 1 of its
-# contracts, the smile chart lost its spot rows). It must mirror whole.
+# contracts, the smile chart lost its spot rows). The backend now writes only
+# the sellable zone (OTM, ±45% moneyness, real bid ≈ 3-5k rows); 6000 here is a
+# SAFETY ceiling so a future backend regression can't ship a 5MB payload to the
+# phone again, not a working limit.
 TAB_CAPS: dict[str, int] = {
-    "iv_surface_scan": 0,
+    "iv_surface_scan": 6000,
 }
 
 _ENV_KEY = "FIREBASE_SERVICE_ACCOUNT_JSON"

@@ -158,6 +158,21 @@ def _fetch_chains(ticker: str, min_dte: int = MIN_DTE, max_dte: int = MAX_DTE,
                 ask = float(row.get("ask", 0) or 0)
                 if iv < 0.001 or bid <= 0:
                     continue
+                strike_f = float(row["strike"])
+                # SELLABLE-ZONE filter — this is a premium-SELLING surface.
+                # (a) OTM-only (5% ITM grace for ATM continuity): deep-ITM rows
+                #     are all intrinsic, the IV solve explodes (100-600% "IV"),
+                #     and they were polluting the surface FIT — which corrupted
+                #     iv_fitted/iv_excess for every real candidate downstream.
+                # (b) Moneyness window ±45%: nobody wheels a strike half the
+                #     spot away; dropping the far tails cut the tab from ~14.5k
+                #     rows (a ~5MB / 6-doc mobile payload) to a sane size.
+                if side == "P" and strike_f > spot * 1.05:
+                    continue
+                if side == "C" and strike_f < spot * 0.95:
+                    continue
+                if not (spot * 0.55 <= strike_f <= spot * 1.45):
+                    continue
                 mid = (bid + ask) / 2.0
                 # oi/volume can be NaN in yfinance
                 raw_oi = row.get("openInterest", 0)
