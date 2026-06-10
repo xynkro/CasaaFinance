@@ -432,15 +432,13 @@ def main() -> int:
         load_env()
         client = sh.authenticate()
 
-        # Clear tab before writing (fresh scan each day)
+        # Fresh scan each day — ATOMIC full-tab overwrite. The old
+        # delete_rows()+append_rows() pair left the tab observably EMPTY between
+        # the two calls (a crash/429 in that window wiped the surface until the
+        # next run). upsert_tab writes header+rows and blanks any stale tail in
+        # ONE call.
         ws = sh.ensure_headers(client, Row.TAB_NAME, Row.HEADERS)
-        # Delete all data rows (keep header)
-        if ws.row_count > 1:
-            ws.delete_rows(2, ws.row_count)
-
-        # Write all rows
-        if all_rows:
-            sh.append_rows(client, Row.TAB_NAME, [r.to_row() for r in all_rows])
+        sh.upsert_tab(ws, [Row.HEADERS] + [r.to_row() for r in all_rows])
         logger.info(f"  Wrote {len(all_rows)} rows to {Row.TAB_NAME}")
     except Exception as e:
         logger.error(f"  Sheet write failed: {e}")

@@ -2,10 +2,13 @@ name: IV Surface Scan — Volatility Surface
 
 on:
   schedule:
-    # 13:04 UTC = ~8:04 AM ET (pre-market, after overnight IV settles)
-    # Offset to :04 (was :00) to stagger off the 13:00 sheet-write pileup
-    # (gex-regime, finnhub-calendars, trigger-alerts) — avoids 429s.
-    - cron: "4 13 * * 1-5"
+    # 14:38 UTC = 10:38 AM ET — ~1h AFTER the open, when option quotes are LIVE.
+    # The old 13:04 slot was PRE-market: bids collapse to 0.01, sizes vanish, and
+    # IV/delta computed from those mids is garbage — exactly what the Scanner
+    # page was rendering. Minute :38 keeps the stagger contract (off the */10
+    # trigger-alerts spine; clear of 14:03 plan, 14:33 alpaca, 14:36
+    # unusual-options, :05/:35 options-refresh, :07/:37 yahoo-grab).
+    - cron: "38 14 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:

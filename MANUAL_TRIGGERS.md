@@ -102,7 +102,7 @@ that window must avoid those ticks).
 | market-scan | Daily 10:15 | `15 2 * * *` |
 | daily-options-scan | Mon-Fri 10:35 | `35 2 * * 1-5` |
 | gex-regime | Mon-Fri 21:02 | `2 13 * * 1-5` |
-| iv-surface-scan | Mon-Fri 21:04 | `4 13 * * 1-5` |
+| iv-surface-scan | Mon-Fri 22:38 (10:38 ET — live quotes) | `38 14 * * 1-5` |
 | finnhub-calendars | Daily 21:06 | `6 13 * * *` |
 | finnhub-news-insider | Daily 21:08 / 01:08 / 05:08 / 10:08 | `8 13,17,21,2 * * *` |
 | build-daily-plan | Mon-Fri 22:03 | `3 14 * * 1-5` |

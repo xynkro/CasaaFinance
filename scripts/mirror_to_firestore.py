@@ -107,6 +107,15 @@ MAX_DOC_BYTES = 900_000
 # so we keep the tail. The PWA only ever needs the most-recent slice.
 DEFAULT_CAP = 400
 
+# Per-tab cap overrides (0 = no cap; chunking handles oversize docs).
+# iv_surface_scan is a SINGLE-DAY full option surface (the backend clears +
+# rewrites each run) that the Scanner page renders per-ticker — the tail-400
+# default silently truncated it to an alphabetical fragment (AAPL kept 1 of its
+# contracts, the smile chart lost its spot rows). It must mirror whole.
+TAB_CAPS: dict[str, int] = {
+    "iv_surface_scan": 0,
+}
+
 _ENV_KEY = "FIREBASE_SERVICE_ACCOUNT_JSON"
 
 
@@ -215,7 +224,7 @@ def mirror_tab(read_tab: Callable[[str], list[dict]], db: Any, name: str,
     `mirror_tabs` stays a thin try/except wrapper.
     """
     rows = read_tab(name) or []
-    rows = _cap_rows(rows, cap)
+    rows = _cap_rows(rows, TAB_CAPS.get(name, cap))
     source_hash = _source_hash(rows)
 
     if _existing_hash(db, name) == source_hash:

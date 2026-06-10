@@ -54,7 +54,20 @@ export function ScannerPage({ ivSurfaceScan, loading }: ScannerPageProps) {
     [tickerContracts, expiry],
   );
 
-  const spot = numeric(chartContracts[0]?.spot);
+  // First contract WITH a real spot — not blindly [0]. A leading row with a
+  // blank/zero spot (truncated or partial data) was rendering "Spot 0.00" and
+  // breaking the chart scale even when other rows carried the price.
+  const spot = useMemo(() => {
+    for (const r of chartContracts) {
+      const s = numeric(r.spot);
+      if (s > 0) return s;
+    }
+    for (const r of tickerContracts) {
+      const s = numeric(r.spot);
+      if (s > 0) return s;
+    }
+    return 0;
+  }, [chartContracts, tickerContracts]);
 
   /* ---- empty state ---- */
 
