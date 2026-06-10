@@ -206,3 +206,48 @@ def test_income_quota_long_call_backfills_open_slot():
     plan = bdp.build_plan(10_000, scan, [], TODAY)
     income = {r["strategy"] for r in plan if r["leg"] == "income"}
     assert income == {"CSP", "IC"}
+
+
+# ── plan_diff (the plan-changes Telegram push, approved 2026-06-10) ──────────
+
+from scripts.build_daily_plan import plan_diff
+
+
+def _prev_row(date, leg, ticker, strategy):
+    return {"date": date, "leg": leg, "ticker": ticker, "strategy": strategy}
+
+
+def _new_row(leg, ticker, strategy, detail="", conviction=50.0):
+    return {"leg": leg, "ticker": ticker, "strategy": strategy,
+            "detail": detail, "conviction": conviction}
+
+
+class TestPlanDiff:
+    def test_added_and_dropped(self):
+        prev = [_prev_row("2026-06-09", "income", "AMD", "IC"),
+                _prev_row("2026-06-09", "growth", "PLTR", "GROWTH")]
+        new = [_new_row("income", "NVDA", "CSP"),
+               _new_row("growth", "PLTR", "GROWTH")]
+        d = plan_diff(prev, new)
+        assert [(p["ticker"]) for p in d["added"]] == ["NVDA"]
+        assert d["dropped"] == [("AMD", "IC")]
+
+    def test_standing_allocation_ignored(self):
+        """ALLOC legs (core/hedge/protector) never page — they don't change."""
+        prev = [_prev_row("2026-06-09", "core", "QQQ", "ALLOC")]
+        new = [_new_row("core", "QQQ", "ALLOC"), _new_row("hedge", "VIXM", "ALLOC")]
+        d = plan_diff(prev, new)
+        assert d["added"] == [] and d["dropped"] == []
+
+    def test_same_day_rerun_is_quiet(self):
+        """Idempotent: rerun diffs vs this morning's own rows (latest date)."""
+        prev = [_prev_row("2026-06-09", "income", "AMD", "IC"),
+                _prev_row("2026-06-10", "income", "NVDA", "CSP")]
+        new = [_new_row("income", "NVDA", "CSP")]
+        d = plan_diff(prev, new)
+        assert d["added"] == [] and d["dropped"] == []
+
+    def test_empty_prior_plan_pages_everything(self):
+        new = [_new_row("income", "NVDA", "CSP")]
+        d = plan_diff([], new)
+        assert len(d["added"]) == 1 and d["dropped"] == []

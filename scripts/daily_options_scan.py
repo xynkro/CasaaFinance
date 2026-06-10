@@ -2175,6 +2175,41 @@ def _apply_macro_warnings(candidates: list[dict], macro: dict) -> int:
     return n
 
 
+def gate_digest_candidates(
+    candidates: list[dict], macro: dict,
+) -> tuple[list[dict], str | None]:
+    """SELL_CAUTION / CASH_PRIORITY digest gate (user-approved 2026-06-10).
+
+    The paper executor refuses premium selling under GEX SELL_CAUTION — the
+    human-facing Telegram digest had no such brake, which is how short-vol
+    recs kept flowing into the 06-05..06-09 selloff. Under either flag this
+    DROPS the premium-selling candidates from the digest and returns a banner
+    explaining the silence; debit/long ideas (LONG_CALL, PMCC) pass through.
+    The Sheet/PWA still carry the full tagged+halved candidate set — the gate
+    applies only to the push channel the user trades from.
+
+    Returns (kept_candidates, banner_or_None).
+    """
+    reasons = []
+    if macro.get("sell_caution"):
+        reasons.append("GEX SELL_CAUTION")
+    if macro.get("cash_priority"):
+        reasons.append("posture CASH_PRIORITY")
+    if not reasons:
+        return candidates, None
+
+    kept = [c for c in candidates
+            if str(c.get("strategy") or "").upper() not in PREMIUM_SELLING_STRATS]
+    n_suppressed = len(candidates) - len(kept)
+    if n_suppressed == 0:
+        return candidates, None
+    banner = (f"🔇 {n_suppressed} premium-selling idea"
+              f"{'s' if n_suppressed != 1 else ''} suppressed — {' + '.join(reasons)}. "
+              "Standing down new short premium is the discipline, not a glitch. "
+              "Full tagged list stays in the PWA.")
+    return kept, banner
+
+
 def _halve_reasons(strategy: str, macro: dict) -> list[str]:
     """Why this candidate's suggested contract count gets halved ([] = no halve).
     degraded → halve EVERYTHING (the gate couldn't verify VIX / SPX-200dma);
@@ -2617,14 +2652,24 @@ def main() -> int:
         tc.pop("_exit_signals", None)
         tg_candidates.append(tc)
 
+    # DIGEST GATE (user-approved 2026-06-10): the paper executor already
+    # refuses premium selling on GEX SELL_CAUTION — but the human trades the
+    # REAL book off this digest, which had no such brake (the 06-05..06-09
+    # incident). Under SELL_CAUTION / CASH_PRIORITY the premium-selling ideas
+    # are SUPPRESSED from the digest, replaced by an explicit banner so the
+    # silence is visible discipline, never a glitch.
+    tg_candidates, tg_banner = gate_digest_candidates(tg_candidates, macro)
+
     try:
         from src import telegram as tg
         tg.ping_options_intel(
             date=today_iso,
             candidates=tg_candidates,
             pwa_url="https://xynkro.github.io/CasaaFinance/",
+            banner=tg_banner,
         )
-        logger.info("✓ Options Intel digest sent to Telegram")
+        logger.info("✓ Options Intel digest sent to Telegram"
+                    + (" (premium ideas suppressed)" if tg_banner else ""))
     except Exception as e:
         logger.warning(f"Telegram Options Intel ping failed: {e}")
 

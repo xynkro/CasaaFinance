@@ -206,6 +206,36 @@ def mf_core_alerts(prev_plan: list[dict], new_plan: list[dict]) -> list[str]:
     return sorted(new - prev)
 
 
+_OPPORTUNITY_LEGS = {"income", "growth", "mf_core"}
+
+
+def plan_diff(prev_plan: list[dict], new_plan: list[dict]) -> dict:
+    """Diff the OPPORTUNITY legs (income/growth/mf_core — the standing
+    allocation never meaningfully changes) of the new plan against the latest
+    prior daily_plan snapshot. Same idempotent convention as mf_core_alerts:
+    the baseline is the LATEST date already in the sheet, so a same-day rerun
+    diffs against this morning's own rows and stays quiet.
+
+    Returns {"added": [plan rows], "dropped": [(ticker, strategy)], }.
+    Feeds the user-approved (2026-06-10) plan-diff Telegram push — the compact
+    "what changed" headline; the PWA's Today's Plan stays the full detail.
+    """
+    dates = {(r.get("date") or "")[:10] for r in prev_plan if r.get("date")}
+    prev_date = max(dates) if dates else ""
+    prev_keys = {((r.get("ticker") or "").upper(), (r.get("strategy") or "").upper())
+                 for r in prev_plan
+                 if (r.get("date") or "")[:10] == prev_date
+                 and (r.get("leg") or "") in _OPPORTUNITY_LEGS}
+    new_rows = [p for p in new_plan if (p.get("leg") or "") in _OPPORTUNITY_LEGS]
+    new_keys = {((p.get("ticker") or "").upper(), (p.get("strategy") or "").upper())
+                for p in new_rows}
+    added = [p for p in new_rows
+             if ((p.get("ticker") or "").upper(), (p.get("strategy") or "").upper())
+             not in prev_keys]
+    dropped = sorted(prev_keys - new_keys)
+    return {"added": added, "dropped": dropped}
+
+
 # Macro-lean tilt — regime-aware SIZING of the growth satellite (news as INPUT,
 # never a trade signal). Hawkish/risk-off → don't add aggressively into a tape
 # that compresses growth multiples; dovish/risk-on → lean in. Modest by design:
@@ -319,6 +349,21 @@ def main() -> int:
                 print(f"  → pinged core {tk}")
             except Exception:
                 pass
+
+    # Plan-diff push (user-approved 2026-06-10): one compact "what changed"
+    # Telegram headline per build — added/dropped opportunities + the lean
+    # tilt. Quiet when nothing changed (edge-triggered, no daily spam). The
+    # PWA's Today's Plan card remains the full-detail view.
+    diff = plan_diff(prev_plan, plan)
+    if diff["added"] or diff["dropped"]:
+        from src import telegram as tg
+        try:
+            tg.ping_daily_plan_diff(date=today, lean=lean, diff=diff,
+                                    pwa_url="https://xynkro.github.io/CasaaFinance/")
+            print(f"  → plan-diff pinged ({len(diff['added'])} added, "
+                  f"{len(diff['dropped'])} dropped)")
+        except Exception as e:
+            print(f"  plan-diff ping failed (non-fatal): {e}")
     return 0
 
 

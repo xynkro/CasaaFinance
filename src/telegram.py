@@ -889,6 +889,7 @@ def ping_options_intel(
     date: str,
     candidates: list[dict],
     pwa_url: str | None = None,
+    banner: str | None = None,
 ) -> dict:
     """
     Post the daily options scan digest to the Options Intel topic.
@@ -903,8 +904,12 @@ def ping_options_intel(
             composite_score, catalyst_flag, underlying_last, cash_required,
             breakeven, hv30, ...}
         pwa_url: optional PWA link for footer
+        banner: optional notice line(s) rendered right under the header —
+            used by the SELL_CAUTION / CASH_PRIORITY digest gate so suppressed
+            recommendations are VISIBLE silence, never a glitch. When a banner
+            is present the digest sends even with zero candidates.
     """
-    if not candidates:
+    if not candidates and not banner:
         return {"skipped": "no candidates to post"}
 
     import html as _html
@@ -969,6 +974,9 @@ def ping_options_intel(
 
     lines = [f"<b>🔬 OPTIONS INTEL</b> · {_html.escape(date)}"]
     lines.append(f"{len(candidates)} candidate{'s' if len(candidates) != 1 else ''} found")
+    if banner:
+        lines.append("")
+        lines.append(_html.escape(banner))
 
     for strat_key in ["CSP", "CC", "PCS", "CCS", "IC", "LONG_CALL", "PMCC"]:
         items = by_strat.pop(strat_key, [])
@@ -1054,6 +1062,53 @@ def ping_options_intel(
     if pwa_url:
         lines.append("")
         lines.append(f'📱 <a href="{_html.escape(pwa_url)}">Full scan in PWA</a>')
+
+    return send(
+        "\n".join(lines),
+        parse_mode="HTML",
+        message_thread_id=OPTIONS_INTEL_TOPIC,
+        disable_web_page_preview=True,
+    )
+
+
+def ping_daily_plan_diff(
+    date: str,
+    lean: str,
+    diff: dict,
+    pwa_url: str | None = None,
+) -> dict:
+    """One compact "what changed in today's plan" headline → Options Intel.
+
+    User-approved (2026-06-10): the push is the HEADLINE (added/dropped
+    opportunities + the macro-lean tilt, with each row's actionable detail
+    inline); the PWA's Today's Plan card stays the full-detail view. Caller is
+    edge-triggered — this only fires when something actually changed.
+
+    `diff` = build_daily_plan.plan_diff() output:
+        {"added": [plan-row dicts], "dropped": [(ticker, strategy), ...]}
+    """
+    import html as _html
+
+    added = diff.get("added") or []
+    dropped = diff.get("dropped") or []
+    if not added and not dropped:
+        return {"skipped": "no plan changes"}
+
+    lines = [f"<b>📋 PLAN CHANGES</b> · {_html.escape(date)} · lean {_html.escape(lean)}"]
+    for p in added[:8]:
+        tk = _html.escape(str(p.get("ticker", "?")))
+        strat = _html.escape(str(p.get("strategy", "")))
+        detail = _html.escape(str(p.get("detail", ""))[:70])
+        conv = float(p.get("conviction", 0) or 0)
+        lines.append(f"  ➕ <b>{tk}</b> {strat} · conv {conv:.0f} · {detail}")
+    if len(added) > 8:
+        lines.append(f"  <i>+{len(added) - 8} more added</i>")
+    for tk, strat in dropped[:8]:
+        lines.append(f"  ➖ <b>{_html.escape(str(tk))}</b> {_html.escape(str(strat))} dropped")
+    if len(dropped) > 8:
+        lines.append(f"  <i>+{len(dropped) - 8} more dropped</i>")
+    if pwa_url:
+        lines.append(f'📱 <a href="{_html.escape(pwa_url)}">Full plan in PWA</a>')
 
     return send(
         "\n".join(lines),
