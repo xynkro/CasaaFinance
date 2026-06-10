@@ -41,7 +41,10 @@ from src.logging_util import setup_logging  # noqa: E402
 
 # ─── Parameters ───────────────────────────────────────────────────────────────
 MIN_DTE = 14
-MAX_DTE = 120
+# 75 (was 120): the wheel targets ~35 DTE and never sells past ~60; surfaces
+# beyond 75 DTE were dead weight that pushed the tab past the mirror's 6k
+# safety cap, re-truncating early-alphabet tickers (AAPL) on the phone.
+MAX_DTE = 75
 MIN_FIT_ROWS = 5       # minimum contracts to attempt surface fit
 RATE_LIMIT_S = 0.5     # sleep between tickers
 
@@ -164,14 +167,15 @@ def _fetch_chains(ticker: str, min_dte: int = MIN_DTE, max_dte: int = MAX_DTE,
                 #     are all intrinsic, the IV solve explodes (100-600% "IV"),
                 #     and they were polluting the surface FIT — which corrupted
                 #     iv_fitted/iv_excess for every real candidate downstream.
-                # (b) Moneyness window ±45%: nobody wheels a strike half the
-                #     spot away; dropping the far tails cut the tab from ~14.5k
-                #     rows (a ~5MB / 6-doc mobile payload) to a sane size.
+                # (b) Moneyness window ±35%: nobody wheels a strike a third of
+                #     the spot away; with MAX_DTE=75 this keeps the whole tab
+                #     under the mirror's 6k safety cap so no ticker truncates
+                #     (unfiltered, the tab was 14.5k rows / a ~5MB phone payload).
                 if side == "P" and strike_f > spot * 1.05:
                     continue
                 if side == "C" and strike_f < spot * 0.95:
                     continue
-                if not (spot * 0.55 <= strike_f <= spot * 1.45):
+                if not (spot * 0.65 <= strike_f <= spot * 1.35):
                     continue
                 mid = (bid + ask) / 2.0
                 # oi/volume can be NaN in yfinance
