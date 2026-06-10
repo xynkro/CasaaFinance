@@ -124,6 +124,34 @@ def read_portfolio_tickers(client, logger: logging.Logger) -> set[str]:
     return out
 
 
+# Index context — always priced so the Market Map / pressure alerts can read
+# the broad tape (SPY/QQQ intraday moves) even when nothing is held in them.
+INDEX_CONTEXT = {"SPY", "QQQ"}
+
+
+def read_watchlist_tickers(client, logger: logging.Logger) -> set[str]:
+    """Watchlist = latest-date tickers in technical_scores (the daily scan
+    universe). Lets the PWA Market Map show the broader tape — not just held
+    names — and feeds the volume-pressure alert universe. Best-effort: an
+    unreadable tab just narrows the universe back to the portfolio."""
+    out: set[str] = set()
+    try:
+        rows = sh._open_sheet(client).worksheet("technical_scores").get_all_values()
+    except Exception as e:
+        logger.warning(f"  [universe] technical_scores read failed: {e}")
+        return out
+    if len(rows) <= 1:
+        return out
+    last_date = max(((r[0] or "")[:10] for r in rows[1:]), default="")
+    for r in rows[1:]:
+        if not r or len(r) < 2 or (r[0] or "")[:10] != last_date:
+            continue
+        t = (r[1] or "").strip().upper()
+        if t and t.replace(".", "").isalnum():
+            out.add(t)
+    return out
+
+
 # --- scanner POST -----------------------------------------------------------
 
 @dataclass
@@ -281,11 +309,14 @@ def main() -> int:
     load_env()
     client = sh.authenticate()
 
-    tickers = read_portfolio_tickers(client, logger)
-    if not tickers:
+    portfolio = read_portfolio_tickers(client, logger)
+    if not portfolio:
         logger.warning("No portfolio tickers found — positions_* tabs empty?")
         return 0
-    logger.info(f"  Portfolio universe: {len(tickers)} tickers")
+    watchlist = read_watchlist_tickers(client, logger)
+    tickers = portfolio | watchlist | INDEX_CONTEXT
+    logger.info(f"  Universe: {len(tickers)} tickers "
+                f"({len(portfolio)} portfolio + {len(watchlist - portfolio)} watchlist + index)")
 
     # Split US vs SGX
     sgx_tickers = sorted(t for t in tickers if t in SGX_TICKERS)
