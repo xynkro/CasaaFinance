@@ -188,8 +188,14 @@ def build_flex_grab(account: dict, positions: list[dict], prev_grab: dict) -> di
     """Assemble the PortfolioGrab JSON: fresh Flex Caspar + carried Sarah."""
     from datetime import datetime
     nlv = float(account.get("nlv", 0) or 0)
-    stocks = [_flex_stock_row(p, nlv) for p in positions if p["asset"] == "STK"]
-    options = [_flex_option_row(p) for p in positions if p["asset"] == "OPT"]
+    # Caspar's rows ONLY — if the Flex query is later widened to include
+    # Sarah's account (U16000287), her rows must not leak into his book.
+    # (Her account then needs its own mapping; until that lands she stays
+    # carried-forward below.)
+    mine = [p for p in positions
+            if (p.get("account") or CASPAR_ACCOUNT) == CASPAR_ACCOUNT]
+    stocks = [_flex_stock_row(p, nlv) for p in mine if p["asset"] == "STK"]
+    options = [_flex_option_row(p) for p in mine if p["asset"] == "OPT"]
     prev_caspar_summary = ((prev_grab.get("accounts") or {}).get("caspar") or {}).get("summary", {})
     now = datetime.now()
     return {
