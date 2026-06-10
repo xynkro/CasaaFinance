@@ -4,6 +4,7 @@ import { numeric } from "../data";
 import { IvSmileChart } from "../cards/IvSmileChart";
 import { TopCandidatesCard } from "../cards/TopCandidatesCard";
 import { ChainViewCard } from "../cards/ChainViewCard";
+import { ScannerHowTo } from "../cards/ScannerHowTo";
 
 /* ---------- types ---------- */
 
@@ -73,10 +74,14 @@ export function ScannerPage({ ivSurfaceScan, loading }: ScannerPageProps) {
 
   if (ivSurfaceScan.length === 0 && !loading) {
     return (
-      <div className="flex items-center justify-center min-h-[40vh] px-6">
-        <p className="text-slate-500 text-[length:var(--t-sm)] text-center">
-          No scan data yet. Scanner runs daily at 8 am ET pre-market.
-        </p>
+      <div className="px-4 pt-4 space-y-4">
+        <ScannerHowTo />
+        <div className="flex items-center justify-center min-h-[30vh] px-6">
+          <p className="text-slate-500 text-[length:var(--t-sm)] text-center">
+            No scan data yet. The surface scan runs each trading day at 10:38 ET
+            (live quotes) — pull to refresh after that.
+          </p>
+        </div>
       </div>
     );
   }
@@ -105,6 +110,9 @@ export function ScannerPage({ ivSurfaceScan, loading }: ScannerPageProps) {
 
   return (
     <div className="space-y-4 px-4 pb-24">
+      {/* How-to helper (collapsible, choice persists) */}
+      <ScannerHowTo />
+
       {/* Ticker chips */}
       <div className="overflow-x-auto flex gap-1.5 no-scrollbar -mx-4 px-4">
         {allTickers.map((t) => (

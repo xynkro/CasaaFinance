@@ -187,8 +187,18 @@ export function TopCandidatesCard({
   // Filter: only rich premium (iv_excess > 0), default to LOW assignment risk
   const [riskFilter, setRiskFilter] = useState<"ALL" | "LOW" | "MEDIUM" | "HIGH">("LOW");
 
+  // Quality floor — keep the list SELLABLE. Without it the top of the
+  // iv_excess ranking is penny-bid noise (e.g. $0.01-0.10 bids on low-vol
+  // ETFs, where a tiny absolute mispricing reads as huge "excess") and
+  // near-ITM strikes nobody wheels. Bid ≥ $0.10 = a real market; |Δ|
+  // 0.05-0.45 = the sellable zone around the wheel band.
   const filtered = contracts
     .filter((r) => numeric(r.iv_excess) > 0)
+    .filter((r) => numeric(r.bid) >= 0.10)
+    .filter((r) => {
+      const d = Math.abs(numeric(r.delta));
+      return d >= 0.05 && d <= 0.45;
+    })
     .filter((r) => riskFilter === "ALL" || (r.assignment_risk ?? "").toUpperCase() === riskFilter)
     .sort((a, b) => numeric(b.iv_excess) - numeric(a.iv_excess));
 
@@ -250,8 +260,10 @@ export function TopCandidatesCard({
       </div>
 
       {!filtered.length && (
-        <p className="text-[length:var(--t-xs)] text-slate-500 py-4 text-center">
-          No candidates match the current filter.
+        <p className="text-[length:var(--t-xs)] text-slate-500 py-4 text-center leading-relaxed">
+          Nothing rich AND sellable at {riskFilter} assignment risk right now
+          (needs IV above the fitted curve, bid ≥ $0.10, |Δ| 0.05–0.45).
+          {riskFilter !== "ALL" ? " Try a wider risk filter — or accept that quiet is an answer." : ""}
         </p>
       )}
 
