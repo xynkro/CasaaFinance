@@ -12,6 +12,7 @@ import { GovConfluenceCard } from "../cards/GovConfluenceCard";
 import { CongressTradesCard } from "../cards/CongressTradesCard";
 import { MotleyFoolCard } from "../cards/MotleyFoolCard";
 import { TldrTodayCard } from "../cards/TldrTodayCard";
+import { MarketMapCard } from "../cards/MarketMapCard";
 import { PaperStatusCard } from "../cards/PaperStatusCard";
 import { TodaysPlanCard } from "../cards/TodaysPlanCard";
 import { MacroStrip } from "../components/MacroStrip";
@@ -102,6 +103,20 @@ export function HomePage({
             sarahPositions={data?.sarahPositions ?? []}
             onJumpDecisions={jumpDecisions}
             onJumpOptions={jumpOptions}
+          />
+        </div>
+
+        {/* Market Map — portfolio + watchlist heatmap (tiles sized by weight,
+            coloured by day % change from the 5-min TV live feed). Sits above
+            the StickyTabs with TL;DR so "who's selling" is visible the moment
+            Home opens. Renders null until the live_prices tab has rows. */}
+        <div className="mb-2 fade-up fade-up-1">
+          <MarketMapCard
+            livePrices={data?.livePrices ?? new Map()}
+            livePricesUpdatedAt={data?.livePricesUpdatedAt ?? ""}
+            casparPositions={data?.casparPositions ?? []}
+            sarahPositions={data?.sarahPositions ?? []}
+            technicalScores={data?.technicalScores ?? []}
           />
         </div>
 
