@@ -71,6 +71,36 @@ def fetch_macro(logger: logging.Logger) -> dict[str, float]:
     return out
 
 
+def spx_above_200dma_from_closes(closes: list[float]) -> bool | None:
+    """SPX close vs its 200-day SMA from a daily close series (oldest→newest).
+    None when there isn't enough history to verify — callers write '' so
+    downstream consumers degrade to reduced sizing rather than assuming TRUE."""
+    closes = [c for c in closes if c is not None]
+    if len(closes) < 200:
+        return None
+    sma200 = sum(closes[-200:]) / 200.0
+    return closes[-1] > sma200
+
+
+def fetch_spx_above_200dma(logger: logging.Logger) -> bool | None:
+    """Daily SPX closes (250d) → close vs 200-day SMA. None on ANY failure —
+    never a guessed default. This feeds the `spx_above_200sma` macro column the
+    paper executor + macro gate read as the trend-halt input."""
+    try:
+        import yfinance as yf
+        data = yf.download("^GSPC", period="250d", progress=False, auto_adjust=True)
+        if data is None or data.empty:
+            logger.warning("spx_above_200sma: yfinance returned empty ^GSPC frame")
+            return None
+        close = data["Close"]
+        if hasattr(close, "columns"):       # MultiIndex single-ticker shape
+            close = close.iloc[:, 0]
+        return spx_above_200dma_from_closes([float(v) for v in close.dropna().tolist()])
+    except Exception as e:
+        logger.warning(f"spx_above_200sma fetch failed: {e}")
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry", action="store_true", help="Print what would be written, no sheet change")
@@ -88,6 +118,9 @@ def main() -> int:
 
     for k, v in values.items():
         logger.info(f"  {k:10}={v:.4f}")
+
+    spx_above = fetch_spx_above_200dma(logger)
+    logger.info(f"  spx_above_200sma={spx_above}")
 
     if args.dry:
         logger.info("[DRY] Would append to macro sheet")
@@ -108,6 +141,7 @@ def main() -> int:
         us_10y=values.get("us_10y", 0.0),
         spx=values.get("spx", 0.0),
         usd_sgd=values.get("usd_sgd", 0.0),
+        spx_above_200sma=spx_above,
     )
     sh.append_row(client, S.MacroRow.TAB_NAME, row.to_row())
     logger.info(f"✓ Appended macro row to {S.MacroRow.TAB_NAME}")

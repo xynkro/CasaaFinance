@@ -129,3 +129,80 @@ def test_macro_lean_schema_roundtrips():
     from src.schema import MacroLeanRow as R
     cells = R(date=TODAY, net_lean="hawkish", summary="CPI→hawkish").to_row()
     assert len(cells) == len(R.HEADERS) and cells[R.HEADERS.index("net_lean")] == "hawkish"
+
+
+# ── TOP_INCOME quota: wheel + spread families (composite scores are NOT
+#    comparable across strategies — ICs saturate ~100, the wheel caps ~62, so
+#    a raw top-2-by-composite cut structurally crowded the wheel out) ─────────
+
+def _scan(strategy, ticker, score, **kw):
+    base = {"date": TODAY, "ticker": ticker, "strategy": strategy, "strike": "100",
+            "premium": "1.50", "dte": "35", "composite_score": str(score), "notes": ""}
+    base.update(kw)
+    return base
+
+
+def test_income_quota_wheel_not_crowded_out_by_saturated_ic():
+    """The live 2026-06-09 shape: IC 104.1 vs CSP 62 → BOTH must surface."""
+    scan = [
+        _scan("IC", "IBM", 104.1, notes="SP:90/LP:85/SC:110/LC:115 W:$5"),
+        _scan("PCS", "META", 82.0, notes="SP:95/LP:90 W:$5"),
+        _scan("CSP", "NVDA", 62.0),
+    ]
+    plan = bdp.build_plan(10_000, scan, [], TODAY)
+    income = [r for r in plan if r["leg"] == "income"]
+    strats = {r["strategy"] for r in income}
+    assert len(income) == 2
+    assert "CSP" in strats, "wheel slot must survive the IC composite saturation"
+    assert "IC" in strats, "best spread (by composite within family) takes slot 2"
+    assert "PCS" not in strats
+
+
+def test_income_quota_best_within_each_family():
+    scan = [
+        _scan("CSP", "NVDA", 62.0),
+        _scan("CC", "AMD", 58.0),       # loses the wheel slot to CSP 62
+        _scan("IC", "IBM", 104.0),
+        _scan("CCS", "TSLA", 99.0),     # loses the spread slot to IC 104
+    ]
+    plan = bdp.build_plan(10_000, scan, [], TODAY)
+    income = {r["strategy"]: r for r in plan if r["leg"] == "income"}
+    assert set(income) == {"CSP", "IC"}
+    assert income["CSP"]["ticker"] == "NVDA" and income["IC"]["ticker"] == "IBM"
+
+
+def test_income_quota_spread_only_fills_both_slots():
+    scan = [_scan("IC", "IBM", 104.0), _scan("PCS", "META", 82.0)]
+    plan = bdp.build_plan(10_000, scan, [], TODAY)
+    income = {r["strategy"] for r in plan if r["leg"] == "income"}
+    assert income == {"IC", "PCS"}          # no wheel candidates → spreads fill both
+
+
+def test_income_quota_wheel_only_fills_both_slots():
+    scan = [_scan("CSP", "NVDA", 62.0), _scan("CC", "AMD", 55.0)]
+    plan = bdp.build_plan(10_000, scan, [], TODAY)
+    income = {r["strategy"] for r in plan if r["leg"] == "income"}
+    assert income == {"CSP", "CC"}
+
+
+def test_income_quota_harvest_csp_counts_as_wheel():
+    scan = [
+        _scan("IC", "IBM", 104.0),
+        _scan("HARVEST_CSP", "MARA", 60.0),    # folds to CSP → wheel slot
+    ]
+    plan = bdp.build_plan(10_000, scan, [], TODAY)
+    income = {r["strategy"]: r for r in plan if r["leg"] == "income"}
+    assert set(income) == {"CSP", "IC"} and income["CSP"]["ticker"] == "MARA"
+
+
+def test_income_quota_long_call_backfills_open_slot():
+    """LONG_CALL is neither family; it backfills only when a slot stays open."""
+    scan = [_scan("CSP", "NVDA", 62.0), _scan("LONG_CALL", "PLTR", 70.0)]
+    plan = bdp.build_plan(10_000, scan, [], TODAY)
+    income = {r["strategy"] for r in plan if r["leg"] == "income"}
+    assert income == {"CSP", "LONG_CALL"}
+    # ...but never displaces the two family slots when both exist
+    scan += [_scan("IC", "IBM", 104.0)]
+    plan = bdp.build_plan(10_000, scan, [], TODAY)
+    income = {r["strategy"] for r in plan if r["leg"] == "income"}
+    assert income == {"CSP", "IC"}

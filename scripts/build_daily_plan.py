@@ -52,6 +52,10 @@ STANDING_ALLOCATION = [
 ]
 
 INCOME_STRATEGIES = ("CSP", "CC", "PCS", "CCS", "IC", "LONG_CALL")
+# Income-slot families for the QUOTA cut (see _income_quota): composite scores
+# are NOT comparable across strategies, so a raw top-N would always be spreads.
+WHEEL_STRATS = ("CSP", "CC")          # wheel side (incl. HARVEST_CSP→CSP)
+SPREAD_STRATS = ("PCS", "CCS", "IC")  # defined-risk spreads
 TOP_GROWTH = 5         # momentum satellite names in the plan (incl the AMD tier)
 TOP_INCOME = 2         # option-income opportunities in the plan
 SATELLITE_PER_NAME_PCT = 0.05   # each momentum satellite ~5% NLV → ~25% across 5
@@ -106,6 +110,33 @@ def _income_candidates(scan_rows: list[dict], today: str) -> list[dict]:
         })
     rows.sort(key=lambda x: x["conviction"], reverse=True)
     return rows
+
+
+def _income_quota(candidates: list[dict], top_n: int = TOP_INCOME) -> list[dict]:
+    """Family QUOTA for the income slots — NOT a raw top-N by composite.
+
+    WHY: composite scores are not comparable ACROSS strategies — ICs saturate
+    ~100 (live 2026-06-09 scan: IC 99.4–104.1, PCS 65–82) while the wheel caps
+    ~62, so a raw top-2-by-composite cut structurally crowds the wheel out of
+    the plan every single day.
+
+    Quota: slot 1 = best wheel-side idea (CSP/CC), slot 2 = best defined-risk
+    spread idea (PCS/CCS/IC), each best-by-composite WITHIN its family (the
+    `candidates` list arrives conviction-sorted from _income_candidates). If a
+    family has no candidates, the remaining income candidates (the other
+    family's next-best, or LONG_CALL) backfill the open slots by composite.
+    """
+    wheel = [c for c in candidates if c.get("strategy") in WHEEL_STRATS]
+    spreads = [c for c in candidates if c.get("strategy") in SPREAD_STRATS]
+    out: list[dict] = []
+    if wheel:
+        out.append(wheel[0])
+    if spreads:
+        out.append(spreads[0])
+    if len(out) < top_n:
+        taken = {id(c) for c in out}
+        out.extend(c for c in candidates if id(c) not in taken)
+    return out[:top_n]
 
 
 def _growth_candidates(screen_rows: list[dict], today: str, nlv: float,
@@ -193,7 +224,9 @@ def build_plan(nlv: float, scan_rows: list[dict], screen_rows: list[dict],
     with the growth satellite sized by today's macro-surprise `lean`."""
     plan = standing_allocation_rows(nlv)
     n_growth, sat_pct = _LEAN_TILT.get(lean, (TOP_GROWTH, SATELLITE_PER_NAME_PCT))
-    income = _income_candidates(scan_rows, today)[:TOP_INCOME]
+    # QUOTA, not raw top-2: best wheel idea + best spread idea (see _income_quota
+    # — cross-strategy composites are incomparable; ICs saturate 100, wheel ~62).
+    income = _income_quota(_income_candidates(scan_rows, today), TOP_INCOME)
     growth = _growth_candidates(screen_rows, today, nlv, per_name_pct=sat_pct)[:n_growth]
     mf_core = _mf_core_candidates(curated_rows or [], today, nlv)
     if lean in _LEAN_TILT:

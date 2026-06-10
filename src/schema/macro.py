@@ -11,7 +11,12 @@ from ._base import _num, _ts_suffix
 @dataclass
 class MacroRow:
     TAB_NAME = "macro"
-    HEADERS = ["date", "vix", "dxy", "us_10y", "spx", "usd_sgd"]
+    # spx_above_200sma is APPENDED LAST (same precedent as SignalOutcomeRow's
+    # pnl_model) so legacy 6-col rows stay positionally aligned on read-back.
+    # Written by macro_grab (SPX close vs its 200-day SMA); read by the macro
+    # gate + paper executor as the trend-halt input. TRUE/FALSE, '' = unknown
+    # (downstream treats unknown as degraded → reduced sizing, never full-size).
+    HEADERS = ["date", "vix", "dxy", "us_10y", "spx", "usd_sgd", "spx_above_200sma"]
 
     date: str
     vix: float | None = None
@@ -19,11 +24,13 @@ class MacroRow:
     us_10y: float | None = None
     spx: float | None = None
     usd_sgd: float | None = None
+    spx_above_200sma: bool | None = None
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
+        sa = "" if self.spx_above_200sma is None else ("TRUE" if self.spx_above_200sma else "FALSE")
         return [d, _num(self.vix, 2), _num(self.dxy, 3), _num(self.us_10y, 3),
-                _num(self.spx, 2), _num(self.usd_sgd, 4)]
+                _num(self.spx, 2), _num(self.usd_sgd, 4), sa]
 
 
 @dataclass
@@ -562,4 +569,5 @@ def macro_from_ledger(ledger: dict, date: str) -> MacroRow:
         us_10y=m.get("us_10y"),
         spx=m.get("spx"),
         usd_sgd=m.get("usd_sgd"),
+        spx_above_200sma=m.get("spx_above_200sma"),  # absent in ledgers → '' cell
     )

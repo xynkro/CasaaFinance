@@ -24,7 +24,7 @@ import argparse
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +47,96 @@ def _f(x, d: float = 0.0) -> float:
         return float(x)
     except (TypeError, ValueError):
         return d
+
+
+def parse_audit_ts(s: str) -> datetime | None:
+    """Sheet audit timestamp → datetime ('YYYY-MM-DDTHHMMSS' _ts_suffix
+    convention, 'YYYY-MM-DD HH:MM:SS', ISO with colons, or bare date)."""
+    s = str(s or "").strip()
+    for fmt in ("%Y-%m-%dT%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def latest_by_parsed_ts(rows: list[dict], date_key: str = "date") -> dict | None:
+    """Latest row by PARSED timestamp — NOT rows[-1]. Audit tabs (macro,
+    gex_regime, ...) are append-UNORDERED: Mac + cloud writers interleave, so
+    e.g. the macro tab's 2026-06-09T180409 row physically precedes T005009.
+    Ties go to the later physical row (the fresher write)."""
+    best, best_ts = None, None
+    for d in rows:
+        ts = parse_audit_ts(d.get(date_key, ""))
+        if ts is None:
+            continue
+        if best_ts is None or ts >= best_ts:
+            best, best_ts = d, ts
+    return best
+
+
+MACRO_TAB_MAX_AGE_HOURS = 72.0   # weekend-tolerant freshness window for macro rows
+
+
+def merge_macro_rows(rows: list[dict], now: datetime | None = None,
+                     max_age_hours: float = MACRO_TAB_MAX_AGE_HOURS) -> dict:
+    """Field-level merge of macro-tab rows: NEWEST non-blank value per field by
+    PARSED timestamp, ignoring rows older than `max_age_hours`.
+
+    Why not the single latest row: the macro tab has MULTIPLE writers
+    (macro_grab, daily_tracker, sync sidecar) and only macro_grab fills
+    spx_above_200sma — a tracker row landing last would mask the flag and
+    permanently degrade sizing. Never invents values: fields absent from every
+    fresh row stay absent, and macro_sizing_context degrades fail-safe."""
+    now = now or datetime.now()
+    cutoff = now - timedelta(hours=max_age_hours)
+    fresh = []
+    for i, d in enumerate(rows):
+        ts = parse_audit_ts(d.get("date", ""))
+        if ts is not None and ts >= cutoff:
+            fresh.append((ts, i, d))
+    if not fresh:
+        return {}
+    fresh.sort(key=lambda t: (t[0], t[1]), reverse=True)   # newest first; ties → later physical
+    out: dict = {"asof": fresh[0][2].get("date", "")}
+    for _, _, row in fresh:
+        for key in ("vix", "spx_above_200sma"):
+            if key not in out and str(row.get(key) or "").strip():
+                out[key] = str(row.get(key)).strip()
+    return out
+
+
+def macro_sizing_context(macro: dict) -> tuple[float, bool, bool]:
+    """(vix, spx_above_200sma, degraded) from the merged macro-tab values.
+
+    FAIL-SAFE: the old code defaulted VIX→16.0 and spx_above_200sma→True when
+    the columns were missing (the spx_above_200sma column didn't even exist),
+    so a dead feed sized at FULL regime multiplier. Now: VIX missing/unparseable
+    OR SPX-vs-200dma unknown → degraded=True, and the caller applies a 0.5
+    multiplier (CAUTION-equivalent) on top of whatever IS known. A known-bad
+    state (VIX>30 / SPX below) still halts via regime_multiplier as before."""
+    vix = _f(macro.get("vix"), 0.0)
+    vix_known = vix > 0
+    sa = str(macro.get("spx_above_200sma") if macro.get("spx_above_200sma") is not None else "").strip().lower()
+    spx_known = sa in ("true", "false", "1", "0")
+    # True here is only the *sizing input* when the state is known; when unknown
+    # the degraded 0.5 multiplier covers it (never full-size on missing data).
+    spx_ok = sa in ("true", "1") if spx_known else True
+    degraded = not (vix_known and spx_known)
+    return vix, spx_ok, degraded
+
+
+def income_skip_reason(strat: str, gex_caution: bool, blackout_event: dict | None) -> str | None:
+    """Pre-placement gates for NEW premium-selling legs (None = proceed).
+    Mirrors: GEX SELL_CAUTION skip + macro event blackout (high-impact US event
+    inside 48h → don't open fresh short premium into FOMC/CPI/NFP)."""
+    if strat in PREMIUM_SELLING:
+        if gex_caution:
+            return "skipped:GEX SELL_CAUTION"
+        if blackout_event:
+            return "skipped:EVENT_BLACKOUT"
+    return None
 
 
 def norm_expiry(e: str) -> str:
@@ -145,8 +235,10 @@ _DEFINED_OR_DEBIT = {"PCS", "CCS", "IC", "PMCC", "LONG_CALL", "LONG_PUT"}
 
 
 def contracts_for(pick: dict, nlv: float, excess_liq: float | None,
-                  vix: float, spx_above_200dma: bool) -> int:
-    """Recommended contract count under Caspar's aggressive profile (Tranche 1b)."""
+                  vix: float, spx_above_200dma: bool, degraded: bool = False) -> int:
+    """Recommended contract count under Caspar's aggressive profile (Tranche 1b).
+    degraded=True (VIX / SPX-200dma unknowable from the macro tab) applies a
+    0.5 CAUTION-equivalent multiplier — never full-size on missing data."""
     from src.position_sizing import size_candidate
     strat = "CSP" if pick.get("strategy") == "HARVEST_CSP" else (pick.get("strategy") or "")
     override = _f(pick.get("cash_required")) if strat.upper() in _DEFINED_OR_DEBIT else None
@@ -155,7 +247,10 @@ def contracts_for(pick: dict, nlv: float, excess_liq: float | None,
         underlying=_f(pick.get("underlying_last")), premium=_f(pick.get("premium")),
         profile_name="aggressive", nlv=nlv, excess_liquidity=excess_liq,
         is_margin=True, bpr_override=override, vix=vix, spx_above_200dma=spx_above_200dma)
-    return sr.recommended_contracts
+    n = sr.recommended_contracts
+    if degraded and n > 0:
+        n = int(n * 0.5)
+    return n
 
 
 # ──────────────────── I/O + main ────────────────────────────────────────────
@@ -227,19 +322,19 @@ def _read_plan_and_context():
         acct["excess_liq"] = _f(c.get("excess_liq")) or None
     except (IndexError, KeyError):
         pass
-    macro = {}
-    try:
-        macro = latest("macro")[-1]
-    except IndexError:
-        pass
+    # Macro values by PARSED timestamp, field-level merged — rows[-1] is wrong
+    # on this tab (append-unordered: Mac + cloud writers interleave out of time
+    # order, and only macro_grab's rows carry spx_above_200sma).
+    macro = merge_macro_rows(latest("macro"))
     gex_gate = {"gate": "NORMAL", "note": ""}
     try:
         spy = [r for r in latest("gex_regime")
                if (r.get("symbol") or "").upper() == "SPY"
                and (r.get("date") or "")[:10] == td]
-        if spy:
-            gex_gate = {"gate": spy[-1].get("premium_gate") or "NORMAL",
-                        "note": spy[-1].get("note") or ""}
+        spy_row = latest_by_parsed_ts(spy)
+        if spy_row:
+            gex_gate = {"gate": spy_row.get("premium_gate") or "NORMAL",
+                        "note": spy_row.get("note") or ""}
     except Exception:
         pass
     return plan, scan, acct, macro, gex_gate
@@ -268,14 +363,30 @@ def main() -> int:
 
     today = date.today().isoformat()
     plan_rows, scan, acct, macro, gexg = _read_plan_and_context()
-    vix = _f(macro.get("vix"), 16.0)
-    spx_ok = str(macro.get("spx_above_200sma", "True")).lower() not in ("false", "0", "")
+    # FAIL-SAFE macro parse: no more VIX=16.0 / spx_above=True defaults on
+    # missing data — unknown inputs mean degraded=True → 0.5 sizing multiplier.
+    vix, spx_ok, macro_degraded = macro_sizing_context(macro)
     gex_caution = (gexg.get("gate") == "SELL_CAUTION")
 
+    # Event blackout: high-impact US macro event (FOMC/CPI/NFP) inside 48h →
+    # skip NEW premium-selling legs (same MacroFeed API trigger_alerts uses).
+    blackout_event = None
+    try:
+        from src.macro_blackouts import MacroFeed
+        blackout_event = MacroFeed.fetch().next_high_impact(within_hours=48)
+    except Exception as e:
+        print(f"  (event-blackout check failed: {e})")
+
     print(f"=== Alpaca paper executor · {today} · NLV ${acct['nlv']:,.0f} "
-          f"excess ${acct['excess_liq'] or 0:,.0f} · VIX {vix} ===")
+          f"excess ${acct['excess_liq'] or 0:,.0f} · VIX {vix if vix > 0 else '?'} ===")
+    if macro_degraded:
+        print("  ⚠ MACRO DATA DEGRADED — VIX and/or SPX-vs-200dma unknown from the "
+              "macro tab; sizing HALVED (0.5× CAUTION-equivalent), never full-size.")
     if gexg.get("note"):
         print(f"  GEX: {gexg['note']}")
+    if blackout_event:
+        print(f"  ⛔ EVENT BLACKOUT: {blackout_event.get('event', '?')} in "
+              f"{blackout_event.get('_minutes_until', '?')}min — premium-selling legs will be skipped")
     if not plan_rows:
         print("No daily_plan rows for today (run build_daily_plan.py first). Nothing to do.")
         return 0
@@ -324,9 +435,12 @@ def main() -> int:
             print(f"  PLAN {spec['label']}  [equity]")
 
         elif leg == "income":
-            if gex_caution and strat in PREMIUM_SELLING:
-                statuses[key] = "skipped:GEX SELL_CAUTION"
-                print(f"  SKIP {strat:10} {tk:6} — GEX SELL_CAUTION (short gamma)")
+            skip = income_skip_reason(strat, gex_caution, blackout_event)
+            if skip:
+                statuses[key] = skip
+                detail = ("GEX SELL_CAUTION (short gamma)" if "GEX" in skip else
+                          f"event blackout ({(blackout_event or {}).get('event', '?')} <48h)")
+                print(f"  SKIP {strat:10} {tk:6} — {detail}")
                 continue
             pick = scan_idx.get((tk, strat))
             if not pick:
@@ -338,7 +452,8 @@ def main() -> int:
                 statuses[key] = f"skipped:{reason}"[:40]
                 print(f"  SKIP {strat:10} {tk:6} — {reason}")
                 continue
-            qty = contracts_for(pick, acct["nlv"], acct["excess_liq"], vix, spx_ok)
+            qty = contracts_for(pick, acct["nlv"], acct["excess_liq"], vix, spx_ok,
+                                degraded=macro_degraded)
             if qty <= 0:
                 statuses[key] = "skipped:sized to 0"
                 print(f"  SKIP {spec['label']} — sized to 0 contracts")

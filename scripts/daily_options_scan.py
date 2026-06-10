@@ -585,42 +585,234 @@ def discover_universe(logger: logging.Logger, top_n: int = HARVEST_UNIVERSE_TOP)
         return FALLBACK_HIGH_IV_UNIVERSE[:top_n]
 
 
-def macro_gate(logger: logging.Logger) -> dict:
-    """Check macro regime. Returns {regime, vix, spx, spx_above_200sma, halted, caution}."""
-    import yfinance as yf
+# ── Macro gate: fail-SAFE, Sheet-first ─────────────────────────────────────
+# PROVEN INCIDENT (2026-06-08/09): yfinance silently failed in CI and the old
+# gate printed "STANDARD (VIX=18.0)" — a hardcoded fallback constant — on BOTH
+# days, while the system's OWN `macro` tab carried VIX 19.87–21.81, gex_regime
+# said SELL_CAUTION and exposure_posture said CASH_PRIORITY. The scanner kept
+# recommending short premium into a selloff. Rules now:
+#   1. PRIMARY  = the `macro` Sheet tab (macro_grab writes it daily).
+#   2. FALLBACK = yfinance.
+#   3. BOTH dead → regime = CAUTION (never STANDARD from a constant),
+#      degraded=True → suggested sizing halved + loud logging.
 
-    result: dict[str, Any] = {"regime": "STANDARD", "halted": False, "blackout": False, "caution": False}
+MACRO_TAB_MAX_AGE_HOURS = 72.0   # weekend-tolerant freshness window for the macro tab
 
-    # VIX
+
+def _parse_audit_ts(s: str) -> datetime | None:
+    """Parse a sheet audit timestamp: 'YYYY-MM-DDTHHMMSS' (the _ts_suffix
+    convention), 'YYYY-MM-DD HH:MM:SS', ISO with colons, or bare 'YYYY-MM-DD'."""
+    s = str(s or "").strip()
+    for fmt in ("%Y-%m-%dT%H%M%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _latest_by_parsed_ts(rows: list[dict], date_key: str = "date") -> dict | None:
+    """Latest row by PARSED timestamp — NOT rows[-1]. The audit tabs are
+    append-unordered (Mac + cloud writers interleave; e.g. on the macro tab
+    2026-06-09T180409 physically precedes T005009), so physical order is not
+    chronological order. Ties: the later physical row (fresher write) wins."""
+    best: dict | None = None
+    best_ts: datetime | None = None
+    for d in rows:
+        ts = _parse_audit_ts(d.get(date_key, ""))
+        if ts is None:
+            continue
+        if best_ts is None or ts >= best_ts:
+            best, best_ts = d, ts
+    return best
+
+
+def _tab_dicts(ss, tab: str) -> list[dict]:
+    """All non-empty rows of `tab` as header-keyed dicts ([] on any failure)."""
+    rows = ss.worksheet(tab).get_all_values()
+    if len(rows) < 2:
+        return []
+    hdr = rows[0]
+    return [dict(zip(hdr, r)) for r in rows[1:] if any(r)]
+
+
+def merge_macro_rows(rows: list[dict], now: datetime | None = None,
+                     max_age_hours: float = MACRO_TAB_MAX_AGE_HOURS) -> dict:
+    """Field-level merge of macro-tab rows: NEWEST non-blank value per field,
+    by PARSED timestamp, ignoring rows older than `max_age_hours`.
+
+    Why not just the single latest row: the tab has MULTIPLE writers
+    (macro_grab, daily_tracker, the sync sidecar) and only macro_grab fills
+    spx_above_200sma — a tracker row landing last would mask the flag and
+    force permanent degradation. Never invents values: a field absent from
+    every fresh row stays absent (callers degrade fail-safe)."""
+    now = now or datetime.now()
+    cutoff = now - timedelta(hours=max_age_hours)
+    fresh: list[tuple[datetime, int, dict]] = []
+    for i, d in enumerate(rows):
+        ts = _parse_audit_ts(d.get("date", ""))
+        if ts is not None and ts >= cutoff:
+            fresh.append((ts, i, d))
+    if not fresh:
+        return {}
+    fresh.sort(key=lambda t: (t[0], t[1]), reverse=True)   # newest first; ties → later physical row
+    out: dict[str, Any] = {"asof": fresh[0][2].get("date", "")}
+    for _, _, row in fresh:
+        if "vix" not in out:
+            try:
+                v = float(row.get("vix") or 0)
+                if v > 0:
+                    out["vix"] = v
+            except (TypeError, ValueError):
+                pass
+        if "spx" not in out:
+            try:
+                s = float(row.get("spx") or 0)
+                if s > 0:
+                    out["spx"] = s
+            except (TypeError, ValueError):
+                pass
+        if "spx_above_200sma" not in out:
+            sa = str(row.get("spx_above_200sma") or "").strip().upper()
+            if sa in ("TRUE", "FALSE"):
+                out["spx_above_200sma"] = (sa == "TRUE")
+    return out
+
+
+def _macro_from_sheet(ss, logger: logging.Logger) -> dict:
+    """PRIMARY macro source: the `macro` tab via merge_macro_rows (newest
+    non-blank value per field within the freshness window). Returns {} when
+    the tab is unreadable, empty, or entirely stale — then yfinance takes
+    over as the fallback. Never invents values."""
     try:
+        rows = _tab_dicts(ss, "macro")
+    except Exception as e:
+        logger.warning(f"  macro tab read failed: {e}")
+        return {}
+    out = merge_macro_rows(rows)
+    if not out and rows:
+        logger.warning(f"  macro tab has no row fresher than {MACRO_TAB_MAX_AGE_HOURS:.0f}h "
+                       "— using yfinance fallback")
+    return out
+
+
+def _yf_vix(logger: logging.Logger) -> float | None:
+    """yfinance VIX close — None on ANY failure (never a constant)."""
+    try:
+        import yfinance as yf
         vix_data = yf.download("^VIX", period="5d", progress=False)
-        if not vix_data.empty:
-            vix = float(vix_data["Close"].dropna().iloc[-1])
-        else:
-            vix = 18.0
-        result["vix"] = round(vix, 1)
-    except Exception:
-        vix = 18.0
-        result["vix"] = vix
+        if vix_data is not None and not vix_data.empty:
+            return float(vix_data["Close"].dropna().iloc[-1])
+    except Exception as e:
+        logger.warning(f"  yfinance VIX fetch failed: {e}")
+    return None
 
-    # SPX + 200 SMA
+
+def _yf_spx_200dma(logger: logging.Logger) -> tuple[float | None, float | None, bool | None]:
+    """yfinance (spx, sma200, spx_above_200sma) — (None, None, None) on failure."""
     try:
+        import yfinance as yf
         spx_data = yf.download("^GSPC", period="250d", progress=False)
-        if not spx_data.empty:
+        if spx_data is not None and not spx_data.empty:
             spx_close = spx_data["Close"].dropna()
-            spx = float(spx_close.iloc[-1])
-            sma200 = float(spx_close.tail(200).mean()) if len(spx_close) >= 200 else 0
-            result["spx"] = round(spx, 1)
-            result["spx_sma200"] = round(sma200, 1)
-            result["spx_above_200sma"] = spx > sma200
-        else:
-            result["spx"] = 0
-            result["spx_above_200sma"] = True
-    except Exception:
-        result["spx"] = 0
-        result["spx_above_200sma"] = True
+            if not spx_close.empty:
+                spx = float(spx_close.iloc[-1])
+                if len(spx_close) >= 200:
+                    sma200 = float(spx_close.tail(200).mean())
+                    return spx, sma200, spx > sma200
+                return spx, None, None
+    except Exception as e:
+        logger.warning(f"  yfinance SPX fetch failed: {e}")
+    return None, None, None
 
-    # Macro blackout check (FOMC/CPI/NFP within 2 days).
+
+def _latest_gex_premium_gate(ss, logger: logging.Logger) -> str:
+    """Latest SPY row of gex_regime → premium_gate (best-effort '' on failure)."""
+    try:
+        spy = [d for d in _tab_dicts(ss, "gex_regime")
+               if (d.get("symbol") or "").strip().upper() == "SPY"]
+        row = _latest_by_parsed_ts(spy)
+        return str(row.get("premium_gate") or "").strip().upper() if row else ""
+    except Exception as e:
+        logger.warning(f"  gex_regime read failed: {e}")
+        return ""
+
+
+def _latest_exposure_posture(ss, logger: logging.Logger) -> tuple[str, float | None]:
+    """Latest exposure_posture row → (recommendation, exposure_ceiling_pct)."""
+    try:
+        row = _latest_by_parsed_ts(_tab_dicts(ss, "exposure_posture"))
+        if not row:
+            return "", None
+        rec = str(row.get("recommendation") or "").strip().upper()
+        try:
+            ceiling = float(row.get("exposure_ceiling_pct") or "")
+        except (TypeError, ValueError):
+            ceiling = None
+        return rec, ceiling
+    except Exception as e:
+        logger.warning(f"  exposure_posture read failed: {e}")
+        return "", None
+
+
+def macro_gate(logger: logging.Logger, ss=None) -> dict:
+    """Check macro regime — FAIL-SAFE. Source order: own `macro` Sheet tab
+    FIRST, yfinance as fallback, and if BOTH fail the regime is CAUTION with
+    degraded=True (halved sizing) — never STANDARD from a constant.
+
+    Also reads gex_regime (latest SPY premium_gate) and exposure_posture
+    (latest recommendation + ceiling) best-effort: SELL_CAUTION / CASH_PRIORITY
+    keep the regime at least at CAUTION and tag + halve premium-selling
+    candidates downstream (tag + halve, NOT zero-out — dropping recommendations
+    entirely is a pending user decision).
+
+    Returns {regime, vix, vix_source, spx, spx_above_200sma?, halted, caution,
+    blackout, degraded, premium_gate, sell_caution, posture, posture_ceiling,
+    cash_priority}.
+    """
+    result: dict[str, Any] = {
+        "regime": "STANDARD", "halted": False, "blackout": False, "caution": False,
+        "degraded": False, "vix": None, "vix_source": None,
+        "premium_gate": "", "sell_caution": False,
+        "posture": "", "posture_ceiling": None, "cash_priority": False,
+    }
+
+    vix: float | None = None
+    spx_above: bool | None = None
+
+    # 1) PRIMARY: the system's own macro tab.
+    if ss is not None:
+        sheet_macro = _macro_from_sheet(ss, logger)
+        if sheet_macro.get("vix") is not None:
+            vix = sheet_macro["vix"]
+            result["vix_source"] = "macro_tab"
+        if sheet_macro.get("spx") is not None:
+            result["spx"] = round(sheet_macro["spx"], 1)
+        if "spx_above_200sma" in sheet_macro:
+            spx_above = sheet_macro["spx_above_200sma"]
+
+    # 2) FALLBACK: yfinance, only for whatever the sheet couldn't provide.
+    if vix is None:
+        yv = _yf_vix(logger)
+        if yv is not None:
+            vix = yv
+            result["vix_source"] = "yfinance"
+    if spx_above is None:
+        spx, sma200, above = _yf_spx_200dma(logger)
+        if spx is not None and "spx" not in result:
+            result["spx"] = round(spx, 1)
+        if sma200 is not None:
+            result["spx_sma200"] = round(sma200, 1)
+        if above is not None:
+            spx_above = above
+        # else: SPX-vs-200dma stays unknown → degraded fail-safe below
+
+    if vix is not None:
+        result["vix"] = round(vix, 1)
+    if spx_above is not None:
+        result["spx_above_200sma"] = spx_above
+
+    # 3) Macro blackout check (FOMC/CPI/NFP within 2 days).
     # Uses MacroFeed.next_high_impact (the real API) — the old code iterated a
     # non-existent `feed.events` / `_dt` key, raised AttributeError, and was
     # swallowed, so the blackout gate never actually fired.
@@ -634,15 +826,44 @@ def macro_gate(logger: logging.Logger) -> dict:
     except Exception as e:
         logger.debug(f"  macro blackout check failed: {e}")
 
-    # Regime classification
-    if vix > 30 or not result.get("spx_above_200sma", True):
+    # 4) GEX premium gate + exposure posture (best-effort, from the same Sheet).
+    if ss is not None:
+        pg = _latest_gex_premium_gate(ss, logger)
+        if pg:
+            result["premium_gate"] = pg
+            result["sell_caution"] = (pg == "SELL_CAUTION")
+        posture, ceiling = _latest_exposure_posture(ss, logger)
+        if posture:
+            result["posture"] = posture
+            result["posture_ceiling"] = ceiling
+            result["cash_priority"] = (posture == "CASH_PRIORITY")
+
+    # 5) Degraded: the gate could not verify its own halt inputs from ANY source.
+    if vix is None or spx_above is None:
+        result["degraded"] = True
+        missing = " + ".join(
+            m for m, absent in (("VIX", vix is None), ("SPX-vs-200dma", spx_above is None)) if absent)
+        logger.error("═" * 60)
+        logger.error(f"  ⚠ MACRO GATE DEGRADED — {missing} unavailable from BOTH "
+                     f"the macro tab and yfinance.")
+        logger.error("  Fail-safe: regime forced to ≥ CAUTION, suggested contract "
+                     "counts HALVED in sizing notes.")
+        logger.error("═" * 60)
+
+    # 6) Regime classification — the existing HALTED logic stands
+    #    (VIX>30 OR SPX<200dma → HALTED), evaluated only on KNOWN values.
+    if (vix is not None and vix > 30) or spx_above is False:
         result["regime"] = "HALTED"
         result["halted"] = True
-    elif vix > 25 or result.get("blackout"):
+    elif ((vix is not None and vix > 25) or result["blackout"] or result["degraded"]
+          or result["sell_caution"] or result["cash_priority"]):
         result["regime"] = "CAUTION"
         result["caution"] = True
 
-    logger.info(f"  Macro: {result['regime']} (VIX={result['vix']}, SPX>200SMA={result.get('spx_above_200sma')})")
+    logger.info(
+        f"  Macro: {result['regime']} (VIX={result['vix']} src={result['vix_source']}, "
+        f"SPX>200SMA={result.get('spx_above_200sma')}, degraded={result['degraded']}, "
+        f"gex={result['premium_gate'] or '-'}, posture={result['posture'] or '-'})")
     return result
 
 
@@ -1922,17 +2143,66 @@ def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
 
 _DEFINED_OR_DEBIT = {"PCS", "CCS", "IC", "PMCC", "LONG_CALL", "LONG_PUT"}
 
+# Short-premium strategies the SELL_CAUTION / CASH_PRIORITY overlay applies to
+# (HARVEST_CSP is the internal alias for discovery CSPs).
+PREMIUM_SELLING_STRATS = {"CSP", "CC", "PCS", "CCS", "IC", "HARVEST_CSP"}
+
+
+def _macro_warning_tags(macro: dict) -> str:
+    """Visible warning tags from the macro gate's gex/posture overlay."""
+    tags = []
+    if macro.get("sell_caution"):
+        tags.append("⚠ SELL_CAUTION")
+    if macro.get("cash_priority"):
+        tags.append("⚠ CASH_PRIORITY")
+    return " ".join(tags)
+
+
+def _apply_macro_warnings(candidates: list[dict], macro: dict) -> int:
+    """Prepend SELL_CAUTION / CASH_PRIORITY tags to every premium-selling
+    candidate's notes (CSP/CC/PCS/CCS/IC incl. HARVEST_CSP). Tag + halve — NOT
+    zero-out: dropping the recommendations entirely is a pending user decision.
+    Returns the number of candidates tagged."""
+    tag = _macro_warning_tags(macro)
+    if not tag:
+        return 0
+    n = 0
+    for c in candidates:
+        if str(c.get("strategy") or "").upper() in PREMIUM_SELLING_STRATS:
+            notes = c.get("notes") or ""
+            c["notes"] = f"{tag} | {notes}" if notes else tag
+            n += 1
+    return n
+
+
+def _halve_reasons(strategy: str, macro: dict) -> list[str]:
+    """Why this candidate's suggested contract count gets halved ([] = no halve).
+    degraded → halve EVERYTHING (the gate couldn't verify VIX / SPX-200dma);
+    SELL_CAUTION / CASH_PRIORITY → halve the premium-selling strategies."""
+    reasons = []
+    if macro.get("degraded"):
+        reasons.append("MACRO_DEGRADED")
+    if str(strategy or "").upper() in PREMIUM_SELLING_STRATS:
+        if macro.get("sell_caution"):
+            reasons.append("SELL_CAUTION")
+        if macro.get("cash_priority"):
+            reasons.append("CASH_PRIORITY")
+    return reasons
+
 
 def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
     """Per-account recommended contract count for a candidate under each profile.
     Annotation only (does not drop) — accounts are shared, so each person reads
-    the count that applies to them. e.g. 'size C:1x B:3x'."""
+    the count that applies to them. e.g. 'size C:1x B:3x'. When the macro gate
+    is degraded or the gex/posture overlay fires, counts are HALVED and the
+    note shows both ('C:2x→1x ... (HALVED: ...)') so the cut is auditable."""
     if not states:
         return ""
     from src.position_sizing import size_candidate
     strat = "CSP" if c.get("strategy") == "HARVEST_CSP" else c.get("strategy", "")
     vix = macro.get("vix", 0) or 0
     spx_ok = macro.get("spx_above_200sma", True)
+    halve = _halve_reasons(c.get("strategy", ""), macro)
     # Defined-risk/debit: capital-at-risk per contract IS cash_required (max loss
     # / net debit). Naked CSP/CC: let the module estimate Reg-T (margin) or
     # cash-secured (cash) from strike/underlying.
@@ -1948,10 +2218,19 @@ def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
                 excess_liquidity=st.get("excess_liq"),
                 bpr_override=override, vix=float(vix), spx_above_200dma=spx_ok,
             )
-            parts.append(f"{acct[0].upper()}:{sr.recommended_contracts}x")
+            n = sr.recommended_contracts
+            if halve:
+                parts.append(f"{acct[0].upper()}:{n}x→{n // 2}x")
+            else:
+                parts.append(f"{acct[0].upper()}:{n}x")
         except Exception:
             continue
-    return ("size " + " ".join(parts)) if parts else ""
+    if not parts:
+        return ""
+    note = "size " + " ".join(parts)
+    if halve:
+        note += f" (HALVED: {'+'.join(halve)})"
+    return note
 
 
 def main() -> int:
@@ -1963,8 +2242,19 @@ def main() -> int:
     logger = setup_logging("daily-scan")
     logger.info("═══ Unified Options Scanner (watchlist + harvest) ═══")
 
+    # ── Sheets auth FIRST ─────────────────────────────────────────────
+    # The macro gate's PRIMARY source is the system's own macro / gex_regime /
+    # exposure_posture tabs (yfinance is only the fallback), so the
+    # authenticated spreadsheet handle must exist BEFORE the gate runs.
+    from src.sync import load_env
+    from src import sheets as sh
+    from src import schema as S
+    load_env()
+    client = sh.authenticate()
+    ss = sh._open_sheet(client)
+
     # ── Macro Gate ────────────────────────────────────────────────────
-    macro = macro_gate(logger)
+    macro = macro_gate(logger, ss=ss)
 
     # ── Universe Assembly ─────────────────────────────────────────────
     # 1) User's watchlist (positions + decision queue + gov/screen signals)
@@ -2003,14 +2293,7 @@ def main() -> int:
             logger.debug(f"  {ticker}: technical reject")
     logger.info(f"  Discovery technical: {len(discovery_final)} of {len(discovery_survivors)} passed")
 
-    # ── Sheets + signal data ──────────────────────────────────────────
-    from src.sync import load_env
-    from src import sheets as sh
-    from src import schema as S
-    load_env()
-    client = sh.authenticate()
-    ss = sh._open_sheet(client)
-
+    # ── Signal data (client/ss authenticated above, before the macro gate) ──
     # Per-account sizing state (NLV per account → recommended contracts per profile)
     account_states = _read_account_states(ss, logger)
     if account_states:
@@ -2192,6 +2475,14 @@ def main() -> int:
     other_picks.sort(key=lambda c: c["annual_yield_pct"], reverse=True)
 
     logger.info(f"Total: {len(all_candidates)} candidates ({len(other_picks)} watchlist + {len(harvest_picks)} harvest)")
+
+    # ── Macro overlay: tag premium-selling candidates (sheet + Telegram both
+    # read these notes). Tag + halve, never zero-out (pending user decision).
+    n_tagged = _apply_macro_warnings(all_candidates, macro)
+    if n_tagged:
+        logger.warning(
+            f"  ⚠ macro overlay [{_macro_warning_tags(macro)}] — tagged {n_tagged} "
+            f"premium-selling candidates; suggested sizing HALVED in notes")
 
     if args.dry:
         for c in (other_picks[:5] + harvest_picks[:5]):
