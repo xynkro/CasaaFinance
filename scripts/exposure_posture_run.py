@@ -123,7 +123,11 @@ def read_latest_regime_signals(client) -> dict[str, dict]:
             if source == "market_breadth":
                 raw.setdefault("breadth_score", int(score_val))
             elif source == "ftd":
-                raw.setdefault("ftd_score", int(score_val))
+                qs = raw.get("quality_score")
+                if isinstance(qs, dict) and qs.get("total_score") is not None:
+                    raw.setdefault("ftd_score", int(_to_float(qs["total_score"])))
+                else:
+                    raw.setdefault("ftd_score", int(score_val))
             elif source == "macro_regime":
                 raw.setdefault("regime_score", int(score_val))
                 # Macro-regime-detector emits `regime` as a nested dict

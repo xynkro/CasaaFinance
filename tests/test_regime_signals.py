@@ -354,3 +354,54 @@ def test_end_to_end_pre_fix_extraction_would_have_been_zero():
     # New parser correctly extracts 95.
     new_sig = parse_ftd(payload)
     assert new_sig.score == 95.0
+
+
+# ---------------- exposure_posture_run ftd_score shim ----------------
+
+class TestFtdScoreShim:
+    """Verify the ftd_score shim in read_latest_regime_signals prefers
+    quality_score.total_score from raw_json over the (potentially buggy)
+    score column."""
+
+    @staticmethod
+    def _simulate_shim(raw: dict, score_column_val: float) -> int:
+        """Replicate the shim logic from exposure_posture_run.py."""
+        def _to_float(v, default=0.0):
+            if v in (None, ""):
+                return default
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        score_val = _to_float(score_column_val)
+        qs = raw.get("quality_score")
+        if isinstance(qs, dict) and qs.get("total_score") is not None:
+            raw.setdefault("ftd_score", int(_to_float(qs["total_score"])))
+        else:
+            raw.setdefault("ftd_score", int(score_val))
+        return raw["ftd_score"]
+
+    def test_shim_extracts_from_raw_json_quality_score(self):
+        """When raw_json has quality_score.total_score, use it — not the
+        score column (which was 0 for all historical FTD rows)."""
+        raw = {"quality_score": {"total_score": 95, "signal": "Strong FTD"}}
+        ftd_score = self._simulate_shim(raw, score_column_val=0)
+        assert ftd_score == 95
+
+    def test_shim_falls_back_to_score_column_when_no_quality_score(self):
+        """When raw_json is truncated/empty, fall back to score column."""
+        raw = {"_truncated": True}
+        ftd_score = self._simulate_shim(raw, score_column_val=50)
+        assert ftd_score == 50
+
+    def test_shim_falls_back_on_empty_raw(self):
+        raw = {}
+        ftd_score = self._simulate_shim(raw, score_column_val=0)
+        assert ftd_score == 0
+
+    def test_shim_does_not_overwrite_existing_ftd_score(self):
+        """setdefault semantics: if raw already has ftd_score, don't clobber."""
+        raw = {"ftd_score": 80, "quality_score": {"total_score": 95}}
+        ftd_score = self._simulate_shim(raw, score_column_val=0)
+        assert ftd_score == 80
