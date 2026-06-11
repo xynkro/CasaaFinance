@@ -513,16 +513,29 @@ def plan_defense_pings(
     live_prices: dict[str, float],
     prior_keys: set[str],
     day: str,
+    sgt_today: str,
 ) -> list[dict]:
     """Plan defense pings for SHORT legs at/inside the approach band.
     Pure — testable without Sheets.
 
     Dedup: event_key = "defense:<TICKER>|<R><strike>|<expiry>|<level>|<day>"
     in the macro_alerts_state ledger — keyed (ticker, strike, expiry,
-    level) with the SGT day appended, so each level pages ONCE per
-    position per day and a recover-then-re-breach on a later day
-    re-arms. A 'breach' plan also marks the 'approach' key so a gap
-    straight through the strike pages once (the breach), not twice.
+    level) with `day` appended, so each level pages ONCE per position
+    per day and a recover-then-re-breach on a later day re-arms. A
+    'breach' plan also marks the 'approach' key so a gap straight
+    through the strike pages once (the breach), not twice.
+
+    `day` must be the US-EASTERN trading date (S.us_market_date()),
+    NOT the SGT date: the US cash session runs 21:30-04:00 SGT, so an
+    SGT-date key rolls over mid-session at 00:00 SGT — that re-armed
+    defense pings minutes after midnight (same SGT-midnight pitfall
+    fixed for market-pressure in commit 0124992 after the 2026-06-11
+    incident).
+
+    `sgt_today` is the SGT calendar date — used ONLY for the
+    expired-leg guard below. SGT runs ~half a day ahead of the US
+    session, which is the right reference for "is this expiry stale";
+    decoupling it from the dedup `day` is deliberate.
     """
     # Expired-leg guard: the IBKR grab can carry already-expired legs for
     # a few days (assignment/settlement lag) — paging defense on those is
@@ -530,7 +543,7 @@ def plan_defense_pings(
     # when the expiry is MORE than 1 day before the SGT date (a leg
     # expiring "yesterday" SGT can still be live US-time).
     try:
-        expiry_floor = (date.fromisoformat(day) - timedelta(days=1)).strftime("%Y%m%d")
+        expiry_floor = (date.fromisoformat(sgt_today) - timedelta(days=1)).strftime("%Y%m%d")
     except ValueError:
         expiry_floor = ""
 
@@ -1255,16 +1268,21 @@ def main() -> int:
     # pings above, which also bypass it).
     # ────────────────────────────────────────────────────────────────
     today_sgt = S.now_sgt_date()
-    # Pressure dedups per US-SESSION day, not SGT day: the US session
-    # crosses SGT midnight, and the SGT-date key re-armed WARN at
-    # 00:00 SGT mid-session (2026-06-11 incident — WARN re-paged ~00:10
-    # for the same selloff already paged 23:36, then the deepening tape
-    # at 01:51-03:32 was silently deduped against that midnight page).
+    # Pressure AND defense dedup per US-SESSION day, not SGT day: the
+    # US session crosses SGT midnight, and the SGT-date key re-armed
+    # WARN at 00:00 SGT mid-session (2026-06-11 incident — WARN
+    # re-paged ~00:10 for the same selloff already paged 23:36, then
+    # the deepening tape at 01:51-03:32 was silently deduped against
+    # that midnight page). Pressure fix landed in 0124992; defense had
+    # the identical flaw and is fixed the same way here. `today_sgt`
+    # stays in play only for the defense lane's expired-leg guard, where
+    # SGT-ahead-of-US is the right reference for "stale expiry".
     us_session_day = S.us_market_date()
     prior_keys = set(prior_macro_alerts)
 
     option_legs = load_open_option_legs(client, logger)
-    defense_plan = plan_defense_pings(option_legs, live_prices, prior_keys, today_sgt)
+    defense_plan = plan_defense_pings(
+        option_legs, live_prices, prior_keys, us_session_day, today_sgt)
 
     held_news_plan = plan_held_news_pings(
         load_news_sentiment_rows(client),
@@ -1289,8 +1307,29 @@ def main() -> int:
         pressure_desc = "none"
 
     n_short_legs = sum(1 for l in option_legs if _f(l.get("qty")) < 0)
+    # Defense suppression count: legs currently inside an approach/breach
+    # band whose key is already in prior_keys (in-band but already paged
+    # this US-session day). Mirrors the pressure-desc change in 0124992
+    # so "defense=0" with a deep tape isn't indistinguishable between
+    # "nothing in band" and "everything in band already paged".
+    defense_suppressed = 0
+    for leg in option_legs:
+        if _f(leg.get("qty")) >= 0:
+            continue
+        tk = (leg.get("ticker") or "").strip().upper()
+        rt = (leg.get("right") or "").strip().upper()[:1]
+        sk = _f(leg.get("strike"))
+        und = live_prices.get(tk) or _f(leg.get("underlying_last"))
+        lv = defense_level(rt, sk, und)
+        if not lv:
+            continue
+        ek = f"defense:{tk}|{rt}{sk:g}|{leg.get('expiry') or ''}|{lv}|{us_session_day}"
+        if ek in prior_keys:
+            defense_suppressed += 1
     logger.info(
-        f"Lane plans: defense={len(defense_plan)} (of {n_short_legs} short legs) | "
+        f"Lane plans: defense={len(defense_plan)} fires "
+        f"(suppressed {defense_suppressed} of {n_short_legs} short legs, "
+        f"session {us_session_day}) | "
         f"held_news={len(held_news_plan)} | "
         f"pressure={pressure_desc} "
         f"(SPY {live_changes.get('SPY', '?')}% QQQ {live_changes.get('QQQ', '?')}%)"

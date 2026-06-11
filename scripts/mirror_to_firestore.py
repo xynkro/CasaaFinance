@@ -119,6 +119,33 @@ TAB_CAPS: dict[str, int] = {
     "iv_surface_scan": 6000,
 }
 
+# Per-tab FRESHNESS trim — drop rows older than N days BEFORE the row cap.
+# The PWA only ever shows the latest slice of these tabs (no historical audit
+# UI), but the Sheet keeps full history for backend grading — so the older
+# rows are pure wire weight. The 41-fetch first-load was paging ~38k rows of
+# audit history the user never sees; trimming here cuts that by ~95% with no
+# behavioral change on screen.
+# Convention: 1 day = latest trading day only; bigger windows for tabs whose
+# PWA card shows a rolling read (news/insider). 0 / missing = keep everything.
+TAB_DAYS_KEPT: dict[str, int] = {
+    "news_sentiment":       3,   # PWA news dot reads last few days · 14,771 → ~600
+    "tv_signals":           1,   # latest-day-only consensus chip   ·  9,649 → ~170
+    "scan_results":         1,   # Harvest renders latest day       ·  2,881 → ~150
+    "insider_transactions": 30,  # insider-flow icon = last 7-30d   ·  2,407 → ~700
+    "options":              1,   # current open legs                ·  2,381 → ~30
+    "exit_plans":           1,   # current per-position plan        ·  1,651 → ~30
+    "technical_scores":     1,   # latest-day TA panel              ·    654 → ~80
+}
+
+# Candidate "what does this row's date look like?" fields, checked in order.
+# Conventional first-column "date" wins (every audited tab); falls back to a
+# small allowlist for tabs that named the field differently (news_sentiment
+# uses datetime; insider_transactions uses transaction_date).
+_DATE_FIELD_CANDIDATES = (
+    "date", "datetime", "transaction_date", "filing_date",
+    "published_at", "updated_at", "report_date", "ts",
+)
+
 _ENV_KEY = "FIREBASE_SERVICE_ACCOUNT_JSON"
 
 
@@ -139,6 +166,52 @@ def _source_hash(rows: list[dict]) -> str:
     """
     blob = json.dumps(rows, sort_keys=True, separators=(",", ":"), default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _date_prefix(v: object) -> str:
+    """Extract a YYYY-MM-DD prefix from any cell value, '' if absent.
+
+    Accepts both clean dates ('2026-06-11') and the audit-suffixed format the
+    rest of the system uses ('2026-06-11T143845'). Strict on the year-MM-DD
+    shape so a random string doesn't pretend to be a date and skew the trim.
+    """
+    if not v:
+        return ""
+    s = str(v).strip()
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-" and s[:4].isdigit():
+        return s[:10]
+    return ""
+
+
+def _detect_date_field(sample: dict) -> str:
+    """Find the date-bearing field of a row, '' if none. Prefers the well-
+    known names; falls back to scanning all fields. Used once per tab."""
+    for f in _DATE_FIELD_CANDIDATES:
+        if f in sample and _date_prefix(sample[f]):
+            return f
+    for f, v in sample.items():
+        if _date_prefix(v):
+            return f
+    return ""
+
+
+def _filter_recent(rows: list[dict], days_kept: int) -> list[dict]:
+    """Keep rows whose date is within the last `days_kept` (inclusive).
+
+    `days_kept <= 0` → keep everything (no trim configured). When no date
+    field can be detected we PREFER OVER-RETAIN to data loss — return the rows
+    unchanged (the existing tail-cap still applies). The cutoff is computed
+    from UTC today so the wire payload stays predictable regardless of which
+    timezone the backend writers used.
+    """
+    if not rows or days_kept <= 0:
+        return rows
+    from datetime import date, timedelta
+    cutoff = (date.today() - timedelta(days=days_kept - 1)).isoformat()
+    field = _detect_date_field(rows[0])
+    if not field:
+        return rows
+    return [r for r in rows if _date_prefix(r.get(field)) >= cutoff]
 
 
 def _cap_rows(rows: list[dict], cap: int) -> list[dict]:
@@ -227,6 +300,10 @@ def mirror_tab(read_tab: Callable[[str], list[dict]], db: Any, name: str,
     `mirror_tabs` stays a thin try/except wrapper.
     """
     rows = read_tab(name) or []
+    # Trim BEFORE the row cap: a freshness window drops audit history the PWA
+    # never renders, slashing the first-load payload (e.g. news_sentiment
+    # 14,771 → ~600). The cap is then a safety ceiling on top.
+    rows = _filter_recent(rows, TAB_DAYS_KEPT.get(name, 0))
     rows = _cap_rows(rows, TAB_CAPS.get(name, cap))
     source_hash = _source_hash(rows)
 
