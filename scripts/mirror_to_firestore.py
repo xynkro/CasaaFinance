@@ -196,22 +196,35 @@ def _detect_date_field(sample: dict) -> str:
 
 
 def _filter_recent(rows: list[dict], days_kept: int) -> list[dict]:
-    """Keep rows whose date is within the last `days_kept` (inclusive).
+    """Keep rows belonging to the LATEST `days_kept` distinct dates present
+    in the data — not the last `days_kept` calendar days from now.
+
+    Anchoring to the data's own latest date instead of UTC today is the only
+    correct semantic for the PWA payload diet: backend tabs cadence
+    differently (technical_scores every few weeks, scan_results weekdays,
+    options whenever the grab fires), and several may not have written
+    "today" yet by the time the mirror runs. Anchoring to today would silently
+    blank any tab whose newest write predates UTC midnight — exactly the
+    regression that took out technical_scores / exit_plans / scan_results on
+    the first deploy.
 
     `days_kept <= 0` → keep everything (no trim configured). When no date
     field can be detected we PREFER OVER-RETAIN to data loss — return the rows
-    unchanged (the existing tail-cap still applies). The cutoff is computed
-    from UTC today so the wire payload stays predictable regardless of which
-    timezone the backend writers used.
+    unchanged (the existing tail-cap still applies).
     """
     if not rows or days_kept <= 0:
         return rows
-    from datetime import date, timedelta
-    cutoff = (date.today() - timedelta(days=days_kept - 1)).isoformat()
     field = _detect_date_field(rows[0])
     if not field:
         return rows
-    return [r for r in rows if _date_prefix(r.get(field)) >= cutoff]
+    distinct = sorted(
+        {_date_prefix(r.get(field)) for r in rows if _date_prefix(r.get(field))},
+        reverse=True,
+    )
+    if not distinct:
+        return rows
+    kept_days = set(distinct[:days_kept])
+    return [r for r in rows if _date_prefix(r.get(field)) in kept_days]
 
 
 def _cap_rows(rows: list[dict], cap: int) -> list[dict]:

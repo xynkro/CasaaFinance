@@ -352,29 +352,37 @@ class TestDetectDateField:
 class TestFilterRecent:
     def _rows(self):
         return [
-            {"date": _ago(60), "ticker": "OLD"},
-            {"date": _ago(30), "ticker": "EDGE"},
-            {"date": _ago(5),  "ticker": "MID"},
+            {"date": _ago(60), "ticker": "OLDEST"},
+            {"date": _ago(30), "ticker": "OLDER"},
+            {"date": _ago(5),  "ticker": "RECENT"},
             {"date": _today_iso() + "T120000", "ticker": "TODAY"},
         ]
 
     def test_no_trim_when_zero(self):
         assert _filter_recent(self._rows(), 0) == self._rows()
 
-    def test_latest_day_keeps_today_only(self):
+    def test_one_day_keeps_latest_date_present(self):
         kept = _filter_recent(self._rows(), 1)
         assert [r["ticker"] for r in kept] == ["TODAY"]
 
-    def test_window_includes_boundary(self):
-        kept = _filter_recent(self._rows(), 7)
-        assert {r["ticker"] for r in kept} == {"MID", "TODAY"}
+    def test_three_days_keeps_three_latest_distinct_dates(self):
+        # 4 distinct dates → top-3 = TODAY, RECENT, OLDER; OLDEST drops.
+        kept = _filter_recent(self._rows(), 3)
+        assert {r["ticker"] for r in kept} == {"OLDER", "RECENT", "TODAY"}
 
-    def test_thirty_day_window_picks_edge_and_inside(self):
-        kept = _filter_recent(self._rows(), 30)
-        assert "OLD" not in {r["ticker"] for r in kept}
-        # 30-day window = today and the last 29 calendar days; EDGE was at -30
-        # which is OUTSIDE — keep MID/TODAY only.
-        assert {r["ticker"] for r in kept} == {"MID", "TODAY"}
+    def test_anchors_to_DATA_not_today_utc(self):
+        """The day window is taken from the tab's own newest date — so a tab
+        whose backend writer hasn't fired today still surfaces yesterday's
+        rows under '1 day'. This was the regression that nuked
+        technical_scores / exit_plans / scan_results on first deploy."""
+        # all rows older than today; "latest day" should still return SOMETHING
+        rows = [
+            {"date": _ago(60), "ticker": "OLD"},
+            {"date": _ago(15), "ticker": "YESTERDAY_PROXY"},
+            {"date": _ago(15) + "T020000", "ticker": "SAME_DAY_DIFFERENT_ROW"},
+        ]
+        kept = _filter_recent(rows, 1)
+        assert {r["ticker"] for r in kept} == {"YESTERDAY_PROXY", "SAME_DAY_DIFFERENT_ROW"}
 
     def test_no_date_field_keeps_all(self):
         rows = [{"ticker": "NVDA"}, {"ticker": "AMD"}]
@@ -382,6 +390,18 @@ class TestFilterRecent:
 
     def test_empty_rows_safe(self):
         assert _filter_recent([], 1) == []
+
+    def test_audit_suffix_collapses_to_day(self):
+        """Multiple rows on the same day (audit T-suffix differs) count as ONE
+        day for the window math — not as multiple distinct days."""
+        rows = [
+            {"date": _today_iso() + "T020000", "ticker": "T1"},
+            {"date": _today_iso() + "T140000", "ticker": "T2"},
+            {"date": _ago(1) + "T140000", "ticker": "Y1"},
+        ]
+        # 1-day window: TODAY only — both T1 and T2 survive.
+        kept = _filter_recent(rows, 1)
+        assert {r["ticker"] for r in kept} == {"T1", "T2"}
 
 
 class TestTabDaysKeptConfig:
