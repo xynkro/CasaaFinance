@@ -298,3 +298,105 @@ def test_pwa_tabs_is_the_40_tab_contract():
     assert mir.PWA_TABS[-1] == "curated_picks"
     assert "uoa_alerts" in mir.PWA_TABS
     assert "scan_meta" in mir.PWA_TABS         # freshness heartbeat
+
+
+# ── Per-tab freshness trim (the PWA-payload diet) ─────────────────────────────
+
+from datetime import date, timedelta
+from scripts.mirror_to_firestore import (
+    _date_prefix,
+    _detect_date_field,
+    _filter_recent,
+    TAB_DAYS_KEPT,
+)
+
+
+def _today_iso():
+    return date.today().isoformat()
+
+
+def _ago(n):
+    return (date.today() - timedelta(days=n)).isoformat()
+
+
+class TestDatePrefix:
+    def test_clean_yyyy_mm_dd(self):
+        assert _date_prefix("2026-06-11") == "2026-06-11"
+
+    def test_audit_suffixed(self):
+        assert _date_prefix("2026-06-11T143845") == "2026-06-11"
+
+    def test_rejects_garbage(self):
+        for s in ("", None, "n/a", "61/06/2026", "06-11-2026", "2026/06/11"):
+            assert _date_prefix(s) == ""
+
+
+class TestDetectDateField:
+    def test_conventional_date(self):
+        assert _detect_date_field({"date": "2026-06-11T143845", "ticker": "NVDA"}) == "date"
+
+    def test_news_sentiment_datetime(self):
+        assert _detect_date_field({"id": "1", "datetime": "2026-06-11T020000", "ticker": "NVDA"}) == "datetime"
+
+    def test_insider_transaction_date(self):
+        assert _detect_date_field({"id": "x", "transaction_date": "2026-06-11", "filing_date": "2026-06-12"}) == "transaction_date"
+
+    def test_falls_back_to_any_dateish_field(self):
+        # No allowlisted name carries a date — scanner finds the one that does.
+        assert _detect_date_field({"x": "?", "when": "2026-06-11"}) == "when"
+
+    def test_no_date_anywhere(self):
+        assert _detect_date_field({"ticker": "NVDA", "n": "5"}) == ""
+
+
+class TestFilterRecent:
+    def _rows(self):
+        return [
+            {"date": _ago(60), "ticker": "OLD"},
+            {"date": _ago(30), "ticker": "EDGE"},
+            {"date": _ago(5),  "ticker": "MID"},
+            {"date": _today_iso() + "T120000", "ticker": "TODAY"},
+        ]
+
+    def test_no_trim_when_zero(self):
+        assert _filter_recent(self._rows(), 0) == self._rows()
+
+    def test_latest_day_keeps_today_only(self):
+        kept = _filter_recent(self._rows(), 1)
+        assert [r["ticker"] for r in kept] == ["TODAY"]
+
+    def test_window_includes_boundary(self):
+        kept = _filter_recent(self._rows(), 7)
+        assert {r["ticker"] for r in kept} == {"MID", "TODAY"}
+
+    def test_thirty_day_window_picks_edge_and_inside(self):
+        kept = _filter_recent(self._rows(), 30)
+        assert "OLD" not in {r["ticker"] for r in kept}
+        # 30-day window = today and the last 29 calendar days; EDGE was at -30
+        # which is OUTSIDE — keep MID/TODAY only.
+        assert {r["ticker"] for r in kept} == {"MID", "TODAY"}
+
+    def test_no_date_field_keeps_all(self):
+        rows = [{"ticker": "NVDA"}, {"ticker": "AMD"}]
+        assert _filter_recent(rows, 1) == rows
+
+    def test_empty_rows_safe(self):
+        assert _filter_recent([], 1) == []
+
+
+class TestTabDaysKeptConfig:
+    def test_known_offenders_have_a_window(self):
+        # Regression: if anyone removes the trim for these huge tabs the PWA
+        # first-load payload explodes (the bug this whole module exists to fix).
+        for tab in ("news_sentiment", "tv_signals", "scan_results",
+                    "insider_transactions", "options", "exit_plans",
+                    "technical_scores"):
+            assert TAB_DAYS_KEPT.get(tab, 0) >= 1, f"{tab} lost its freshness trim"
+
+    def test_decision_queue_not_trimmed(self):
+        """Decision history matters for review — must NOT be date-trimmed."""
+        assert "decision_queue" not in TAB_DAYS_KEPT
+
+    def test_iv_surface_scan_not_trimmed_by_days(self):
+        """Single-day surface, capped by TAB_CAPS — not by date window."""
+        assert "iv_surface_scan" not in TAB_DAYS_KEPT
