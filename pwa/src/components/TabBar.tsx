@@ -16,11 +16,15 @@ export function TabBar({
   active,
   onChange,
   decisionCount,
+  decisionUrgent,
   defenseAlerts,
 }: {
   active: number;
   onChange: (i: number) => void;
   decisionCount?: number;
+  /** True when any decision is act_now — badge goes red (urgency) instead of
+   *  amber (workload). */
+  decisionUrgent?: boolean;
   defenseAlerts?: number;
 }) {
   const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -111,14 +115,17 @@ export function TabBar({
                   </span>
                 )}
 
-                {/* Decision badge */}
+                {/* Decision badge — red when something is act_now, amber for
+                    plain workload (pending/ready). */}
                 {showDecision && (
                   <span
                     className="absolute -top-2 -right-2.5 min-w-[15px] h-[15px] px-[3px] rounded-full flex items-center justify-center text-[8px] font-bold pop-in"
                     style={{
-                      background: "#f59e0b",
-                      color: "#0a0a0a",
-                      boxShadow: "0 0 10px rgba(245,158,11,0.55), 0 1px 3px rgba(0,0,0,0.3)",
+                      background: decisionUrgent ? "#ef4444" : "#f59e0b",
+                      color: decisionUrgent ? "#ffffff" : "#0a0a0a",
+                      boxShadow: decisionUrgent
+                        ? "0 0 10px rgba(239,68,68,0.55), 0 1px 3px rgba(0,0,0,0.3)"
+                        : "0 0 10px rgba(245,158,11,0.55), 0 1px 3px rgba(0,0,0,0.3)",
                     }}
                   >
                     {decisionCount}

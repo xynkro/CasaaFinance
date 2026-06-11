@@ -148,9 +148,45 @@ export function TldrTodayCard({
     });
   }
 
+  // Track urgent items that exist but don't fit the 3-row cap — rendered as
+  // an overflow footer so nothing critical is EVER silently evicted.
+  let urgentEvicted = 0;
+
+  // Critical DEFENSE — outranks new entries: protecting held money beats
+  // entering (post-mortem doctrine). It used to rank BELOW act-now, so a
+  // blackout + two act-nows silently evicted a breached short strike.
+  if (criticalDefense.length > 0) {
+    if (rows.length < 3) {
+      const lead = criticalDefense[0];
+      rows.push({
+        kind: "def",
+        node: (
+          <Item
+            key="def"
+            Icon={ShieldAlert}
+            color="#fca5a5"
+            pulse
+            label={`${lead.severity} DEFENSE`}
+            body={`${lead.ticker} ${lead.right}${lead.strike}`}
+            sub={
+              criticalDefense.length > 1
+                ? `${lead.title} · +${criticalDefense.length - 1} more`
+                : lead.title
+            }
+            onClick={onJumpOptions}
+          />
+        ),
+      });
+    } else {
+      urgentEvicted += 1;
+    }
+  }
+
   // ACT NOW (one row per fire, up to 2)
+  let actShown = 0;
   for (const a of actNow.slice(0, 2)) {
     if (rows.length >= 3) break;
+    actShown += 1;
     rows.push({
       kind: "act",
       node: (
@@ -167,6 +203,7 @@ export function TldrTodayCard({
       ),
     });
   }
+  urgentEvicted += Math.max(0, actNow.length - actShown);
 
   // Macro APPROACHING (15-30 min away — heads up, not a hard gate)
   if (macroSoon?.severity === "approaching" && rows.length < 3) {
@@ -181,29 +218,6 @@ export function TldrTodayCard({
           body={macroSoon.event}
           sub={`in ${macroSoon.minutesUntil} min — blackout starts at ${BLACKOUT_BEFORE_MIN}min mark`}
           onClick={onJumpDecisions}
-        />
-      ),
-    });
-  }
-
-  // Critical defense (one row, summarized when >1)
-  if (criticalDefense.length > 0 && rows.length < 3) {
-    const lead = criticalDefense[0];
-    rows.push({
-      kind: "def",
-      node: (
-        <Item
-          key="def"
-          Icon={ShieldAlert}
-          color="#fca5a5"
-          label={`${lead.severity} DEFENSE`}
-          body={`${lead.ticker} ${lead.right}${lead.strike}`}
-          sub={
-            criticalDefense.length > 1
-              ? `${lead.title} · +${criticalDefense.length - 1} more`
-              : lead.title
-          }
-          onClick={onJumpOptions}
         />
       ),
     });
@@ -228,22 +242,26 @@ export function TldrTodayCard({
   }
 
   // Close-state triggers (only if room left)
-  if (close.length > 0 && rows.length < 3) {
-    const lead = close[0];
-    rows.push({
-      kind: "close",
-      node: (
-        <Item
-          key="close"
-          Icon={Hourglass}
-          color="#fcd34d"
-          label="CLOSE"
-          body={`${lead.ticker.toUpperCase()} · ${lead.account.toUpperCase()}`}
-          sub={close.length > 1 ? `${lead.reason} · +${close.length - 1} more` : lead.reason}
-          onClick={onJumpDecisions}
-        />
-      ),
-    });
+  if (close.length > 0) {
+    if (rows.length < 3) {
+      const lead = close[0];
+      rows.push({
+        kind: "close",
+        node: (
+          <Item
+            key="close"
+            Icon={Hourglass}
+            color="#fcd34d"
+            label="CLOSE"
+            body={`${lead.ticker.toUpperCase()} · ${lead.account.toUpperCase()}`}
+            sub={close.length > 1 ? `${lead.reason} · +${close.length - 1} more` : lead.reason}
+            onClick={onJumpDecisions}
+          />
+        ),
+      });
+    } else {
+      urgentEvicted += 1;
+    }
   }
 
   // Pending count (informational tail)
@@ -281,6 +299,14 @@ export function TldrTodayCard({
       <div className="space-y-1.5">
         {rows.map((r) => r.node)}
       </div>
+      {urgentEvicted > 0 && (
+        <button
+          onClick={onJumpDecisions}
+          className="mt-1.5 w-full text-left text-[length:var(--t-2xs)] font-semibold text-amber-400/90 active:opacity-70"
+        >
+          ⚠ +{urgentEvicted} more urgent item{urgentEvicted !== 1 ? "s" : ""} didn’t fit — tap to review
+        </button>
+      )}
     </Card>
   );
 }

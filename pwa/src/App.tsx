@@ -1,5 +1,6 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { fetchDashboard, type DashboardData } from "./data";
+import { evaluateTrigger } from "./data/normalize";
 import type { TechnicalScoreRow } from "./data";
 import { PinGate } from "./PinGate";
 import { usePinAuth } from "./lib/usePinAuth";
@@ -110,9 +111,30 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
   // Firestore + permission denial == signed in but not on the allowlist.
   const notAuthorized = USE_FIRESTORE && loadFailed && isPermissionError(data?.error);
 
-  const pendingCount = (data?.decisions ?? []).filter(
-    (d) => d.status?.toLowerCase() === "pending" || d.status?.toLowerCase() === "watching",
-  ).length;
+  // Badge counts WHAT NEEDS ACTION, not the backlog. The old pending+watching
+  // count produced a permanent 6-8 (watching is explicitly do-nothing) that
+  // trained the eye to ignore it. Now: pending (needs accept) + watching rows
+  // whose live trigger evaluates ready/act_now — and the badge turns red when
+  // anything is act_now.
+  const decisionBadge = useMemo(() => {
+    let urgent = 0, count = 0;
+    for (const d of data?.decisions ?? []) {
+      const status = (d.status || "").toLowerCase();
+      if (status === "pending") { count += 1; continue; }
+      if (status !== "watching") continue;
+      const tk = (d.ticker || "").toUpperCase();
+      const ev = evaluateTrigger(
+        d,
+        Number(data?.livePrices?.get(tk)?.last) || undefined,
+        data?.exposurePosture ?? null,
+        data?.tvSignals?.get(tk),
+      );
+      if (ev.state === "act_now") { urgent += 1; count += 1; }
+      else if (ev.state === "ready") count += 1;
+    }
+    return { count, urgent };
+  }, [data]);
+  const pendingCount = decisionBadge.count;
 
   const urgentDefense = (data?.optionsDefense ?? []).filter(
     (d) => d.severity === "CRITICAL" || d.severity === "HIGH",
@@ -329,6 +351,7 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
         active={tab}
         onChange={setTab}
         decisionCount={pendingCount}
+        decisionUrgent={decisionBadge.urgent > 0}
         defenseAlerts={urgentDefense}
       />
 

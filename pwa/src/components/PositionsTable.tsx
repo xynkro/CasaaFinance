@@ -150,6 +150,7 @@ export function PositionsTable({
           techHistory={technicalScoresHistory}
           exitPlan={exitByTicker.get(selected.ticker)}
           currency={currency}
+          livePrice={livePrices?.get((selected.ticker || "").toUpperCase()) ?? null}
           onClose={() => setSelected(null)}
         />
       )}

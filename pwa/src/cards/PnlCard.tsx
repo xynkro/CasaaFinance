@@ -263,14 +263,15 @@ export function PnlCard({
         </span>
       </div>
 
-      {/* Stats grid — Market Value uses live overlay; Day UPL retains
-          the snapshot's UnrealizedPnL (a separate IBKR figure that's
-          today-only-realized vs our live total UPL). */}
+      {/* Stats grid — Market Value uses live overlay. The fourth tile is the
+          IBKR snapshot's TOTAL UnrealizedPnL; it was labeled "Day UPL", which
+          it has never been (same total-UPL concept as the live badge above,
+          just from the slower snapshot). Label it honestly. */}
       <div className="grid grid-cols-2 gap-2">
-        <StatTile label="Cash"         value={fmt(snapshot.cash, prefix)} />
-        <StatTile label="Market Value" value={fmtCompact(liveMktVal, prefix)} />
-        <StatTile label="Positions"    value={posCount > 0 ? `${posCount} holdings` : "—"} />
-        <StatTile label="Day UPL"      value={fmt(snapshot.upl, prefix)} /></div>
+        <StatTile label="Cash"            value={fmt(snapshot.cash, prefix)} />
+        <StatTile label="Market Value"    value={fmtCompact(liveMktVal, prefix)} />
+        <StatTile label="Positions"       value={posCount > 0 ? `${posCount} holdings` : "—"} />
+        <StatTile label="UPL (snapshot)"  value={fmt(snapshot.upl, prefix)} /></div>
     </Card>
   );
 }

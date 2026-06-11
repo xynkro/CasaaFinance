@@ -319,6 +319,7 @@ export function StockDetail({
   techHistory,
   exitPlan,
   currency,
+  livePrice,
   onClose,
 }: {
   position?: PositionRow;
@@ -328,6 +329,12 @@ export function StockDetail({
   techHistory?: TechnicalScoreRow[];
   exitPlan?: ExitPlanRow;
   currency: "USD" | "SGD";
+  /** Live 5-min price row for this ticker. When present it OVERLAYS the
+   *  grab-time position.last/upl — the table row the user just tapped was
+   *  live-computed, so this screen showing a different (stale) P&L one tap
+   *  later erodes trust in every number on it. Optional: mounts that lack
+   *  livePrices keep grab-time behaviour. */
+  livePrice?: { last?: string } | null;
   onClose: () => void;
 }) {
   const ticker = tickerProp ?? position?.ticker ?? decision?.ticker ?? "";
@@ -341,10 +348,16 @@ export function StockDetail({
   });
 
   const prefix = currency === "SGD" ? "S$" : "$";
-  const upl    = position ? Number(position.upl) : 0;
+  const liveLast = Number(livePrice?.last) || 0;
+  const lastPx   = liveLast > 0 ? liveLast : Number(position?.last) || 0;
+  const avgCost  = position ? Number(position.avg_cost) : 0;
+  const qtyNum   = position ? Number(position.qty) || 0 : 0;
+  // Live-overlaid UPL when a fresh price exists; grab-time figure otherwise.
+  const upl = liveLast > 0 && position && avgCost > 0
+    ? (liveLast - avgCost) * qtyNum
+    : (position ? Number(position.upl) : 0);
   const isUp   = upl >= 0;
-  const avgCost = position ? Number(position.avg_cost) : 0;
-  const uplPct  = avgCost > 0 ? ((Number(position?.last) - avgCost) / avgCost) * 100 : 0;
+  const uplPct  = avgCost > 0 ? ((lastPx - avgCost) / avgCost) * 100 : 0;
   const { sector, emoji } = sectorFor(ticker);
 
   // TradingView widgets
@@ -427,7 +440,7 @@ export function StockDetail({
       {/* ── Position price strip ── */}
       {position && (
         <div className="flex items-center gap-3 px-4 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-          <span className="text-2xl font-bold text-white tabular-nums">{fmt(position.last, prefix)}</span>
+          <span className="text-2xl font-bold text-white tabular-nums">{fmt(lastPx, prefix)}</span>
           <span
             className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[length:var(--t-xs)] font-semibold tabular-nums"
             style={{
@@ -502,8 +515,10 @@ export function StockDetail({
       {position && (
         <div className="grid grid-cols-4 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           {[
-            { label: "Mkt Val",   value: fmt(position.mkt_val, prefix) },
-            { label: "UPL",       value: fmt(position.upl, prefix) },
+            // Live-overlaid when a fresh price exists (same source as the
+            // table row that was tapped); grab-time figures otherwise.
+            { label: "Mkt Val",   value: fmt(liveLast > 0 ? lastPx * qtyNum : Number(position.mkt_val), prefix) },
+            { label: "UPL",       value: fmt(upl, prefix) },
             { label: "Avg Cost",  value: fmt(position.avg_cost, prefix) },
             { label: "Weight",    value: `${(Number(position.weight) * 100).toFixed(1)}%` },
           ].map((s) => (

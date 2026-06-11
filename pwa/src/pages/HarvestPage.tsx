@@ -8,7 +8,20 @@ import { SwipeTabs } from "../components/SwipeTabs";
 import { BarChart3 } from "lucide-react";
 
 function MacroBanner({ picks }: { picks: HarvestScanRow[] }) {
-  const regime = picks[0]?.macro_regime || "STANDARD";
+  // NO FABRICATED ALL-CLEAR: an empty harvest scan used to fall back to
+  // "STANDARD" and render a green "Harvest active · STANDARD · VIX 0" —
+  // i.e. a halted/suppressed/missing state displayed as GO. No data = say so.
+  if (!picks.length || !picks[0]?.macro_regime) {
+    return (
+      <div className="rounded-xl border p-3 mb-3 bg-slate-500/10 border-slate-500/20">
+        <div className="font-bold text-[length:var(--t-sm)] text-slate-400">No harvest scan data</div>
+        <div className="text-[length:var(--t-2xs)] text-slate-500 mt-0.5">
+          Regime unknown — the last scan wrote nothing here. Check the scan freshness banner above.
+        </div>
+      </div>
+    );
+  }
+  const regime = picks[0].macro_regime;
   const vix = Number(picks[0]?.vix || 0);
 
   const config: Record<string, { bg: string; text: string; label: string }> = {
@@ -16,13 +29,14 @@ function MacroBanner({ picks }: { picks: HarvestScanRow[] }) {
     CAUTION:  { bg: "bg-amber-500/10 border-amber-500/20",   text: "text-amber-400",   label: "Harvest active — reduced sizing" },
     HALTED:   { bg: "bg-red-500/10 border-red-500/20",       text: "text-red-400",      label: "Harvest paused — elevated risk" },
   };
-  const c = config[regime] || config.STANDARD;
+  // Unknown regime string renders as CAUTION, not green.
+  const c = config[regime] || config.CAUTION;
 
   return (
     <div className={`rounded-xl border p-3 mb-3 ${c.bg}`}>
       <div className={`font-bold text-[length:var(--t-sm)] ${c.text}`}>{c.label}</div>
       <div className="text-[length:var(--t-2xs)] text-slate-500 mt-0.5">
-        {regime} · VIX {vix.toFixed(0)}
+        {regime}{vix > 0 ? ` · VIX ${vix.toFixed(0)}` : ""}
       </div>
     </div>
   );
@@ -34,7 +48,9 @@ function HarvestStatsCard({ options }: { options: OptionRow[] }) {
   );
   if (!cspPositions.length) return null;
 
-  const totalCredit = cspPositions.reduce((s, o) => s + Math.abs(Number(o.credit) || 0) * 100, 0);
+  // credit is PER CONTRACT — scale by |qty| or a 3-lot reads as a 1-lot.
+  const totalCredit = cspPositions.reduce(
+    (s, o) => s + Math.abs(Number(o.credit) || 0) * 100 * Math.max(1, Math.abs(Number(o.qty) || 1)), 0);
   const totalUpl = cspPositions.reduce((s, o) => s + (Number(o.upl) || 0), 0);
   const winning = cspPositions.filter((o) => (Number(o.upl) || 0) > 0).length;
   const winRate = cspPositions.length > 0 ? (winning / cspPositions.length) * 100 : 0;
