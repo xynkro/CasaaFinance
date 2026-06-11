@@ -108,7 +108,7 @@ def test_spread_label_ignores_other_expiry_or_ticker():
 
 def test_plan_defense_approach_fires_once_per_day():
     legs = [_leg(strike="190.00", qty="-1"), _leg(strike="180.00", qty="1")]
-    plans = plan_defense_pings(legs, {"NVDA": 195.0}, set(), DAY)
+    plans = plan_defense_pings(legs, {"NVDA": 195.0}, set(), DAY, DAY)
     assert len(plans) == 1
     p = plans[0]
     assert p["level"] == "approach"
@@ -116,12 +116,12 @@ def test_plan_defense_approach_fires_once_per_day():
     assert p["dte"] == 10
     assert p["key"] == f"defense:NVDA|P190|20260620|approach|{DAY}"
     # Same run state recorded → next run is silent.
-    assert plan_defense_pings(legs, {"NVDA": 195.0}, {p["key"]}, DAY) == []
+    assert plan_defense_pings(legs, {"NVDA": 195.0}, {p["key"]}, DAY, DAY) == []
 
 
 def test_plan_defense_breach_subsumes_approach():
     legs = [_leg(strike="190.00", qty="-1")]
-    plans = plan_defense_pings(legs, {"NVDA": 188.0}, set(), DAY)
+    plans = plan_defense_pings(legs, {"NVDA": 188.0}, set(), DAY, DAY)
     assert len(plans) == 1
     p = plans[0]
     assert p["level"] == "breach"
@@ -134,7 +134,7 @@ def test_plan_defense_breach_subsumes_approach():
 def test_plan_defense_escalates_approach_to_breach():
     legs = [_leg(strike="190.00", qty="-1")]
     approach_key = f"defense:NVDA|P190|20260620|approach|{DAY}"
-    plans = plan_defense_pings(legs, {"NVDA": 189.5}, {approach_key}, DAY)
+    plans = plan_defense_pings(legs, {"NVDA": 189.5}, {approach_key}, DAY, DAY)
     assert [p["level"] for p in plans] == ["breach"]
 
 
@@ -142,8 +142,8 @@ def test_plan_defense_rearms_on_later_day():
     legs = [_leg(strike="190.00", qty="-1")]
     prior = {f"defense:NVDA|P190|20260620|breach|{DAY}",
              f"defense:NVDA|P190|20260620|approach|{DAY}"}
-    assert plan_defense_pings(legs, {"NVDA": 188.0}, prior, DAY) == []
-    plans = plan_defense_pings(legs, {"NVDA": 188.0}, prior, "2026-06-11")
+    assert plan_defense_pings(legs, {"NVDA": 188.0}, prior, DAY, DAY) == []
+    plans = plan_defense_pings(legs, {"NVDA": 188.0}, prior, "2026-06-11", "2026-06-11")
     assert len(plans) == 1   # new day → new key → re-armed
 
 
@@ -152,13 +152,13 @@ def test_plan_defense_ignores_long_and_safe_legs():
         _leg(strike="180.00", qty="1"),                  # long leg — never paged
         _leg(ticker="IONQ", strike="40.00", qty="-1"),   # short, but safe
     ]
-    assert plan_defense_pings(legs, {"NVDA": 150.0, "IONQ": 60.0}, set(), DAY) == []
+    assert plan_defense_pings(legs, {"NVDA": 150.0, "IONQ": 60.0}, set(), DAY, DAY) == []
 
 
 def test_plan_defense_falls_back_to_grab_underlying():
     # Ticker missing from live_prices → use the options-tab underlying_last.
     legs = [_leg(strike="190.00", qty="-1", underlying_last="189.00")]
-    plans = plan_defense_pings(legs, {}, set(), DAY)
+    plans = plan_defense_pings(legs, {}, set(), DAY, DAY)
     assert len(plans) == 1
     assert plans[0]["underlying"] == 189.0
     assert plans[0]["level"] == "breach"
@@ -167,11 +167,11 @@ def test_plan_defense_falls_back_to_grab_underlying():
 def test_plan_defense_short_call_mirror():
     legs = [_leg(ticker="AVGO", right="C", strike="350.00", qty="-1"),
             _leg(ticker="AVGO", right="C", strike="360.00", qty="1")]
-    plans = plan_defense_pings(legs, {"AVGO": 341.0}, set(), DAY)
+    plans = plan_defense_pings(legs, {"AVGO": 341.0}, set(), DAY, DAY)
     assert len(plans) == 1
     assert plans[0]["level"] == "approach"   # 341 >= 350*0.97 = 339.5
     assert plans[0]["label"] == "CCS 350/360"
-    plans = plan_defense_pings(legs, {"AVGO": 351.0}, set(), DAY)
+    plans = plan_defense_pings(legs, {"AVGO": 351.0}, set(), DAY, DAY)
     assert plans[0]["level"] == "breach"
 
 
@@ -180,12 +180,12 @@ def test_plan_defense_skips_expired_legs():
     # lag) — found live in the 2026-06-10 book (OPEN 4.5P exp 20260529).
     dead = _leg(ticker="OPEN", strike="4.50", qty="-1",
                 expiry="20260529", dte="0")
-    assert plan_defense_pings([dead], {"OPEN": 4.34}, set(), DAY) == []
+    assert plan_defense_pings([dead], {"OPEN": 4.34}, set(), DAY, DAY) == []
     # But a leg expiring TODAY (0 DTE) is exactly when paging matters,
     # and "yesterday" SGT can still be live US-time — both stay eligible.
     for exp in ("20260610", "20260609"):
         live = _leg(strike="190.00", qty="-1", expiry=exp, dte="0")
-        plans = plan_defense_pings([live], {"NVDA": 188.0}, set(), DAY)
+        plans = plan_defense_pings([live], {"NVDA": 188.0}, set(), DAY, DAY)
         assert len(plans) == 1, exp
 
 
@@ -193,7 +193,7 @@ def test_plan_defense_dedups_same_strike_across_accounts():
     # Spec keys dedup on (ticker, strike, expiry, level) — both accounts
     # holding the same short strike page once, not twice.
     legs = [_leg(qty="-1", account="caspar"), _leg(qty="-1", account="sarah")]
-    plans = plan_defense_pings(legs, {"NVDA": 189.0}, set(), DAY)
+    plans = plan_defense_pings(legs, {"NVDA": 189.0}, set(), DAY, DAY)
     assert len(plans) == 1
 
 
@@ -410,3 +410,82 @@ def test_pressure_2026_06_11_incident_regression():
     # Next US session (Jun 11 ET) re-arms WARN at the same tape.
     plan = cycle(datetime(2026, 6, 11, 21, 40, tzinfo=SGT), -1.0, -1.4)
     assert plan and plan["key"] == "pressure:2026-06-11|WARN"
+
+
+# ════════════════════════════════════════════════════════════════════
+# Lane 1 regression — same SGT-midnight key roll, now on defense.
+#
+# The defense lane keyed its event_key with the SGT calendar date, so
+# a leg paged at 23:5x SGT for an in-band underlying would re-page
+# minutes later at 00:1x SGT on the date roll — same US session, same
+# unchanged position. Identical flaw to the pressure lane (fixed in
+# commit 0124992 for ET=2026-06-10 incident); this lane is fixed the
+# same way: the dedup `day` is the US-EASTERN trading date
+# (us_market_date), constant across one cash session.
+# ════════════════════════════════════════════════════════════════════
+
+def test_plan_defense_no_re_arm_across_sgt_midnight_same_us_session():
+    """A 23:5x SGT page must not re-page at 00:1x SGT same US session.
+    A new US session (next ET day) re-arms."""
+    legs = [_leg(strike="190.00", qty="-1")]  # NVDA P190, expiry 20260620
+    prior: set[str] = set()
+
+    def cycle(sgt_dt, px):
+        day = us_market_date(sgt_dt)
+        # SGT-today on these cycles flips at 00:00 SGT — keep it real so
+        # the expiry_floor guard is exercised on its actual reference,
+        # not on the dedup day.
+        sgt_today = sgt_dt.strftime("%Y-%m-%d")
+        plans = plan_defense_pings(legs, {"NVDA": px}, prior, day, sgt_today)
+        for p in plans:
+            prior.update(p["keys_to_mark"])
+        return plans
+
+    # 23:50 SGT Jun 10 — NVDA at 195 (just inside the approach band:
+    # 190 * 1.03 = 195.70). First page of the session fires approach.
+    plans = cycle(datetime(2026, 6, 10, 23, 50, tzinfo=SGT), 195.0)
+    assert len(plans) == 1
+    assert plans[0]["level"] == "approach"
+    assert plans[0]["key"] == "defense:NVDA|P190|20260620|approach|2026-06-10"
+
+    # 00:10 SGT Jun 11 — SGT date rolled, US session didn't. Under the
+    # old SGT-day keying this would have re-paged the SAME approach for
+    # the SAME unchanged tape. With the fix, dedup key stays on the
+    # US-session day 2026-06-10 and the page is suppressed.
+    assert cycle(datetime(2026, 6, 11, 0, 10, tzinfo=SGT), 195.0) == []
+
+    # 01:55 / 03:32 SGT — still in approach band, still same session.
+    assert cycle(datetime(2026, 6, 11, 1, 55, tzinfo=SGT), 194.5) == []
+    assert cycle(datetime(2026, 6, 11, 3, 32, tzinfo=SGT), 193.0) == []
+
+    # 03:45 SGT — gap through the strike escalates approach to breach
+    # on the SAME US-session day (key still 2026-06-10).
+    plans = cycle(datetime(2026, 6, 11, 3, 45, tzinfo=SGT), 188.0)
+    assert len(plans) == 1
+    assert plans[0]["level"] == "breach"
+    assert plans[0]["key"] == "defense:NVDA|P190|20260620|breach|2026-06-10"
+
+    # Next US session (Jun 11 ET = 21:30 SGT Jun 11 onward) re-arms.
+    # NVDA still at 188 — re-page fires under the NEW session-day key.
+    plans = cycle(datetime(2026, 6, 11, 21, 40, tzinfo=SGT), 188.0)
+    assert len(plans) == 1
+    assert plans[0]["level"] == "breach"
+    assert plans[0]["key"] == "defense:NVDA|P190|20260620|breach|2026-06-11"
+
+
+def test_plan_defense_dedup_day_decoupled_from_expiry_guard():
+    """`sgt_today` controls the stale-leg expiry guard, `day` controls
+    the dedup key — they're decoupled so a leg expiring "yesterday SGT"
+    can stay alive in the still-running US session."""
+    # NVDA P190 expiring 20260610 — that's "today" SGT (still live US-time).
+    live = _leg(strike="190.00", qty="-1", expiry="20260610", dte="0")
+    # 00:30 SGT Jun 11: SGT date is 2026-06-11, US-session day is still
+    # 2026-06-10. Expiry guard floor = sgt_today - 1 day = 2026-06-10 →
+    # leg expiring 20260610 is NOT < 20260610 → stays eligible.
+    plans = plan_defense_pings(
+        [live], {"NVDA": 188.0}, set(),
+        day="2026-06-10", sgt_today="2026-06-11")
+    assert len(plans) == 1
+    assert plans[0]["level"] == "breach"
+    # And the dedup key uses the US-session day, not the SGT date.
+    assert plans[0]["key"].endswith("|2026-06-10")
