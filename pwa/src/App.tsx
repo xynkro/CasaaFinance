@@ -23,6 +23,14 @@ import { RefreshCw, Search } from "lucide-react";
 const TAB_TITLES = ["Home", "Portfolio", "Options", "Scanner", "Insider", "Decisions", "Review", "Settings"];
 const SETTINGS_TAB = 7;
 
+/** Named tab indices — import these instead of hardcoding numbers. A literal
+ *  `onJumpTab?.(3)` in HomePage silently routed every urgent ACT-NOW tile to
+ *  the Scanner page after the tab order changed (Decisions moved 3→5). */
+export const TAB = {
+  HOME: 0, PORTFOLIO: 1, OPTIONS: 2, SCANNER: 3,
+  INSIDER: 4, DECISIONS: 5, REVIEW: 6, SETTINGS: 7,
+} as const;
+
 // Private read path: when VITE_DATA_SOURCE==='firestore', the dashboard sits
 // behind Google sign-in instead of the localStorage PIN. The gate component
 // is lazy-loaded so the Firebase SDK is only pulled in on the private path.

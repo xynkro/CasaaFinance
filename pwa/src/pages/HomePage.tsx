@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState } from "react";
 import type { DashboardData } from "../data";
+import { TAB } from "../App";
 import { DailyBriefCard } from "../cards/DailyBriefCard";
 import { RiskPulseCard } from "../cards/RiskPulseCard";
 import { MoversCard } from "../cards/MoversCard";
@@ -75,13 +76,14 @@ export function HomePage({
 
   const liteFresh = wsrLite ? isWsrLiteFresh(wsrLite.date) : false;
 
-  // Tab indices: Decisions=3, Options=2 (matches TAB_TITLES in App.tsx).
-  const jumpDecisions = () => onJumpTab?.(3);
-  const jumpOptions = () => onJumpTab?.(2);
-  // Portfolio is tab 1; sub-tab index 2 = Paper (see PortfolioPage SwipeTabs).
+  // Named tab indices from App.tsx — a hardcoded 3 here routed every urgent
+  // ACT-NOW / blackout / close tile to the SCANNER page (Decisions is 5).
+  const jumpDecisions = () => onJumpTab?.(TAB.DECISIONS);
+  const jumpOptions = () => onJumpTab?.(TAB.OPTIONS);
+  // Sub-tab index 2 = Paper (see PortfolioPage SwipeTabs).
   const jumpPaper = () => {
     try { localStorage.setItem("casaa_portfolio_subtab", "2"); } catch { /* ignore */ }
-    onJumpTab?.(1);
+    onJumpTab?.(TAB.PORTFOLIO);
   };
 
   return (
