@@ -15,9 +15,12 @@ sort, even though they happened ~minutes apart in real time.
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 
 SGT = timezone(timedelta(hours=8), name="SGT")
+
+US_MARKET_TZ = ZoneInfo("America/New_York")
 
 
 def now_sgt_iso() -> str:
@@ -28,6 +31,19 @@ def now_sgt_iso() -> str:
 def now_sgt_date() -> str:
     """Current SGT calendar date as 'YYYY-MM-DD'."""
     return datetime.now(SGT).strftime("%Y-%m-%d")
+
+
+def us_market_date(now: datetime | None = None) -> str:
+    """US-Eastern calendar date 'YYYY-MM-DD' of `now` (tz-aware; default
+    = current instant).
+
+    The dedup day for alert lanes tied to the US cash session. The session
+    runs ACROSS SGT midnight (21:30-04:00 SGT), so keying a once-per-day
+    page to the SGT date re-arms it at 00:00 SGT mid-session — the
+    2026-06-11 market-pressure incident: WARN paged 23:36 SGT, re-paged
+    ~00:10 SGT on the date roll, then the deepening tape stayed silent
+    because the "new day's" WARN was already spent."""
+    return (now or datetime.now(US_MARKET_TZ)).astimezone(US_MARKET_TZ).strftime("%Y-%m-%d")
 
 
 def _num(x, ndp: int = 2) -> str:

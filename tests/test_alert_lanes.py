@@ -5,6 +5,8 @@ market-pressure. Sheet reads are mocked by feeding the pure plan_*
 functions plain dicts shaped like the tab rows."""
 from datetime import datetime, timedelta, timezone
 
+from src.schema import us_market_date
+
 from scripts.trigger_alerts import (
     DEFENSE_CALL_APPROACH_MULT,
     DEFENSE_PUT_APPROACH_MULT,
@@ -340,3 +342,71 @@ def test_pressure_no_page_after_alert_eases_to_warn_band():
 
 def test_pressure_silent_when_indices_missing():
     assert plan_market_pressure({}, {"NVDA"}, set(), DAY) is None
+
+
+# ════════════════════════════════════════════════════════════════════
+# Lane 3 regression — 2026-06-11 incident: SGT-midnight key roll.
+#
+# The US cash session runs 21:30-04:00 SGT, crossing SGT midnight.
+# Keying the pressure dedup to the SGT date re-armed WARN at 00:00 SGT
+# mid-session: WARN paged 23:36 SGT Jun 10 (QQQ -1.2786), re-paged
+# ~00:10 SGT Jun 11 on the date roll (same selloff), and the deepening
+# tape at 01:51-03:32 SGT then logged "pressure=none" — its WARN was
+# silently deduped against the midnight re-page. Fix: key on the
+# US-Eastern trading date (us_market_date), constant across a session.
+# ════════════════════════════════════════════════════════════════════
+
+def test_us_market_date_constant_across_sgt_midnight():
+    # Every cycle of the 2026-06-10 US session maps to ONE session day,
+    # even though the SGT calendar date flips at 00:00 SGT mid-session.
+    incident_cycles_sgt = [
+        datetime(2026, 6, 10, 23, 36, tzinfo=SGT),   # WARN paged here
+        datetime(2026, 6, 11, 0, 10, tzinfo=SGT),    # old key re-armed here
+        datetime(2026, 6, 11, 0, 40, tzinfo=SGT),    # GH cycle, suppressed
+        datetime(2026, 6, 11, 3, 21, tzinfo=SGT),    # logged pressure=none
+        datetime(2026, 6, 11, 3, 32, tzinfo=SGT),    # logged pressure=none
+        datetime(2026, 6, 11, 3, 45, tzinfo=SGT),    # ALERT fired
+    ]
+    assert {us_market_date(t) for t in incident_cycles_sgt} == {"2026-06-10"}
+    # The next US session (21:30 SGT Jun 11 = 09:30 ET Jun 11) is a new day.
+    assert us_market_date(datetime(2026, 6, 11, 21, 30, tzinfo=SGT)) == "2026-06-11"
+
+
+def test_pressure_2026_06_11_incident_regression():
+    """Replay the incident cycles with the exact logged SPY/QQQ values,
+    marking keys after each page exactly as main()'s send path does."""
+    held: set[str] = set()
+    fired: set[str] = set()
+
+    def cycle(sgt_dt, spy, qqq):
+        plan = plan_market_pressure(
+            {"SPY": spy, "QQQ": qqq}, held, fired, us_market_date(sgt_dt))
+        if plan:
+            fired.update(plan["keys_to_mark"])
+        return plan
+
+    # 23:36 SGT Jun 10 — first WARN of the session pages (ledger values).
+    plan = cycle(datetime(2026, 6, 10, 23, 36, tzinfo=SGT), -0.9199, -1.2786)
+    assert plan and plan["severity"] == "WARN"
+    assert plan["key"] == "pressure:2026-06-10|WARN"
+
+    # 00:40 SGT Jun 11 — SGT date rolled, session didn't. Under the old
+    # SGT-day keying this cycle re-paged WARN (fresh "2026-06-11" key)
+    # and silently consumed the rest of the session's WARN budget.
+    assert cycle(datetime(2026, 6, 11, 0, 40, tzinfo=SGT), -0.9226, -1.3012) is None
+
+    # 01:51 / 03:21 / 03:32 SGT — WARN band, already paged this session.
+    assert cycle(datetime(2026, 6, 11, 1, 51, tzinfo=SGT), -1.1166, -1.5569) is None
+    assert cycle(datetime(2026, 6, 11, 3, 21, tzinfo=SGT), -1.3378, -1.6558) is None
+    assert cycle(datetime(2026, 6, 11, 3, 32, tzinfo=SGT), -1.3432, -1.8762) is None
+
+    # 03:45 SGT — escalation to ALERT pages on the SAME session day.
+    plan = cycle(datetime(2026, 6, 11, 3, 45, tzinfo=SGT), -1.5386, -2.0951)
+    assert plan and plan["severity"] == "ALERT"
+    assert plan["key"] == "pressure:2026-06-10|ALERT"
+    assert set(plan["keys_to_mark"]) == {
+        "pressure:2026-06-10|ALERT", "pressure:2026-06-10|WARN"}
+
+    # Next US session (Jun 11 ET) re-arms WARN at the same tape.
+    plan = cycle(datetime(2026, 6, 11, 21, 40, tzinfo=SGT), -1.0, -1.4)
+    assert plan and plan["key"] == "pressure:2026-06-11|WARN"

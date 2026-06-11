@@ -110,9 +110,12 @@ HELD_NEWS_FRESH_MIN = max(HOT_NEWS_FRESH_MIN, 150)
 HELD_NEWS_PING_CAP = 3  # same flood-protection precedent as HOT_NEWS_PING_CAP
 
 # Market-pressure lane ("time to get out"): SPY/QQQ day-change
-# thresholds in percent. One page per severity per SGT day; an ALERT
-# also marks WARN as fired so a tape easing back into the WARN band
-# doesn't downgrade-page afterwards (WARN→ALERT escalation still pages).
+# thresholds in percent. One page per severity per US-session day
+# (US-Eastern date — NOT the SGT date: the US session crosses SGT
+# midnight, and SGT-date keying re-armed WARN at 00:00 SGT mid-session
+# in the 2026-06-11 incident); an ALERT also marks WARN as fired so a
+# tape easing back into the WARN band doesn't downgrade-page afterwards
+# (WARN→ALERT escalation still pages).
 PRESSURE_WARN_PCT = -1.25
 PRESSURE_ALERT_PCT = -2.0
 PRESSURE_WORST_N = 5  # worst held names shown in the mini-heatmap
@@ -720,10 +723,16 @@ def plan_market_pressure(
     """Plan the market-pressure page, or None. Pure — testable.
 
     Dedup: event_key = "pressure:<day>|<severity>" — one page per
-    severity per SGT day. An ALERT also marks the WARN key so the tape
-    easing back into the WARN band later doesn't downgrade-page;
-    WARN→ALERT escalation still pages (different key). Includes the
-    worst-PRESSURE_WORST_N held names by day change as a mini-heatmap.
+    severity per `day`. Callers must pass the US-EASTERN trading date
+    (S.us_market_date()), not the SGT date: the US cash session runs
+    21:30-04:00 SGT, so an SGT-date key rolls over mid-session at
+    00:00 SGT — that re-armed WARN minutes after midnight in the
+    2026-06-11 incident and then swallowed the deepening tape's WARN
+    for the rest of the session. An ALERT also marks the WARN key so
+    the tape easing back into the WARN band later doesn't
+    downgrade-page; WARN→ALERT escalation still pages (different key).
+    Includes the worst-PRESSURE_WORST_N held names by day change as a
+    mini-heatmap.
     """
     spy = live_changes.get("SPY")
     qqq = live_changes.get("QQQ")
@@ -1246,6 +1255,12 @@ def main() -> int:
     # pings above, which also bypass it).
     # ────────────────────────────────────────────────────────────────
     today_sgt = S.now_sgt_date()
+    # Pressure dedups per US-SESSION day, not SGT day: the US session
+    # crosses SGT midnight, and the SGT-date key re-armed WARN at
+    # 00:00 SGT mid-session (2026-06-11 incident — WARN re-paged ~00:10
+    # for the same selloff already paged 23:36, then the deepening tape
+    # at 01:51-03:32 was silently deduped against that midnight page).
+    us_session_day = S.us_market_date()
     prior_keys = set(prior_macro_alerts)
 
     option_legs = load_open_option_legs(client, logger)
@@ -1259,13 +1274,25 @@ def main() -> int:
     )
 
     pressure_plan = plan_market_pressure(
-        live_changes, portfolio_tickers, prior_keys, today_sgt)
+        live_changes, portfolio_tickers, prior_keys, us_session_day)
+
+    # Log line distinguishes "tape below threshold" from "in band but
+    # already paged this session" — both used to print as "none", which
+    # made the dedup suppression indistinguishable from a dropped WARN.
+    pressure_sev_now = pressure_severity(
+        live_changes.get("SPY"), live_changes.get("QQQ"))
+    if pressure_plan:
+        pressure_desc = pressure_plan["severity"]
+    elif pressure_sev_now:
+        pressure_desc = f"{pressure_sev_now}-already-paged({us_session_day})"
+    else:
+        pressure_desc = "none"
 
     n_short_legs = sum(1 for l in option_legs if _f(l.get("qty")) < 0)
     logger.info(
         f"Lane plans: defense={len(defense_plan)} (of {n_short_legs} short legs) | "
         f"held_news={len(held_news_plan)} | "
-        f"pressure={pressure_plan['severity'] if pressure_plan else 'none'} "
+        f"pressure={pressure_desc} "
         f"(SPY {live_changes.get('SPY', '?')}% QQQ {live_changes.get('QQQ', '?')}%)"
     )
 
