@@ -11,8 +11,11 @@ Skills wrapped (in order):
   - market-top-detector          FMP_API_KEY required + breadth args (skipped here)
 
 Each skill is invoked as a subprocess into a tempdir, then the most-recent JSON
-is parsed for a normalized (score, label, summary) tuple. The full JSON is
-serialised into the `raw_json` column (truncated to 5KB).
+is parsed for a normalized (score, label, summary) tuple. The skill output is
+compacted per-source (per-bar histories dropped) and serialised into the
+`raw_json` column. RegimeSignalRow.to_row caps the cell at 25KB and, if even
+the compact payload exceeds that, swaps in a parseable envelope so downstream
+`json.loads` never breaks.
 
 Behavior:
   - --dry / --dry-run : print rows that would be appended; no Sheet write
@@ -76,6 +79,89 @@ class ParsedSignal:
     raw: dict
 
 
+# ---------------- raw_json compaction ----------------
+# RegimeSignalRow.to_row enforces a 25KB ceiling on raw_json (Sheets cell
+# limit is 50KB). When any field above that ceiling lands in the cell, the
+# schema layer replaces it with a parseable envelope — so anything we want
+# the brain prompts / exposure-coach to see has to fit. The per-source
+# compactors below drop the per-bar OHLCV histories that bloat ftd /
+# macro_regime / distribution_day payloads past the limit, while keeping
+# the score, label, regime, and decision fields the downstream readers
+# actually use.
+
+
+def _drop_keys(d: dict, keys: tuple[str, ...]) -> dict:
+    return {k: v for k, v in d.items() if k not in keys}
+
+
+def _compact_raw(source: str, raw: dict) -> dict:
+    """Strip known time-series / per-bar fields per source.
+
+    Idempotent and shape-tolerant: if a key is missing or has an unexpected
+    type, the compactor leaves it alone — never raises. The result is still
+    a dict the brain can inspect; only the bulky arrays are dropped.
+    """
+    if not isinstance(raw, dict):
+        return raw
+
+    if source == "ftd":
+        # sp500 / nasdaq carry full multi-month bar histories used only by
+        # the skill's own state machine — drop, keep the index summaries.
+        out = dict(raw)
+        for idx_key in ("sp500", "nasdaq"):
+            v = out.get(idx_key)
+            if isinstance(v, dict):
+                out[idx_key] = _drop_keys(v, ("history", "chronological"))
+        return out
+
+    if source == "distribution_day":
+        # market_distribution_state.index_results[*] carries the raw
+        # active/removed DD records — kept by the skill for audit but the
+        # brain only needs counts + risk level.
+        out = dict(raw)
+        mds = out.get("market_distribution_state")
+        if isinstance(mds, dict):
+            mds = dict(mds)
+            idx_results = mds.get("index_results")
+            if isinstance(idx_results, list):
+                compact_idx = []
+                for r in idx_results:
+                    if isinstance(r, dict):
+                        compact_idx.append(_drop_keys(
+                            r, ("active_distribution_days",
+                                "removed_distribution_days",
+                                "skipped_sessions"),
+                        ))
+                    else:
+                        compact_idx.append(r)
+                mds["index_results"] = compact_idx
+            out["market_distribution_state"] = mds
+        # Drop the per-session skip audit too — large + only useful for
+        # debugging the skill itself.
+        audit = out.get("audit")
+        if isinstance(audit, dict):
+            out["audit"] = _drop_keys(audit, ("skipped_sessions",))
+        return out
+
+    if source == "macro_regime":
+        # components.* often carry per-ETF sub-series the brain doesn't
+        # read — keep score / label / interpretation; drop verbose detail.
+        out = dict(raw)
+        comps = out.get("components")
+        if isinstance(comps, dict):
+            slim_comps: dict = {}
+            for k, v in comps.items():
+                if isinstance(v, dict):
+                    slim_comps[k] = _drop_keys(v, ("series", "history", "detail"))
+                else:
+                    slim_comps[k] = v
+            out["components"] = slim_comps
+        return out
+
+    # market_breadth and any future source: pass through unchanged.
+    return raw
+
+
 # ---------------- per-skill JSON parsers ----------------
 
 def parse_market_breadth(data: dict) -> ParsedSignal:
@@ -104,15 +190,29 @@ def parse_market_breadth(data: dict) -> ParsedSignal:
 def parse_ftd(data: dict) -> ParsedSignal:
     """ftd-detector JSON -> normalized signal.
 
-    Key path: market_state.quality_score.{total_score, signal, guidance}.
+    The detector writes the analysis dict with these TOP-LEVEL keys:
+      - market_state: {combined_state, dual_confirmation, ftd_index}
+      - quality_score: {total_score, signal, guidance, exposure_range}
+      - sp500 / nasdaq / post_ftd_distribution / ftd_invalidation / power_trend
+
+    Earlier versions of this parser read `market_state.quality_score`, which
+    silently emitted score=0 / label=UNKNOWN. That fed ftd_score=0 into the
+    exposure-coach composite and dragged the ceiling down even when FTD was
+    confirmed at quality 95.
     """
+    quality = data.get("quality_score", {}) or {}
     market_state = data.get("market_state", {}) or {}
-    quality = market_state.get("quality_score", {}) or {}
     score = float(quality.get("total_score", 0) or 0)
-    label = str(quality.get("signal", "UNKNOWN")).strip()
+    combined_state = str(market_state.get("combined_state", "")).strip()
+    signal = str(quality.get("signal", "")).strip()
     guidance = str(quality.get("guidance", "")).strip()
     exposure_range = str(quality.get("exposure_range", "")).strip()
-    summary_bits = [s for s in (label, exposure_range, guidance) if s]
+    # Label carries the operational state ("FTD_CONFIRMED", "RALLY_ATTEMPT",
+    # etc.) — the brain prompts + exposure-coach use this as the actionable
+    # tag. Fall back to the quality `signal` ("Strong FTD" / "Moderate FTD")
+    # when combined_state is absent.
+    label = combined_state or signal or "UNKNOWN"
+    summary_bits = [s for s in (signal, exposure_range, guidance) if s]
     summary = " | ".join(summary_bits[:3]) or f"score {score}"
     return ParsedSignal(
         source="ftd", score=score, label=label, summary=summary, raw=data,
@@ -297,7 +397,7 @@ def main() -> int:
             score=sig.score,
             label=sig.label,
             summary=sig.summary[:500],
-            raw_json=json.dumps(sig.raw, default=str),
+            raw_json=json.dumps(_compact_raw(sig.source, sig.raw), default=str),
         )
         rows.append(row)
 

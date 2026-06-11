@@ -2,10 +2,35 @@
 schemas, and the macro factory helper."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import List
 
 from ._base import _num, _ts_suffix
+
+# Sheets per-cell limit is 50KB. We cap raw_json / components_json at 25KB
+# to leave headroom for the audit timestamp suffix and any quoting overhead.
+MAX_JSON_CELL_BYTES = 25_000
+
+
+def _safe_truncate_json(s: str, limit: int, **envelope_extra) -> str:
+    """Return s unchanged if it fits; otherwise a parseable envelope.
+
+    The previous truncation strategy did a byte-cut at 5000 chars and
+    appended "...[truncated]" — the result was a half-string that broke
+    every downstream `json.loads`. Now if we have to drop the payload, we
+    emit a JSON object that downstream readers can parse and recognize via
+    the `_truncated` flag.
+    """
+    if len(s) <= limit:
+        return s
+    envelope = {
+        "_truncated": True,
+        "_orig_size": len(s),
+        "preview": s[:500],
+        **envelope_extra,
+    }
+    return json.dumps(envelope, default=str)
 
 
 @dataclass
@@ -57,14 +82,17 @@ class RegimeSignalRow:
     score: float        # 0-100 normalized per-source
     label: str          # short tag e.g. "Weakening" | "FTD_CONFIRMED" | "HIGH_RISK"
     summary: str        # 1-line human-readable
-    raw_json: str       # full skill output (truncated to 5KB)
+    raw_json: str       # full skill output (safe-truncated to MAX_JSON_CELL_BYTES)
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
-        # Truncate raw_json to 5KB to stay well below Sheets cell limit (50K).
-        raw = self.raw_json or ""
-        if len(raw) > 5000:
-            raw = raw[:5000] + "...[truncated]"
+        raw = _safe_truncate_json(
+            self.raw_json or "",
+            MAX_JSON_CELL_BYTES,
+            source=self.source,
+            score=self.score,
+            label=self.label,
+        )
         return [d, self.source, _num(self.score, 1), self.label, self.summary, raw]
 
 
@@ -92,9 +120,11 @@ class ExposurePostureRow:
 
     def to_row(self, audit: bool = True) -> List[str]:
         d = _ts_suffix(self.date) if audit else self.date
-        comp = self.components_json or ""
-        if len(comp) > 5000:
-            comp = comp[:5000] + "...[truncated]"
+        comp = _safe_truncate_json(
+            self.components_json or "",
+            MAX_JSON_CELL_BYTES,
+            recommendation=self.recommendation,
+        )
         return [
             d, _num(self.exposure_ceiling_pct, 0),
             self.bias, self.participation, self.recommendation,
