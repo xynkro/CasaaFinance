@@ -1,8 +1,9 @@
 import { useState } from "react";
-import type { HarvestScanRow } from "../data";
+import type { ExposurePostureRow, GexRegimeRow, HarvestScanRow, ScanMetaRow } from "../data";
 import { Card } from "./Card";
 import { fmtExpiry } from "../lib/dates";
 import { Wheat, ChevronDown, ChevronUp } from "lucide-react";
+import { RegimeStamp } from "../components/RegimeStamp";
 
 function convColor(c: number) {
   if (c >= 75) return "text-emerald-400 bg-emerald-500/15 border-emerald-500/30";
@@ -59,7 +60,12 @@ function PickRow({ row }: { row: HarvestScanRow }) {
   );
 }
 
-export function HarvestPicksCard({ picks }: { picks: HarvestScanRow[] }) {
+export function HarvestPicksCard({ picks, exposurePosture, gexRegime, scanMeta }: {
+  picks: HarvestScanRow[];
+  exposurePosture?: ExposurePostureRow | null;
+  gexRegime?: GexRegimeRow[] | null;
+  scanMeta?: ScanMetaRow | null;
+}) {
   if (!picks.length) {
     return (
       <Card>
@@ -85,6 +91,7 @@ export function HarvestPicksCard({ picks }: { picks: HarvestScanRow[] }) {
         </div>
         <span className="text-emerald-400 text-[length:var(--t-2xs)] tabular-nums">{sorted.length} CSP</span>
       </div>
+      <RegimeStamp posture={exposurePosture} gexRegime={gexRegime} scanMeta={scanMeta} className="mb-2" />
       <div>
         {sorted.map((p, i) => <PickRow key={`${p.ticker}-${i}`} row={p} />)}
       </div>

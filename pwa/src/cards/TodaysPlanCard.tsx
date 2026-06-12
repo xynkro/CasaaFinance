@@ -1,6 +1,7 @@
-import type { DailyPlanRow, NewsSummary } from "../data";
+import type { DailyPlanRow, ExposurePostureRow, GexRegimeRow, ScanMetaRow, NewsSummary } from "../data";
 import { Card } from "./Card";
 import { ClipboardList, Shield, TrendingUp, Coins, CircleDollarSign, Layers, Flame } from "lucide-react";
+import { RegimeStamp, suppressionReasons } from "../components/RegimeStamp";
 
 function num(v?: string): number {
   const n = Number(v);
@@ -17,14 +18,18 @@ const LEG_META: Record<string, { label: string; icon: typeof Shield; cls: string
 };
 
 // "" = pending; the auto-trader writes the outcome back per row.
+// "skipped:<reason>" / "failed:<reason>" carry the WHY — surface it (UI-audit
+// #9). The discipline signal (skipped: SELL_CAUTION) used to collapse to a
+// bare "skipped" pill that read identically to a missed leg.
 function StatusPill({ status }: { status?: string }) {
-  const s = (status || "").toLowerCase();
+  const raw = (status || "").toLowerCase();
+  const reason = raw.includes(":") ? raw.slice(raw.indexOf(":") + 1).trim() : "";
   let cls = "text-slate-500 bg-slate-500/10 border-slate-500/20";
   let label = "pending";
-  if (s.startsWith("filled")) { cls = "text-emerald-300 bg-emerald-500/15 border-emerald-500/30"; label = "filled"; }
-  else if (s.startsWith("held")) { cls = "text-sky-300 bg-sky-500/15 border-sky-500/30"; label = "held"; }
-  else if (s.startsWith("skipped")) { cls = "text-slate-400 bg-slate-500/10 border-slate-500/25"; label = "skipped"; }
-  else if (s.startsWith("failed")) { cls = "text-rose-300 bg-rose-500/15 border-rose-500/30"; label = "failed"; }
+  if (raw.startsWith("filled")) { cls = "text-emerald-300 bg-emerald-500/15 border-emerald-500/30"; label = "filled"; }
+  else if (raw.startsWith("held")) { cls = "text-sky-300 bg-sky-500/15 border-sky-500/30"; label = "held"; }
+  else if (raw.startsWith("skipped")) { cls = "text-slate-400 bg-slate-500/10 border-slate-500/25"; label = reason ? `skipped: ${reason}` : "skipped"; }
+  else if (raw.startsWith("failed")) { cls = "text-rose-300 bg-rose-500/15 border-rose-500/30"; label = reason ? `failed: ${reason}` : "failed"; }
   return (
     <span className={`px-1.5 py-0.5 rounded text-[length:var(--t-2xs)] font-bold border ${cls}`}>
       {label}
@@ -77,9 +82,12 @@ function PlanRow({ row, news }: { row: DailyPlanRow; news?: NewsSummary }) {
   );
 }
 
-export function TodaysPlanCard({ plan, newsByTicker }: {
+export function TodaysPlanCard({ plan, newsByTicker, exposurePosture, gexRegime, scanMeta }: {
   plan: DailyPlanRow[];
   newsByTicker?: Map<string, NewsSummary>;
+  exposurePosture?: ExposurePostureRow | null;
+  gexRegime?: GexRegimeRow[] | null;
+  scanMeta?: ScanMetaRow | null;
 }) {
   if (!plan.length) return null;
   const newsFor = (t?: string) => newsByTicker?.get((t || "").toUpperCase());
@@ -102,6 +110,9 @@ export function TodaysPlanCard({ plan, newsByTicker }: {
         One source of truth — the auto-trader executes exactly this list, nothing else.
       </p>
 
+      {/* Regime stamp — discipline visible at the plan surface (UI-audit #5). */}
+      <RegimeStamp posture={exposurePosture} gexRegime={gexRegime} scanMeta={scanMeta} className="mb-2" />
+
       {standing.length > 0 && (
         <div className="mb-1">
           <div className="text-[length:var(--t-2xs)] text-slate-500 uppercase tracking-wide mb-0.5">
@@ -123,11 +134,21 @@ export function TodaysPlanCard({ plan, newsByTicker }: {
           </div>
         </div>
       )}
-      {opps.length === 0 && (
-        <p className="text-[length:var(--t-2xs)] text-slate-600 pt-1.5 border-t border-white/5">
-          No fresh growth/income opportunities today — holding the standing allocation only.
-        </p>
-      )}
+      {opps.length === 0 && (() => {
+        // If a gate is actively suppressing premium-selling recs, say so by
+        // name (mirrors the Telegram 🔇 digest banner — visible discipline,
+        // not a quiet scan). Otherwise the tape genuinely had nothing today.
+        const reasons = suppressionReasons(exposurePosture, gexRegime, scanMeta);
+        return reasons.length ? (
+          <p className="text-[length:var(--t-2xs)] text-amber-300/90 pt-1.5 border-t border-white/5">
+            🔇 Premium-selling recs suppressed — gated by {reasons.join(" · ")}. The silence is the discipline.
+          </p>
+        ) : (
+          <p className="text-[length:var(--t-2xs)] text-slate-600 pt-1.5 border-t border-white/5">
+            No fresh growth/income opportunities today — holding the standing allocation only.
+          </p>
+        );
+      })()}
     </Card>
   );
 }

@@ -183,7 +183,13 @@ export function HomePage({
             "what's the bot doing" surface; recommendation == execution. */}
         {(data?.dailyPlan?.length ?? 0) > 0 && (
           <div className="fade-up fade-up-2 mt-3">
-            <TodaysPlanCard plan={data?.dailyPlan ?? []} newsByTicker={data?.newsByTicker} />
+            <TodaysPlanCard
+              plan={data?.dailyPlan ?? []}
+              newsByTicker={data?.newsByTicker}
+              exposurePosture={data?.exposurePosture ?? null}
+              gexRegime={data?.gexRegime ?? null}
+              scanMeta={data?.scanMeta ?? null}
+            />
           </div>
         )}
 

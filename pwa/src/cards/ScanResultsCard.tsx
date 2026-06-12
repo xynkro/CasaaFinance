@@ -1,8 +1,9 @@
 import { useState } from "react";
-import type { ScanResultRow } from "../data";
+import type { ExposurePostureRow, GexRegimeRow, ScanMetaRow, ScanResultRow } from "../data";
 import { Card } from "./Card";
 import { fmtExpiry } from "../lib/dates";
 import { TrendingUp, ChevronDown, ChevronUp } from "lucide-react";
+import { RegimeStamp } from "../components/RegimeStamp";
 
 /** Strategy-specific contract label: "$190P" for puts, "$200C" for calls, "$190P/$185P" for spreads. */
 function contractLabel(row: ScanResultRow): string {
@@ -126,9 +127,15 @@ function ScanRow({ row }: { row: ScanResultRow }) {
 export function ScanResultsCard({
   strategy,
   rows,
+  exposurePosture,
+  gexRegime,
+  scanMeta,
 }: {
   strategy: string;
   rows: ScanResultRow[];
+  exposurePosture?: ExposurePostureRow | null;
+  gexRegime?: GexRegimeRow[] | null;
+  scanMeta?: ScanMetaRow | null;
 }) {
   if (!rows.length) {
     return (
@@ -159,6 +166,7 @@ export function ScanResultsCard({
           {rows.length} picks
         </span>
       </div>
+      <RegimeStamp posture={exposurePosture} gexRegime={gexRegime} scanMeta={scanMeta} className="mb-2" />
       <div>
         {rows.map((r, i) => <ScanRow key={`${r.ticker}-${r.strike}-${i}`} row={r} />)}
       </div>

@@ -1,6 +1,7 @@
 import type { OptionRow, HarvestScanRow } from "../data";
 import { Card } from "./Card";
 import { Sprout, TrendingUp, TrendingDown, AlertTriangle } from "lucide-react";
+import { OptionMechanics } from "../components/OptionMechanics";
 
 export interface ActiveHarvest {
   position: OptionRow;
@@ -86,6 +87,20 @@ function HarvestPositionRow({ h }: { h: ActiveHarvest }) {
       </div>
 
       <ProfitBar pct={profitPct} />
+
+      {/* Mechanics strip — captured % (50% rule) / DTE pill (21d act, 7d urgent)
+          / distance-to-strike / max loss. Computed from credit/last/qty/strike/
+          expiry/right; chips drop out individually on missing inputs. */}
+      <OptionMechanics
+        credit={Number(pos.credit) || undefined}
+        last={Number(pos.last) || undefined}
+        dte={dte}
+        strike={strike}
+        underlying={Number(pos.underlying_last) || undefined}
+        right={pos.right}
+        qty={Number(pos.qty) || undefined}
+        leg="CSP"
+      />
 
       <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
         <span>Credit <span className="text-slate-300 tabular-nums">${credit.toFixed(2)}</span></span>

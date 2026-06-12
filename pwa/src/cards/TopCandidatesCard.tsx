@@ -1,8 +1,9 @@
 import { useState } from "react";
-import type { IvSurfaceScanRow } from "../data";
+import type { ExposurePostureRow, GexRegimeRow, IvSurfaceScanRow, ScanMetaRow } from "../data";
 import { numeric } from "../data";
 import { Card } from "./Card";
 import { Activity, ChevronDown, ChevronUp } from "lucide-react";
+import { RegimeStamp } from "../components/RegimeStamp";
 
 // --------------- helpers ---------------
 
@@ -178,9 +179,15 @@ const DEFAULT_COUNT = 15;
 export function TopCandidatesCard({
   contracts,
   onSelectContract,
+  exposurePosture,
+  gexRegime,
+  scanMeta,
 }: {
   contracts: IvSurfaceScanRow[];
   onSelectContract?: (row: IvSurfaceScanRow) => void;
+  exposurePosture?: ExposurePostureRow | null;
+  gexRegime?: GexRegimeRow[] | null;
+  scanMeta?: ScanMetaRow | null;
 }) {
   const [showAll, setShowAll] = useState(false);
 
@@ -230,6 +237,8 @@ export function TopCandidatesCard({
           {filtered.length} contract{filtered.length !== 1 ? "s" : ""}
         </span>
       </div>
+
+      <RegimeStamp posture={exposurePosture} gexRegime={gexRegime} scanMeta={scanMeta} className="mb-2" />
 
       {/* Risk filter toggles */}
       <div className="flex gap-1.5 mb-3">

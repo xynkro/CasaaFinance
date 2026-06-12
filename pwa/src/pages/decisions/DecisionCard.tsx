@@ -11,6 +11,8 @@ import { useState } from "react";
 import type {
   DecisionRow,
   ExposurePostureRow,
+  GexRegimeRow,
+  ScanMetaRow,
   TvConsensus,
   EarningsRow,
   AnalystConsensusRow,
@@ -18,6 +20,8 @@ import type {
   InsiderSummary,
 } from "../../data";
 import { evaluateTrigger } from "../../data";
+import { OptionMechanics, dteFromExpiry } from "../../components/OptionMechanics";
+import { RegimeStamp } from "../../components/RegimeStamp";
 import {
   EarningsBadge,
   AnalystChip,
@@ -461,6 +465,8 @@ export function DecisionCard({
   news,
   insider,
   exposurePosture,
+  gexRegime,
+  scanMeta,
 }: {
   decision: DecisionRow;
   onTap: () => void;
@@ -471,6 +477,8 @@ export function DecisionCard({
   news?: NewsSummary;
   insider?: InsiderSummary;
   exposurePosture?: ExposurePostureRow | null;
+  gexRegime?: GexRegimeRow[] | null;
+  scanMeta?: ScanMetaRow | null;
 }) {
   const status = resolveStatus(decision.status);
   const conv = Math.round(Number(decision.conv) || 0);
@@ -523,6 +531,16 @@ export function DecisionCard({
         </div>
       </div>
 
+      {/* Regime stamp — discipline at the point of decision. A pending CSP
+          must visibly DIFFER between NEW_ENTRY_ALLOWED and CASH_PRIORITY days
+          (UI-audit #5; post-mortem doctrine). */}
+      <RegimeStamp
+        posture={exposurePosture}
+        gexRegime={gexRegime}
+        scanMeta={scanMeta}
+        className="mb-3"
+      />
+
       {/* Thesis */}
       <p className="text-[length:var(--t-sm)] text-slate-300 leading-relaxed mb-3">{decision.thesis_1liner}</p>
 
@@ -550,6 +568,21 @@ export function DecisionCard({
 
       {/* Options-spec sub-row (only for option strategies) */}
       {showOptionsSpec && <OptionsSpecRow decision={decision} />}
+
+      {/* Mechanics strip — captured % / DTE / dist-to-strike / max loss.
+          Captured-% only renders when a live mark exists (decisions don't
+          carry one); distance-to-strike + DTE + max-loss work from strike +
+          expiry + cash_required. UI-audit #3. */}
+      {showOptionsSpec && (
+        <OptionMechanics
+          strike={Number(decision.strike) || undefined}
+          underlying={currentPrice}
+          right={decision.right}
+          dte={dteFromExpiry(decision.expiry)}
+          leg={decision.strategy === "CSP" ? "CSP" : decision.strategy === "CC" ? "CC" : undefined}
+          className="mt-2"
+        />
+      )}
 
       {/* Bucket + metrics row + actions */}
       <div className="flex items-center justify-between gap-2 flex-wrap">

@@ -12,6 +12,8 @@ import { useState } from "react";
 import type {
   DecisionRow,
   ExposurePostureRow,
+  GexRegimeRow,
+  ScanMetaRow,
   LivePriceRow,
   PositionRow,
   ScreenCandidateRow,
@@ -53,6 +55,8 @@ export function DecisionsPage({
   casparPositions,
   sarahPositions,
   exposurePosture,
+  gexRegime,
+  scanMeta,
   casparSnapshot,
   sarahSnapshot,
   tvSignals,
@@ -74,6 +78,8 @@ export function DecisionsPage({
   casparPositions?: PositionRow[];
   sarahPositions?: PositionRow[];
   exposurePosture?: ExposurePostureRow | null;
+  gexRegime?: GexRegimeRow[] | null;
+  scanMeta?: ScanMetaRow | null;
   casparSnapshot?: SnapshotRow | null;
   sarahSnapshot?: SnapshotRow | null;
   tvSignals?: Map<string, TvConsensus>;
@@ -168,6 +174,8 @@ export function DecisionsPage({
         news={newsByTicker?.get((d.ticker || "").toUpperCase())}
         insider={insiderByTicker?.get((d.ticker || "").toUpperCase())}
         exposurePosture={exposurePosture}
+        gexRegime={gexRegime}
+        scanMeta={scanMeta}
       />
     </div>
   );
@@ -181,7 +189,13 @@ export function DecisionsPage({
             manual decision queue (kept for review). */}
         {dailyPlan.length > 0 && (
           <div className={nextFade()}>
-            <TodaysPlanCard plan={dailyPlan} newsByTicker={newsByTicker} />
+            <TodaysPlanCard
+              plan={dailyPlan}
+              newsByTicker={newsByTicker}
+              exposurePosture={exposurePosture}
+              gexRegime={gexRegime}
+              scanMeta={scanMeta}
+            />
           </div>
         )}
 

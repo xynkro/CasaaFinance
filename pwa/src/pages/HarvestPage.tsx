@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { HarvestScanRow, OptionRow, ScanResultRow } from "../data";
+import type { ExposurePostureRow, GexRegimeRow, HarvestScanRow, OptionRow, ScanMetaRow, ScanResultRow } from "../data";
 import { HarvestPicksCard } from "../cards/HarvestPicksCard";
 import { ScanResultsCard } from "../cards/ScanResultsCard";
 import { ActiveHarvestCard, matchHarvestPositions } from "../cards/ActiveHarvestCard";
@@ -105,11 +105,17 @@ export function HarvestContent({
   scanResults,
   options,
   loading,
+  exposurePosture,
+  gexRegime,
+  scanMeta,
 }: {
   harvestScan: HarvestScanRow[];
   scanResults: ScanResultRow[];
   options: OptionRow[];
   loading: boolean;
+  exposurePosture?: ExposurePostureRow | null;
+  gexRegime?: GexRegimeRow[] | null;
+  scanMeta?: ScanMetaRow | null;
 }) {
   // ⚠️ Rules of Hooks: every hook below MUST run on every render. The loading
   // early-return lives AFTER all hooks — putting it before them (as it was) made
@@ -176,14 +182,25 @@ export function HarvestContent({
               if (strat === "CSP" && picks.length > 0) {
                 return (
                   <div className="px-4 pb-4">
-                    <HarvestPicksCard picks={picks} />
+                    <HarvestPicksCard
+                      picks={picks}
+                      exposurePosture={exposurePosture}
+                      gexRegime={gexRegime}
+                      scanMeta={scanMeta}
+                    />
                   </div>
                 );
               }
               const rows = byStrategy.get(strat) ?? [];
               return (
                 <div className="px-4 pb-4">
-                  <ScanResultsCard strategy={strat} rows={rows} />
+                  <ScanResultsCard
+                    strategy={strat}
+                    rows={rows}
+                    exposurePosture={exposurePosture}
+                    gexRegime={gexRegime}
+                    scanMeta={scanMeta}
+                  />
                 </div>
               );
             })}
@@ -193,7 +210,12 @@ export function HarvestContent({
       ) : picks.length > 0 ? (
         /* Fallback: no scan_results strategies, but we have harvest CSP picks. */
         <div className={`fade-up ${activeHarvests.length > 0 ? "fade-up-4" : "fade-up-2"} mt-3`}>
-          <HarvestPicksCard picks={picks} />
+          <HarvestPicksCard
+            picks={picks}
+            exposurePosture={exposurePosture}
+            gexRegime={gexRegime}
+            scanMeta={scanMeta}
+          />
         </div>
       ) : (
         /* Nothing to show — say so explicitly rather than render blank. */

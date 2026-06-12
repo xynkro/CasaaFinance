@@ -6,6 +6,7 @@ import type {
   WheelNextLegRow,
   ExitPlanRow,
   OptionsDefenseRow,
+  ExposurePostureRow,
   HarvestScanRow,
   ScanResultRow,
   UoaAlertRow,
@@ -90,6 +91,7 @@ export function OptionsPage({
   gexRegime,
   macroLean,
   scanMeta,
+  exposurePosture,
   mfOverlay,
   loading,
 }: {
@@ -106,6 +108,7 @@ export function OptionsPage({
   gexRegime: GexRegimeRow[];
   macroLean?: MacroLeanRow | null;
   scanMeta?: ScanMetaRow | null;
+  exposurePosture?: ExposurePostureRow | null;
   mfOverlay?: CuratedPickRow[];
   loading: boolean;
 }) {
@@ -203,7 +206,15 @@ export function OptionsPage({
       )}
 
       {sub === "harvest" && (
-        <HarvestContent harvestScan={harvestScan} scanResults={scanResults} options={options} loading={loading} />
+        <HarvestContent
+          harvestScan={harvestScan}
+          scanResults={scanResults}
+          options={options}
+          loading={loading}
+          exposurePosture={exposurePosture}
+          gexRegime={gexRegime}
+          scanMeta={scanMeta}
+        />
       )}
 
       {sub === "flow" && (

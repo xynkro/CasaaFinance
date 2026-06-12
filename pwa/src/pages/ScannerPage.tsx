@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import type { IvSurfaceScanRow } from "../data";
+import type { ExposurePostureRow, GexRegimeRow, IvSurfaceScanRow, ScanMetaRow } from "../data";
 import { numeric } from "../data";
 import { IvSmileChart } from "../cards/IvSmileChart";
 import { TopCandidatesCard } from "../cards/TopCandidatesCard";
@@ -11,11 +11,14 @@ import { ScannerHowTo } from "../cards/ScannerHowTo";
 interface ScannerPageProps {
   ivSurfaceScan: IvSurfaceScanRow[];
   loading: boolean;
+  exposurePosture?: ExposurePostureRow | null;
+  gexRegime?: GexRegimeRow[] | null;
+  scanMeta?: ScanMetaRow | null;
 }
 
 /* ---------- component ---------- */
 
-export function ScannerPage({ ivSurfaceScan, loading }: ScannerPageProps) {
+export function ScannerPage({ ivSurfaceScan, loading, exposurePosture, gexRegime, scanMeta }: ScannerPageProps) {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<"P" | "C" | "both">("P");
@@ -176,6 +179,9 @@ export function ScannerPage({ ivSurfaceScan, loading }: ScannerPageProps) {
       <TopCandidatesCard
         contracts={ivSurfaceScan}
         onSelectContract={handleSelectContract}
+        exposurePosture={exposurePosture}
+        gexRegime={gexRegime}
+        scanMeta={scanMeta}
       />
 
       {/* Chain View */}

@@ -180,12 +180,21 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
             gexRegime={data?.gexRegime ?? []}
             macroLean={data?.macroLean ?? null}
             scanMeta={data?.scanMeta ?? null}
+            exposurePosture={data?.exposurePosture ?? null}
             mfOverlay={data?.mfOverlay ?? []}
             loading={loading && !data}
           />
         );
       case 3:
-        return <ScannerPage ivSurfaceScan={data?.ivSurfaceScan ?? []} loading={loading && !data} />;
+        return (
+          <ScannerPage
+            ivSurfaceScan={data?.ivSurfaceScan ?? []}
+            loading={loading && !data}
+            exposurePosture={data?.exposurePosture ?? null}
+            gexRegime={data?.gexRegime ?? null}
+            scanMeta={data?.scanMeta ?? null}
+          />
+        );
       case 4:
         return (
           <InsiderPage
@@ -207,6 +216,8 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
             casparPositions={data?.casparPositions ?? []}
             sarahPositions={data?.sarahPositions ?? []}
             exposurePosture={data?.exposurePosture ?? null}
+            gexRegime={data?.gexRegime ?? null}
+            scanMeta={data?.scanMeta ?? null}
             casparSnapshot={data?.caspar ?? null}
             sarahSnapshot={data?.sarah ?? null}
             tvSignals={data?.tvSignals}
