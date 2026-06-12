@@ -489,3 +489,172 @@ def test_plan_defense_dedup_day_decoupled_from_expiry_guard():
     assert plans[0]["level"] == "breach"
     # And the dedup key uses the US-session day, not the SGT date.
     assert plans[0]["key"].endswith("|2026-06-10")
+
+
+# ── Mechanical-threshold lanes (50% profit / 21 DTE / cash floor / concentration) ──
+
+import pytest
+
+from scripts.trigger_alerts import (
+    plan_profit_take_pings,
+    plan_dte_pings,
+    plan_cash_floor_pings,
+    plan_concentration_pings,
+    PROFIT_TAKE_PCT,
+    DTE_RULE_DAYS,
+    DTE_RULE_FLOOR,
+    CASH_FLOOR_ABS,
+    CASH_FLOOR_NLV_PCT,
+    CONC_WARN_PCT,
+    CONC_ALERT_PCT,
+)
+
+
+def _short_leg(ticker="NVDA", right="P", strike=190, expiry="20260919",
+               qty=-3, credit=2.99, last=1.20, dte=30, account="caspar"):
+    return {
+        "ticker": ticker, "right": right, "strike": strike, "expiry": expiry,
+        "qty": qty, "credit": credit, "last": last, "dte": dte, "account": account,
+    }
+
+
+class TestProfitTakeLane:
+    def test_fires_at_50pct_captured(self):
+        # credit 2.99 → mark 1.20 = 60.2% captured (≥ 50%)
+        plans = plan_profit_take_pings([_short_leg()], set(), "2026-06-12")
+        assert len(plans) == 1
+        p = plans[0]
+        assert p["key"] == "profit50:NVDA|P190|20260919"
+        assert p["captured"] > PROFIT_TAKE_PCT
+        assert p["ticker"] == "NVDA" and p["account"] == "caspar"
+
+    def test_skips_below_threshold(self):
+        # credit 2.99 → mark 2.00 = 33% captured
+        assert plan_profit_take_pings(
+            [_short_leg(last=2.00)], set(), "2026-06-12") == []
+
+    def test_skips_already_paged(self):
+        prior = {"profit50:NVDA|P190|20260919"}
+        assert plan_profit_take_pings([_short_leg()], prior, "2026-06-12") == []
+
+    def test_skips_long_legs(self):
+        # qty > 0 means a long leg — no credit to capture
+        assert plan_profit_take_pings(
+            [_short_leg(qty=3)], set(), "2026-06-12") == []
+
+    def test_skips_no_mark(self):
+        # blank or zero `last` would read as 100% captured — must skip
+        assert plan_profit_take_pings([_short_leg(last=0)], set(), "2026-06-12") == []
+        assert plan_profit_take_pings([_short_leg(last="")], set(), "2026-06-12") == []
+
+    def test_skips_no_credit(self):
+        # no credit basis → captured% undefined
+        assert plan_profit_take_pings([_short_leg(credit=0)], set(), "2026-06-12") == []
+
+    def test_skips_already_expired(self):
+        # expiry > 1 day before SGT today → stale grab row
+        assert plan_profit_take_pings(
+            [_short_leg(expiry="20260101")], set(), "2026-06-12") == []
+
+
+class TestDte21Lane:
+    def test_fires_inside_band(self):
+        plans = plan_dte_pings([_short_leg(dte=21)], set())
+        assert len(plans) == 1
+        assert plans[0]["dte"] == 21
+        assert plans[0]["key"].startswith("dte21:")
+        # also fires at e.g. DTE 15 (between floor 7 and ceiling 21)
+        assert len(plan_dte_pings([_short_leg(dte=15)], set())) == 1
+
+    def test_skips_above_band(self):
+        assert plan_dte_pings([_short_leg(dte=DTE_RULE_DAYS + 1)], set()) == []
+
+    def test_skips_at_or_below_floor(self):
+        # DTE ≤ 7 is the defense/urgency lane's territory
+        assert plan_dte_pings([_short_leg(dte=DTE_RULE_FLOOR)], set()) == []
+        assert plan_dte_pings([_short_leg(dte=3)], set()) == []
+
+    def test_skips_long_legs(self):
+        assert plan_dte_pings([_short_leg(qty=2, dte=15)], set()) == []
+
+    def test_skips_already_paged(self):
+        prior = {"dte21:NVDA|P190|20260919"}
+        assert plan_dte_pings([_short_leg(dte=15)], prior) == []
+
+
+class TestCashFloorLane:
+    def test_fires_below_absolute_floor(self):
+        # 0.7% of NLV AND $69 < $500 abs floor → page
+        snaps = {"caspar": {"nlv": 10_000, "cash": 69, "ccy": "$"}}
+        plans = plan_cash_floor_pings(snaps, set(), "2026-06-12")
+        assert len(plans) == 1
+        assert plans[0]["account"] == "caspar"
+        assert plans[0]["floor"] == max(CASH_FLOOR_ABS,
+                                        CASH_FLOOR_NLV_PCT * 10_000)
+
+    def test_fires_below_nlv_pct_even_if_above_abs(self):
+        # big account: 2% of 100k = $2000 floor; $1500 < $2000
+        snaps = {"sarah": {"nlv": 100_000, "cash": 1_500, "ccy": "S$"}}
+        plans = plan_cash_floor_pings(snaps, set(), "2026-06-12")
+        assert len(plans) == 1 and plans[0]["floor"] == 2000.0
+
+    def test_skips_when_healthy(self):
+        snaps = {"caspar": {"nlv": 10_000, "cash": 2_000, "ccy": "$"}}
+        assert plan_cash_floor_pings(snaps, set(), "2026-06-12") == []
+
+    def test_daily_re_arm_keyed_to_sgt_day(self):
+        # Yesterday's ping shouldn't suppress today's.
+        snaps = {"caspar": {"nlv": 10_000, "cash": 50, "ccy": "$"}}
+        prior = {"cashfloor:caspar|2026-06-11"}
+        plans = plan_cash_floor_pings(snaps, prior, "2026-06-12")
+        assert len(plans) == 1
+        # but same-day repeat is suppressed
+        assert plan_cash_floor_pings(snaps, prior | {plans[0]["key"]},
+                                     "2026-06-12") == []
+
+    def test_skips_missing_nlv(self):
+        # no data → no page (not "no cash")
+        snaps = {"caspar": {"nlv": 0, "cash": 0, "ccy": "$"}}
+        assert plan_cash_floor_pings(snaps, set(), "2026-06-12") == []
+
+
+class TestConcentrationLane:
+    def _positions(self, ticker, weight, nlv=10_000):
+        # one position whose mkt_val = weight * NLV
+        return {"caspar": [{"ticker": ticker, "mkt_val": weight * nlv}]}
+
+    def test_fires_warn_at_30(self):
+        pos = self._positions("SCHD", 0.34)
+        plans = plan_concentration_pings(pos, {"caspar": 10_000}, set(),
+                                         "2026-W24")
+        assert len(plans) == 1
+        assert plans[0]["band"] == "WARN"
+        assert plans[0]["ticker"] == "SCHD"
+        assert plans[0]["weight"] == pytest.approx(0.34)
+
+    def test_fires_alert_at_40(self):
+        pos = self._positions("SCHD", 0.45)
+        plans = plan_concentration_pings(pos, {"caspar": 10_000}, set(),
+                                         "2026-W24")
+        assert len(plans) == 1 and plans[0]["band"] == "ALERT"
+        # ALERT must also MARK the WARN key (so a downgrade-to-WARN later
+        # in the same week doesn't re-page) — same precedent as pressure.
+        assert any("WARN" in k for k in plans[0]["keys_to_mark"])
+
+    def test_skips_below_warn(self):
+        pos = self._positions("AAPL", 0.20)
+        assert plan_concentration_pings(pos, {"caspar": 10_000}, set(),
+                                        "2026-W24") == []
+
+    def test_skips_already_paged_this_week(self):
+        pos = self._positions("SCHD", 0.34)
+        prior = {"conc:caspar|SCHD|WARN|2026-W24"}
+        assert plan_concentration_pings(pos, {"caspar": 10_000}, prior,
+                                        "2026-W24") == []
+
+    def test_weekly_re_arm(self):
+        pos = self._positions("SCHD", 0.34)
+        # Last week's ping doesn't suppress this week's.
+        prior = {"conc:caspar|SCHD|WARN|2026-W23"}
+        assert len(plan_concentration_pings(pos, {"caspar": 10_000}, prior,
+                                            "2026-W24")) == 1

@@ -1232,6 +1232,98 @@ def ping_options_defense(
     )
 
 
+def ping_profit_take(
+    ticker: str,
+    right: str,
+    strike: float,
+    expiry: str,            # "YYYYMMDD"
+    captured: float,        # 0..1+
+    credit: float,
+    last: float,
+    label: str = "",
+    account: str = "",
+) -> dict:
+    """50%-profit-take rule fired on a held short leg (once per position).
+    Fired by scripts/trigger_alerts.py when (credit−last)/credit ≥ 0.50."""
+    exp = str(expiry)
+    if len(exp) == 8:
+        exp = f"{exp[4:6]}-{exp[6:]}"
+    ctx = f"{label} exp {exp}" if label else f"exp {exp}"
+    if account:
+        ctx += f", {account}"
+    return send(
+        f"💰 PROFIT-TAKE: {ticker} {strike:g}{(right or '').upper()[:1]} — "
+        f"{captured:.0%} of max profit captured (credit {credit:.2f} → mark {last:.2f}; {ctx}). "
+        f"Close per the 50% rule.",
+        parse_mode="none",
+        message_thread_id=OPTIONS_INTEL_TOPIC,
+    )
+
+
+def ping_dte_rule(
+    ticker: str,
+    right: str,
+    strike: float,
+    expiry: str,            # "YYYYMMDD"
+    dte: int,
+    label: str = "",
+    account: str = "",
+) -> dict:
+    """21-DTE mechanical point reached on a held short leg (once per
+    position). Fired by scripts/trigger_alerts.py."""
+    exp = str(expiry)
+    if len(exp) == 8:
+        exp = f"{exp[4:6]}-{exp[6:]}"
+    ctx = f"{label} exp {exp}" if label else f"exp {exp}"
+    if account:
+        ctx += f", {account}"
+    return send(
+        f"⏳ 21-DTE: {ticker} {strike:g}{(right or '').upper()[:1]} at {dte} DTE ({ctx}). "
+        f"Mechanical close/roll point — gamma risk grows from here.",
+        parse_mode="none",
+        message_thread_id=OPTIONS_INTEL_TOPIC,
+    )
+
+
+def ping_cash_floor(
+    account: str,
+    cash: float,
+    nlv: float,
+    floor: float,
+    ccy: str = "$",
+) -> dict:
+    """Per-account cash below floor (daily re-arm while breached). Fired by
+    scripts/trigger_alerts.py when cash < max($500, 2% of NLV)."""
+    pct = (cash / nlv * 100) if nlv > 0 else 0.0
+    return send(
+        f"🪫 CASH FLOOR: {account} cash {ccy}{cash:,.2f} ({pct:.1f}% of NLV) is below the "
+        f"{ccy}{floor:,.0f} floor. New CSPs are not cash-securable — raise cash before "
+        f"adding short premium.",
+        parse_mode="none",
+        message_thread_id=MULTI_DAY_SWING_TOPIC,
+    )
+
+
+def ping_concentration(
+    account: str,
+    ticker: str,
+    weight: float,          # 0..1
+    band: str,              # "WARN" | "ALERT"
+    nlv: float,
+    ccy: str = "$",
+) -> dict:
+    """Single-name concentration crossed 30% (WARN) / 40% (ALERT) of an
+    account's NLV (weekly re-arm). Fired by scripts/trigger_alerts.py."""
+    icon = "🟥" if band == "ALERT" else "🟧"
+    return send(
+        f"{icon} CONCENTRATION {band}: {ticker} is {weight:.0%} of {account}'s NLV "
+        f"({ccy}{nlv:,.0f}). Single-name risk — consider trimming before adding anything "
+        f"correlated.",
+        parse_mode="none",
+        message_thread_id=MULTI_DAY_SWING_TOPIC,
+    )
+
+
 def ping_spread_defense(
     ticker: str,
     right: str,            # "P" | "C"

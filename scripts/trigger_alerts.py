@@ -1,7 +1,10 @@
 """
 trigger_alerts.py — every-N-min poll that fires Telegram pushes when a
 WATCHING decision transitions into ACT_NOW, plus three held-book lanes
-(spread-defense / held-name news / market pressure).
+(spread-defense / held-name news / market pressure) and four MECHANICAL-
+THRESHOLD lanes (50% profit-take / 21-DTE / cash floor / concentration)
+so the trading rules page the user the moment they fire instead of
+waiting for him to open the app.
 
 Mirrors the client-side `evaluateTrigger()` in `pwa/src/data.ts` so a
 user who only opens the app once a day still gets paged at the moment
@@ -12,18 +15,27 @@ Inputs (all read from Sheets):
   - live_prices      → ticker → current price + day change % (5-min cron)
   - exposure_posture → for "exposure:NEW_ENTRY_ALLOWED" gate
   - tv_signals       → for "tv_daily:BUY", "tv_weekly:BUY" gates
-  - options          → HELD option legs (spread-defense lane)
+  - options          → HELD option legs (spread-defense + profit-take +
+                       21-DTE lanes)
   - news_sentiment   → held-name news lane (4×/day Finnhub cache; this
                        script makes NO Finnhub calls of its own)
+  - snapshot_caspar / snapshot_sarah → cash-floor lane (NLV + cash)
+  - positions_caspar / positions_sarah → concentration lane (mkt_val vs
+                       NLV) + the held-ticker set for news/pressure
 
 Output:
   - trigger_alerts sheet (per-decision state ledger)
   - macro_alerts_state sheet (per-event dedup ledger, shared by macro +
-    defense + held-news + pressure lanes)
+    defense + held-news + pressure + mechanical-threshold lanes)
   - Telegram push when state transitions DORMANT/CLOSE/READY → ACT_NOW
     (same row staying ACT_NOW across runs is suppressed)
   - Telegram defense page when an underlying approaches/breaches a held
     SHORT strike; held-name strong-sentiment news; SPY/QQQ pressure page
+  - Telegram mechanical-rule pages: short leg captured ≥50% of max
+    profit (close-the-winner rule, once per position EVER); short leg
+    at ≤21 DTE (close/roll point, once per position EVER); account cash
+    below max($500, 2% of NLV) (re-arms daily while breached);
+    single-name weight ≥30%/40% of NLV (re-arms weekly)
 
 Schedule: every 10 min during US market hours. PRIMARY: local launchd
 agent scripts/com.caspar.trigger-alerts.plist → intraday_loop_local.sh
@@ -119,6 +131,42 @@ HELD_NEWS_PING_CAP = 3  # same flood-protection precedent as HOT_NEWS_PING_CAP
 PRESSURE_WARN_PCT = -1.25
 PRESSURE_ALERT_PCT = -2.0
 PRESSURE_WORST_N = 5  # worst held names shown in the mini-heatmap
+
+# ────────────────────────────────────────────────────────────────────
+# Mechanical-threshold lanes (UI-audit #7) — the trading rules the user
+# acts by were pull-only (visible only if the app happened to be open).
+# Each lane below is a one-shot page when its rule first fires.
+# ────────────────────────────────────────────────────────────────────
+# Profit-take lane: close short premium at 50% of max profit.
+#   captured% = (credit − last) / credit, per held SHORT leg.
+# Fires once per position EVER (the rule fires once; no daily re-arm) —
+# see expiry_event_time() for how "ever" survives the ledger's 7-day
+# prune. Requires a usable mark: blank/zero `last` is skipped (a stale
+# 0 mark would read as 100% captured).
+PROFIT_TAKE_PCT = 0.50
+
+# 21-DTE lane: mechanical close/roll point for short premium. Pages the
+# first run a short leg's DTE is inside (DTE_RULE_FLOOR, DTE_RULE_DAYS],
+# once per position EVER. DTE ≤ DTE_RULE_FLOOR is deliberately excluded:
+# ≤7 DTE urgency is the defense/expiry path's territory, and a weekly
+# opened inside 7 DTE never had a 21-DTE decision point to page.
+DTE_RULE_DAYS = 21
+DTE_RULE_FLOOR = 7
+
+# Cash-floor lane: per-account "new CSPs are not cash-securable" page,
+# from the snapshot tabs. floor = max(CASH_FLOOR_ABS, CASH_FLOOR_NLV_PCT
+# × NLV). Unlike profit50/dte21 this is a STATE, not an event — the key
+# embeds the SGT day so it re-arms daily while the account stays
+# breached (the $30.51 incident class).
+CASH_FLOOR_ABS = 500.0
+CASH_FLOOR_NLV_PCT = 0.02
+
+# Concentration lane: single-name |mkt_val| / NLV per account, from the
+# positions tabs. WARN at ≥30%, ALERT at ≥40%. Concentration is a slow
+# variable — the key embeds the SGT ISO-week so each band re-pages at
+# most weekly while breached.
+CONC_WARN_PCT = 0.30
+CONC_ALERT_PCT = 0.40
 
 
 def _f(v, default: float = 0.0) -> float:
@@ -373,16 +421,20 @@ def load_decisions(client, logger: logging.Logger) -> list[Decision]:
     return out
 
 
-def load_portfolio_tickers(client) -> set[str]:
-    """Return uppercase ticker set held across both accounts (latest grab).
+def load_account_positions(client) -> dict[str, list[dict]]:
+    """{'caspar': [...], 'sarah': [...]} — latest-grab rows from the
+    positions tabs as header-keyed dicts (ticker/qty/mkt_val/... per
+    S.PositionRow). "Latest grab" = rows whose audit `date` equals the
+    tab's max date value, same convention as load_open_option_legs.
 
-    Used by the macro-news mirror logic — when a hot headline mentions any
-    of these tickers, the ping is also routed to Multi Day Swing so the
-    user sees portfolio-relevant news alongside their decisions topic.
+    One read feeds both the concentration lane (mkt_val) and — via
+    held_tickers_from_positions() — the macro-news mirror, held-news
+    and market-pressure lanes. Accounts whose tab is missing/empty are
+    omitted.
     """
-    out: set[str] = set()
+    out: dict[str, list[dict]] = {}
     ss = sh._open_sheet(client)
-    for tab in ("positions_caspar", "positions_sarah"):
+    for account, tab in (("caspar", "positions_caspar"), ("sarah", "positions_sarah")):
         try:
             ws = ss.worksheet(tab)
         except Exception:
@@ -393,17 +445,33 @@ def load_portfolio_tickers(client) -> set[str]:
         hdr = rows[0]
         try:
             c_d = hdr.index("date")
-            c_t = hdr.index("ticker")
         except ValueError:
             continue
         # Latest date — same convention as the PWA's `latestGroup()`.
         latest = max((r[c_d] for r in rows[1:] if len(r) > c_d and r[c_d]), default="")
         if not latest:
             continue
-        for r in rows[1:]:
-            if len(r) > max(c_d, c_t) and r[c_d] == latest and r[c_t]:
-                out.add(r[c_t].strip().upper())
+        out[account] = [
+            {hdr[i]: (r[i] if i < len(r) else "") for i in range(len(hdr))}
+            for r in rows[1:]
+            if r and len(r) > c_d and r[c_d] == latest
+        ]
     return out
+
+
+def held_tickers_from_positions(positions_by_account: dict[str, list[dict]]) -> set[str]:
+    """Uppercase ticker set held across both accounts. Pure.
+
+    Used by the macro-news mirror logic — when a hot headline mentions any
+    of these tickers, the ping is also routed to Multi Day Swing so the
+    user sees portfolio-relevant news alongside their decisions topic.
+    """
+    return {
+        (row.get("ticker") or "").strip().upper()
+        for rows in positions_by_account.values()
+        for row in rows
+        if (row.get("ticker") or "").strip()
+    }
 
 
 def load_live_quotes(client) -> tuple[dict[str, float], dict[str, float]]:
@@ -772,6 +840,290 @@ def plan_market_pressure(
     }
 
 
+# ════════════════════════════════════════════════════════════════════
+# Mechanical-threshold lanes (UI-audit #7) — 50% profit-take, 21-DTE,
+# cash floor, single-name concentration. The rules the user trades by
+# were computed in Sheets/PWA but reached no push channel: a 50%-captured
+# winner or a $30.51 cash balance was only discoverable by opening the
+# app and looking at the right card. Same plan/dedup/send shape as the
+# held-book lanes above.
+# ════════════════════════════════════════════════════════════════════
+
+def sgt_week(sgt_date: str) -> str:
+    """ISO-week tag ('2026-W24') of an SGT calendar date — the re-arm
+    period for the concentration lane. Falls back to the raw string on
+    malformed input (never raises inside the cron)."""
+    try:
+        y, w, _ = date.fromisoformat(sgt_date).isocalendar()
+        return f"{y}-W{w:02d}"
+    except (ValueError, TypeError):
+        return str(sgt_date)
+
+
+def expiry_event_time(expiry: str) -> str:
+    """Ledger event_time for the once-per-position-EVER keys
+    (profit50/dte21).
+
+    upsert_macro_alert_state prunes rows whose event_time is >7 days
+    old on every write, so a now()-stamped "once ever" row would
+    silently re-arm after a week. Stamping the LEG'S EXPIRY keeps the
+    ledger row alive until 7 days after the position can no longer
+    exist — which is "ever" for any key scoped to that position. Falls
+    back to now() (worst case: a weekly re-page) on malformed expiry.
+    """
+    exp = str(expiry or "")
+    if len(exp) == 8 and exp.isdigit():
+        return f"{exp[:4]}-{exp[4:6]}-{exp[6:]}T235959"
+    return S.now_sgt_iso()
+
+
+def plan_profit_take_pings(
+    legs: list[dict],
+    prior_keys: set[str],
+    sgt_today: str,
+) -> list[dict]:
+    """Plan 50%-profit-take pings for held SHORT legs. Pure — testable
+    without Sheets.
+
+    captured% = (credit − last) / credit; page when it has crossed
+    ≥ PROFIT_TAKE_PCT. Dedup: event_key =
+    "profit50:<TICKER>|<R><strike>|<expiry>" — NO day suffix, the
+    mechanical rule fires once per position EVER (ledger row outlives
+    the 7-day prune via expiry_event_time).
+
+    Skips:
+      - long legs (profit-take is a short-premium rule)
+      - legs with blank/zero `last` — no usable mark; a stale 0 would
+        read as 100% captured (per spec)
+      - legs with no recorded credit — captured% is undefined
+      - already-expired legs (same stale-grab guard as the defense
+        lane: SGT runs ~half a day ahead of the US session, so only
+        legs expiring >1 day before the SGT date are stale-for-sure)
+    """
+    try:
+        expiry_floor = (date.fromisoformat(sgt_today) - timedelta(days=1)).strftime("%Y%m%d")
+    except ValueError:
+        expiry_floor = ""
+
+    plans: list[dict] = []
+    seen: set[str] = set()
+    for leg in legs:
+        if _f(leg.get("qty")) >= 0:
+            continue  # short-premium rule — long legs have no credit to capture
+        ticker = (leg.get("ticker") or "").strip().upper()
+        right = (leg.get("right") or "").strip().upper()[:1]
+        strike = _f(leg.get("strike"))
+        expiry = str(leg.get("expiry") or "")
+        if expiry_floor and len(expiry) == 8 and expiry < expiry_floor:
+            continue  # already expired — stale grab row
+        credit = _f(leg.get("credit"))
+        last = _f(leg.get("last"))
+        if credit <= 0 or last <= 0:
+            continue  # no usable mark / no credit basis
+        captured = (credit - last) / credit
+        if captured < PROFIT_TAKE_PCT:
+            continue
+        key = f"profit50:{ticker}|{right}{strike:g}|{expiry}"
+        if key in prior_keys or key in seen:
+            continue
+        seen.add(key)
+        plans.append({
+            "key": key,
+            "ticker": ticker,
+            "right": right,
+            "strike": strike,
+            "expiry": expiry,
+            "dte": int(_f(leg.get("dte"))),
+            "credit": credit,
+            "last": last,
+            "captured": captured,
+            "label": spread_label(leg, legs),
+            "account": (leg.get("account") or "").lower(),
+        })
+    return plans
+
+
+def plan_dte_pings(legs: list[dict], prior_keys: set[str]) -> list[dict]:
+    """Plan 21-DTE pings for held SHORT legs. Pure — testable without
+    Sheets.
+
+    Pages the first run a short leg's DTE is inside
+    (DTE_RULE_FLOOR, DTE_RULE_DAYS]. Dedup: event_key =
+    "dte21:<TICKER>|<R><strike>|<expiry>" — once per position EVER
+    (ledger row outlives the 7-day prune via expiry_event_time).
+    DTE ≤ DTE_RULE_FLOOR never pages here: that band is the defense/
+    urgency paths' territory — do not duplicate. The floor also keeps
+    expired stale-grab legs (dte ≤ 0) out without a separate guard.
+    """
+    plans: list[dict] = []
+    seen: set[str] = set()
+    for leg in legs:
+        if _f(leg.get("qty")) >= 0:
+            continue  # the 21-DTE close/roll rule manages SHORT premium
+        dte = int(_f(leg.get("dte")))
+        if dte <= DTE_RULE_FLOOR or dte > DTE_RULE_DAYS:
+            continue
+        ticker = (leg.get("ticker") or "").strip().upper()
+        right = (leg.get("right") or "").strip().upper()[:1]
+        strike = _f(leg.get("strike"))
+        expiry = str(leg.get("expiry") or "")
+        key = f"dte21:{ticker}|{right}{strike:g}|{expiry}"
+        if key in prior_keys or key in seen:
+            continue
+        seen.add(key)
+        plans.append({
+            "key": key,
+            "ticker": ticker,
+            "right": right,
+            "strike": strike,
+            "expiry": expiry,
+            "dte": dte,
+            "label": spread_label(leg, legs),
+            "account": (leg.get("account") or "").lower(),
+        })
+    return plans
+
+
+def plan_cash_floor_pings(
+    snapshots: dict[str, dict],
+    prior_keys: set[str],
+    sgt_today: str,
+) -> list[dict]:
+    """Plan per-account cash-floor pings. Pure — testable without Sheets.
+
+    `snapshots`: {account: {"nlv": float, "cash": float, "ccy": "$"}}
+    (load_account_snapshots shape). Page when
+    cash < max(CASH_FLOOR_ABS, CASH_FLOOR_NLV_PCT × NLV).
+
+    Dedup: event_key = "cashfloor:<account>|<SGT-day>" — re-arms DAILY
+    while breached (a state, not an event: a once-ever key would go
+    silent while the account stays un-securable). SGT day, not US-
+    session day, is deliberate — this isn't tied to the cash session
+    and one nag per calendar day is the right cadence.
+
+    Accounts with NLV ≤ 0 are skipped: that's "no snapshot data", not
+    "no cash" — paging a floor breach off a missing grab would be noise.
+    """
+    plans: list[dict] = []
+    for account in sorted(snapshots):
+        snap = snapshots[account] or {}
+        nlv = _f(snap.get("nlv"))
+        cash = _f(snap.get("cash"))
+        if nlv <= 0:
+            continue
+        floor = max(CASH_FLOOR_ABS, CASH_FLOOR_NLV_PCT * nlv)
+        if cash >= floor:
+            continue
+        key = f"cashfloor:{account}|{sgt_today}"
+        if key in prior_keys:
+            continue
+        plans.append({
+            "key": key,
+            "account": account,
+            "cash": cash,
+            "nlv": nlv,
+            "floor": floor,
+            "pct_of_nlv": cash / nlv,
+            "ccy": snap.get("ccy") or "$",
+        })
+    return plans
+
+
+def plan_concentration_pings(
+    positions_by_account: dict[str, list[dict]],
+    nlv_by_account: dict[str, float],
+    prior_keys: set[str],
+    week: str,
+) -> list[dict]:
+    """Plan single-name concentration pings. Pure — testable without
+    Sheets.
+
+    Per account: weight = Σ|mkt_val| per ticker / NLV (rows summed per
+    ticker first so split lots can't dilute the read; abs() so a short
+    position's negative mkt_val still counts as exposure). Bands:
+    ALERT ≥ CONC_ALERT_PCT, WARN ≥ CONC_WARN_PCT.
+
+    Dedup: event_key = "conc:<account>|<TICKER>|<BAND>|<SGT-week>" —
+    weekly re-arm (concentration is a slow variable; daily nags would
+    train the user to ignore it). An ALERT also marks the WARN key so
+    a name easing from 41% back to 34% later in the week doesn't
+    downgrade-page; WARN→ALERT escalation still pages (different key)
+    — same subsumption pattern as the pressure/defense lanes.
+
+    Accounts with NLV ≤ 0 are skipped (no snapshot data — a weight off
+    a zero denominator is meaningless).
+    """
+    plans: list[dict] = []
+    for account in sorted(positions_by_account):
+        nlv = _f(nlv_by_account.get(account))
+        if nlv <= 0:
+            continue
+        by_ticker: dict[str, float] = {}
+        for row in positions_by_account[account]:
+            ticker = (row.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            by_ticker[ticker] = by_ticker.get(ticker, 0.0) + abs(_f(row.get("mkt_val")))
+        for ticker in sorted(by_ticker):
+            weight = by_ticker[ticker] / nlv
+            if weight >= CONC_ALERT_PCT:
+                band = "ALERT"
+            elif weight >= CONC_WARN_PCT:
+                band = "WARN"
+            else:
+                continue
+            key = f"conc:{account}|{ticker}|{band}|{week}"
+            if key in prior_keys:
+                continue
+            keys_to_mark = [key]
+            if band == "ALERT":
+                keys_to_mark.append(f"conc:{account}|{ticker}|WARN|{week}")
+            plans.append({
+                "key": key,
+                "keys_to_mark": keys_to_mark,
+                "account": account,
+                "ticker": ticker,
+                "band": band,
+                "weight": weight,
+                "mkt_val": by_ticker[ticker],
+                "nlv": nlv,
+            })
+    return plans
+
+
+def load_account_snapshots(client) -> dict[str, dict]:
+    """{'caspar': {'nlv':…, 'cash':…, 'ccy':'$'}, 'sarah': {…,'ccy':'S$'}}
+    from the latest snapshot_caspar / snapshot_sarah rows (latest = max
+    `date`, same read_latest_snapshot convention as exposure_posture_run).
+    Accounts whose tab is missing/empty are omitted — the cash-floor
+    plan treats absent as "no data", never as "no cash"."""
+    specs = (
+        ("caspar", S.SnapshotCaspar.TAB_NAME, "net_liq_usd", "cash", "$"),
+        ("sarah", S.SnapshotSarah.TAB_NAME, "net_liq_sgd", "cash_sgd", "S$"),
+    )
+    out: dict[str, dict] = {}
+    ss = sh._open_sheet(client)
+    for account, tab, nlv_col, cash_col, ccy in specs:
+        try:
+            rows = ss.worksheet(tab).get_all_values()
+        except Exception:
+            continue
+        if len(rows) < 2:
+            continue
+        hdr = rows[0]
+        data = [dict(zip(hdr, r)) for r in rows[1:] if r and any(r)]
+        if not data:
+            continue
+        data.sort(key=lambda r: r.get("date", ""))
+        latest = data[-1]
+        out[account] = {
+            "nlv": _f(latest.get(nlv_col)),
+            "cash": _f(latest.get(cash_col)),
+            "ccy": ccy,
+        }
+    return out
+
+
 def load_exposure_rec(client) -> str:
     """Latest exposure_posture.recommendation, or empty string."""
     ss = sh._open_sheet(client)
@@ -1024,8 +1376,12 @@ def main() -> int:
 
     decisions = load_decisions(client, logger)
     if not decisions:
-        logger.info("No watching decisions — nothing to do")
-        return 0
+        # Decision lane is idle but the held-book + mechanical-threshold
+        # lanes must still run — a 50%-captured winner, a cash-floor
+        # breach or an in-band short strike doesn't care whether the
+        # brain has watching rows today. (Was an early `return 0` — that
+        # silently disabled every lane below on zero-decision days.)
+        logger.info("No watching decisions — decision lane idle, held-book lanes still run")
 
     live_prices, live_changes = load_live_quotes(client)
     exposure_rec = load_exposure_rec(client)
@@ -1240,7 +1596,8 @@ def main() -> int:
     # the Multi Day Swing topic so portfolio-relevant news lands in the
     # decisions lane. The mirror is a SEPARATE Telegram message (different
     # leading line) — the original ping still goes to Macro News too.
-    portfolio_tickers = load_portfolio_tickers(client)
+    positions_by_account = load_account_positions(client)
+    portfolio_tickers = held_tickers_from_positions(positions_by_account)
     logger.info(f"Portfolio tickers (for mirror): {sorted(portfolio_tickers) or '(none)'}")
 
     def _matched_tickers(text: str) -> list[str]:
@@ -1258,14 +1615,16 @@ def main() -> int:
         return hits
 
     # ────────────────────────────────────────────────────────────────
-    # Plan the three held-book lanes (spread-defense / held-news /
-    # market-pressure) — added after the June 5-9 2026 incident where
-    # held put credit spreads rode an SPX selloff with zero pages.
-    # All three dedup through the same macro_alerts_state ledger and
-    # are NOT gated by the macro blackout: the blackout exists to stop
-    # ENTRY pings minutes before FOMC/CPI — these are exit-side risk
-    # alerts on positions already held (same reasoning as the macro-news
-    # pings above, which also bypass it).
+    # Plan the held-book lanes: spread-defense / held-news / market-
+    # pressure (added after the June 5-9 2026 incident where held put
+    # credit spreads rode an SPX selloff with zero pages) + the four
+    # mechanical-threshold lanes (UI-audit #7: 50% profit-take, 21-DTE,
+    # cash floor, concentration — the rules were pull-only before).
+    # All dedup through the same macro_alerts_state ledger and are NOT
+    # gated by the macro blackout: the blackout exists to stop ENTRY
+    # pings minutes before FOMC/CPI — these are exit-side risk /
+    # position-management alerts on money already at work (same
+    # reasoning as the macro-news pings above, which also bypass it).
     # ────────────────────────────────────────────────────────────────
     today_sgt = S.now_sgt_date()
     # Pressure AND defense dedup per US-SESSION day, not SGT day: the
@@ -1293,6 +1652,18 @@ def main() -> int:
 
     pressure_plan = plan_market_pressure(
         live_changes, portfolio_tickers, prior_keys, us_session_day)
+
+    # ── Mechanical-threshold lane plans (pure; sends happen post-dry) ──
+    snapshots = load_account_snapshots(client)
+    profit_take_plan = plan_profit_take_pings(option_legs, prior_keys, today_sgt)
+    dte_plan = plan_dte_pings(option_legs, prior_keys)
+    cash_floor_plan = plan_cash_floor_pings(snapshots, prior_keys, today_sgt)
+    conc_plan = plan_concentration_pings(
+        positions_by_account,
+        {a: s.get("nlv", 0.0) for a, s in snapshots.items()},
+        prior_keys,
+        sgt_week(today_sgt),
+    )
 
     # Log line distinguishes "tape below threshold" from "in band but
     # already paged this session" — both used to print as "none", which
@@ -1326,13 +1697,21 @@ def main() -> int:
         ek = f"defense:{tk}|{rt}{sk:g}|{leg.get('expiry') or ''}|{lv}|{us_session_day}"
         if ek in prior_keys:
             defense_suppressed += 1
+    # Snapshot freshness in the lane log — a cashfloor/conc count of 0
+    # must be distinguishable between "healthy" and "no snapshot data".
+    snap_desc = ", ".join(
+        f"{a} nlv={s.get('nlv', 0):,.0f}" for a, s in sorted(snapshots.items())
+    ) or "none"
     logger.info(
         f"Lane plans: defense={len(defense_plan)} fires "
         f"(suppressed {defense_suppressed} of {n_short_legs} short legs, "
         f"session {us_session_day}) | "
         f"held_news={len(held_news_plan)} | "
         f"pressure={pressure_desc} "
-        f"(SPY {live_changes.get('SPY', '?')}% QQQ {live_changes.get('QQQ', '?')}%)"
+        f"(SPY {live_changes.get('SPY', '?')}% QQQ {live_changes.get('QQQ', '?')}%) | "
+        f"profit50={len(profit_take_plan)} | dte21={len(dte_plan)} | "
+        f"cashfloor={len(cash_floor_plan)} | conc={len(conc_plan)} "
+        f"(snapshots: {snap_desc})"
     )
 
     if args.dry:
@@ -1370,6 +1749,32 @@ def main() -> int:
             )
         if not defense_plan and not held_news_plan and not pressure_plan:
             logger.info("  [DRY] no defense/held-news/pressure pings queued")
+        for plan in profit_take_plan:
+            logger.info(
+                f"  [DRY] would fire PROFIT-TAKE 50%: {plan['ticker']} "
+                f"{plan['strike']:g}{plan['right']} {plan['captured']:.0%} captured "
+                f"(credit {plan['credit']:.2f} → mark {plan['last']:.2f}, "
+                f"{plan['label']} exp {plan['expiry']}, {plan['account']})"
+            )
+        for plan in dte_plan:
+            logger.info(
+                f"  [DRY] would fire 21-DTE: {plan['ticker']} "
+                f"{plan['strike']:g}{plan['right']} {plan['dte']} DTE "
+                f"({plan['label']} exp {plan['expiry']}, {plan['account']})"
+            )
+        for plan in cash_floor_plan:
+            logger.info(
+                f"  [DRY] would fire CASH FLOOR: {plan['account']} cash "
+                f"{plan['ccy']}{plan['cash']:,.2f} ({plan['pct_of_nlv']:.1%} of NLV) "
+                f"< floor {plan['ccy']}{plan['floor']:,.0f}"
+            )
+        for plan in conc_plan:
+            logger.info(
+                f"  [DRY] would fire CONCENTRATION {plan['band']}: "
+                f"{plan['account']} {plan['ticker']} {plan['weight']:.0%} of NLV"
+            )
+        if not profit_take_plan and not dte_plan and not cash_floor_plan and not conc_plan:
+            logger.info("  [DRY] no mechanical-threshold pings queued")
         return 0
 
     # Persist state regardless of whether any fired (so dormant→close
@@ -1630,6 +2035,60 @@ def main() -> int:
         except Exception as e:
             logger.warning(f"  ✗ PRESSURE failed: {e}")
 
+    # ── Mechanical-threshold sends (50% profit / 21 DTE / cash floor /
+    # concentration). Same contract as the lanes above: the ledger row is
+    # appended ONLY after a successful send, so failures retry next run.
+    # Exit/risk-side alerts — they deliberately bypass the macro blackout
+    # (same precedent as defense/pressure).
+    mech_sent = 0
+    mech_jobs = (
+        [(p, "profit_take_50",
+          f"{p['ticker']} {p['strike']:g}{p['right']} {p['captured']:.0%} captured",
+          lambda p=p: tg.ping_profit_take(
+              ticker=p["ticker"], right=p["right"], strike=p["strike"],
+              expiry=p["expiry"], captured=p["captured"], credit=p["credit"],
+              last=p["last"], label=p["label"], account=p["account"]))
+         for p in profit_take_plan]
+        + [(p, "dte_21",
+            f"{p['ticker']} {p['strike']:g}{p['right']} {p['dte']} DTE",
+            lambda p=p: tg.ping_dte_rule(
+                ticker=p["ticker"], right=p["right"], strike=p["strike"],
+                expiry=p["expiry"], dte=p["dte"], label=p["label"],
+                account=p["account"]))
+           for p in dte_plan]
+        + [(p, "cash_floor",
+            f"{p['account']} cash {p['cash']:,.2f} < floor {p['floor']:,.0f}",
+            lambda p=p: tg.ping_cash_floor(
+                account=p["account"], cash=p["cash"], nlv=p["nlv"],
+                floor=p["floor"], ccy=p["ccy"]))
+           for p in cash_floor_plan]
+        + [(p, "concentration",
+            f"{p['account']} {p['ticker']} {p['weight']:.0%} {p['band']}",
+            lambda p=p: tg.ping_concentration(
+                account=p["account"], ticker=p["ticker"], weight=p["weight"],
+                band=p["band"], nlv=p["nlv"],
+                ccy=p.get("ccy") or ("S$" if p["account"] == "sarah" else "$")))
+           for p in conc_plan]
+    )
+    for plan, ev_type, summary, send_fn in mech_jobs:
+        try:
+            send_fn()
+            mech_sent += 1
+            logger.info(f"  ✓ sent {ev_type.upper()}: {summary}")
+            # Concentration carries keys_to_mark (ALERT also marks WARN, like
+            # the pressure lane); the others mark their single key.
+            for k in (plan.get("keys_to_mark") or [plan["key"]]):
+                macro_state_rows.append(S.MacroAlertStateRow(
+                    event_key=k,
+                    event_type=ev_type,
+                    event_summary=summary[:200],
+                    event_time=now_iso,
+                    alerted_at=now_iso,
+                    updated_at=now_iso,
+                ))
+        except Exception as e:
+            logger.warning(f"  ✗ {ev_type.upper()} failed: {e}")
+
     if macro_state_rows:
         upsert_macro_alert_state(client, macro_state_rows, logger)
 
@@ -1642,6 +2101,7 @@ def main() -> int:
         + (f", {defense_sent} defense" if defense_sent else "")
         + (f", {held_news_sent} held-news" if held_news_sent else "")
         + (f", {pressure_sent} pressure" if pressure_sent else "")
+        + (f", {mech_sent} mechanical" if mech_sent else "")
         + (f"; {total_deferred} deferred by macro blackout" if total_deferred else "")
     )
     return 0
