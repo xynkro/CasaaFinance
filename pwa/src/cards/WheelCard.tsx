@@ -1,7 +1,8 @@
-import type { OptionRow, PositionRow, TechnicalScoreRow, ExitPlanRow } from "../data";
+import type { OptionRow, PositionRow, TechnicalScoreRow, ExitPlanRow, OptionsDefenseRow } from "../data";
 import { numeric } from "../data";
 import { Card } from "./Card";
 import { Chip } from "../components/ui";
+import { OptionMechanics, numOrUndef, dteClass } from "../components/OptionMechanics";
 import { CircleDot, AlertTriangle, TrendingUp, TrendingDown, Shield, Info, Zap } from "lucide-react";
 import { useState } from "react";
 
@@ -127,11 +128,13 @@ function OptionItem({
   stockPositions,
   techScore,
   exitPlan,
+  defense,
 }: {
   opt: OptionRow;
   stockPositions: PositionRow[];
   techScore?: TechnicalScoreRow;
   exitPlan?: ExitPlanRow;
+  defense?: OptionsDefenseRow;
 }) {
   const [expanded, setExpanded] = useState(false);
   const right = opt.right === "C" ? "CALL" : opt.right === "P" ? "PUT" : opt.right;
@@ -152,6 +155,9 @@ function OptionItem({
   const stockQty = stock ? numeric(stock.qty) : 0;
   const stockAvg = stock ? numeric(stock.avg_cost) : 0;
 
+  // Short premium row (negative contracts) → wheel-mechanics strip applies.
+  const isShort = numeric(opt.qty) < 0;
+
   return (
     <button
       type="button"
@@ -169,7 +175,9 @@ function OptionItem({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <div className="flex flex-col items-end leading-tight">
-            <span className={`text-[length:var(--t-2xs)] font-mono tabular-nums ${dte <= 7 && dte >= 0 ? "text-amber-400 font-bold" : "text-slate-500"}`}>
+            {/* 21d-rule thresholds (shared with OptionMechanics): red ≤7, amber ≤21.
+                Previously ambered only at ≤7 — two weeks past the act point. */}
+            <span className={`text-[length:var(--t-2xs)] font-mono tabular-nums ${dte >= 0 ? dteClass(dte) : "text-slate-500"}`}>
               {dteLabel}
             </span>
             <span className="text-[length:var(--t-2xs)] text-slate-600">exp {fmtExp(opt.expiry)}</span>
@@ -197,7 +205,7 @@ function OptionItem({
       {/* Stats row */}
       <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-[length:var(--t-2xs)] text-slate-500">
         <span>Stock: <span className="text-slate-300 tabular-nums">{fmtPrice(underlying)}</span></span>
-        {strike > 0 && (
+        {strike > 0 && !isShort && (
           <span>
             Dist: <span className={`tabular-nums ${
               opt.moneyness === "ITM" ? "text-red-400" : "text-emerald-400"
@@ -211,6 +219,34 @@ function OptionItem({
           <span>Adj basis: <span className="text-cyan-400 tabular-nums">{fmtPrice(adjCost)}</span></span>
         )}
       </div>
+
+      {/* Wheel mechanics strip — captured% / 21d rule / distance-to-strike /
+          max loss, computed from the row's own fields (UI audit #3). */}
+      {isShort && (
+        <OptionMechanics
+          credit={numOrUndef(opt.credit)}
+          last={numOrUndef(opt.last)}
+          dte={dte >= 0 ? dte : undefined}
+          strike={numOrUndef(opt.strike)}
+          underlying={numOrUndef(opt.underlying_last)}
+          right={opt.right}
+          qty={numOrUndef(opt.qty)}
+          leg={opt.wheel_leg}
+        />
+      )}
+
+      {/* Inline defense join — a HIGH-assignment / BREACHING row prints its
+          matching Daily Defense action here instead of requiring the manual
+          ticker+strike join one subtab away. */}
+      {defense && (
+        <div className="flex items-start gap-1.5 text-[length:var(--t-2xs)] pt-1.5 border-t border-white/5">
+          <Shield size={10} className={`shrink-0 mt-0.5 ${defense.severity === "CRITICAL" ? "text-red-400" : "text-orange-400"}`} />
+          <span className="text-slate-500 shrink-0">Defense:</span>
+          <span className={`font-medium leading-snug ${defense.severity === "CRITICAL" ? "text-red-400" : "text-orange-400"}`}>
+            {defense.action}
+          </span>
+        </div>
+      )}
 
       {/* Sell calls above indicator */}
       {adjCost > 0 && opt.wheel_leg === "CC" && (
@@ -226,17 +262,12 @@ function OptionItem({
         </div>
       )}
 
-      {/* Exit plan summary */}
-      {exitPlan && (
+      {/* Exit plan target — captured% now comes from the mechanics strip above
+          (computed from the row's own credit/last, so it renders even when no
+          fresh exit-plan row matches); keep the plan's close target when one exists. */}
+      {exitPlan && numeric(exitPlan.target_close_at) > 0 && (
         <div className="flex items-center gap-1.5 text-[length:var(--t-2xs)] pt-1.5 border-t border-white/5">
           <Shield size={10} className="text-indigo-400" />
-          <span className="text-slate-500">Captured:</span>
-          <span className={`tabular-nums font-semibold ${
-            numeric(exitPlan.profit_capture_pct) >= 50 ? "text-emerald-400" : "text-slate-300"
-          }`}>
-            {numeric(exitPlan.profit_capture_pct).toFixed(0)}%
-          </span>
-          <span className="text-slate-600">·</span>
           <span className="text-slate-500">Close at</span>
           <span className="text-emerald-400 font-semibold tabular-nums">${numeric(exitPlan.target_close_at).toFixed(2)}</span>
         </div>
@@ -332,6 +363,7 @@ export function WheelCard({
   sarahPositions,
   technicalScores,
   exitPlans,
+  optionsDefense,
   loading,
 }: {
   options: OptionRow[];
@@ -339,20 +371,46 @@ export function WheelCard({
   sarahPositions: PositionRow[];
   technicalScores?: TechnicalScoreRow[];
   exitPlans?: ExitPlanRow[];
+  optionsDefense?: OptionsDefenseRow[];
   loading?: boolean;
 }) {
   const techByTicker = new Map<string, TechnicalScoreRow>();
   for (const t of technicalScores ?? []) {
     techByTicker.set(t.ticker, t);
   }
-  // Map option exit plans by "account|ticker|right" since same ticker could have
-  // both CSP and CC (rare but possible); we just need account+ticker here.
-  const exitByKey = new Map<string, ExitPlanRow>();
+  // Option exit plans grouped by account|ticker. The old single-key map
+  // collided when one ticker carried both a CSP and a CC, attaching the wrong
+  // plan; ExitPlanRow carries no strike/right/expiry, so disambiguate by
+  // position_type (OPTION_CSP vs OPTION_CC) and only fall back to a loose
+  // match when the ticker has exactly ONE option plan.
+  const optionPlans = new Map<string, ExitPlanRow[]>();
   for (const e of exitPlans ?? []) {
-    if (e.position_type?.startsWith("OPTION")) {
-      exitByKey.set(`${e.account}|${e.ticker}`, e);
-    }
+    if (!e.position_type?.startsWith("OPTION")) continue;
+    const k = `${e.account}|${e.ticker}`;
+    const arr = optionPlans.get(k) ?? [];
+    arr.push(e);
+    optionPlans.set(k, arr);
   }
+  const planFor = (opt: OptionRow): ExitPlanRow | undefined => {
+    const list = optionPlans.get(`${opt.account}|${opt.ticker}`);
+    if (!list?.length) return undefined;
+    const want = opt.wheel_leg === "CSP" ? "OPTION_CSP" : opt.wheel_leg === "CC" ? "OPTION_CC" : "";
+    return list.find((e) => e.position_type === want) ?? (list.length === 1 ? list[0] : undefined);
+  };
+  // Defense join: only rows the mechanics flag as in trouble get the inline
+  // action (assignment_risk HIGH or trend_risk BREACHING), matched by
+  // account + ticker + right + strike.
+  const defenseFor = (opt: OptionRow): OptionsDefenseRow | undefined => {
+    if (opt.assignment_risk !== "HIGH" && opt.trend_risk !== "BREACHING") return undefined;
+    return (optionsDefense ?? []).find(
+      (d) =>
+        d.ticker === opt.ticker &&
+        d.account === opt.account &&
+        (!d.right || d.right === opt.right) &&
+        Math.abs(numeric(d.strike) - numeric(opt.strike)) < 0.5 &&
+        !!d.action,
+    );
+  };
   if (loading) {
     return (
       <Card>
@@ -425,7 +483,8 @@ export function WheelCard({
                   opt={opt}
                   stockPositions={acct === "caspar" ? casparPositions : sarahPositions}
                   techScore={techByTicker.get(opt.ticker)}
-                  exitPlan={exitByKey.get(`${opt.account}|${opt.ticker}`)}
+                  exitPlan={planFor(opt)}
+                  defense={defenseFor(opt)}
                 />
               ))}
             </div>
