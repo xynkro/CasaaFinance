@@ -218,8 +218,16 @@ export function HarvestContent({
           />
         </div>
       ) : (
-        /* Nothing to show — say so explicitly rather than render blank. */
+        /* Nothing to show — say so explicitly rather than render blank.
+           The quiet-market illustration carries the mood the copy can't:
+           flat line + glowing dot = standing down, not broken. */
         <div className="fade-up fade-up-2 mt-8 text-center px-6">
+          <img
+            src={`${import.meta.env.BASE_URL}quiet-market.jpg`}
+            alt=""
+            aria-hidden="true"
+            className="block mx-auto w-40 h-40 opacity-80 mb-4 rounded-2xl"
+          />
           <p className="text-[length:var(--t-sm)] text-slate-400 font-medium">No scan candidates right now</p>
           <p className="text-[length:var(--t-2xs)] text-slate-600 mt-1.5 leading-relaxed">
             The last scan found nothing to recommend, or the data hasn’t synced yet.

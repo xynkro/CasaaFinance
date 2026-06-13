@@ -79,8 +79,14 @@ export function ScannerPage({ ivSurfaceScan, loading, exposurePosture, gexRegime
     return (
       <div className="px-4 pt-4 space-y-4">
         <ScannerHowTo />
-        <div className="flex items-center justify-center min-h-[30vh] px-6">
-          <p className="text-slate-500 text-[length:var(--t-sm)] text-center">
+        <div className="flex flex-col items-center justify-center min-h-[30vh] px-6 text-center">
+          <img
+            src={`${import.meta.env.BASE_URL}quiet-market.jpg`}
+            alt=""
+            aria-hidden="true"
+            className="w-40 h-40 opacity-80 mb-4 rounded-2xl"
+          />
+          <p className="text-slate-500 text-[length:var(--t-sm)]">
             No scan data yet. The surface scan runs each trading day at 10:38 ET
             (live quotes) — pull to refresh after that.
           </p>
