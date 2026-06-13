@@ -151,11 +151,22 @@ export function ConcentrationCard({
         </span>
       </div>
 
-      <p className="text-[length:var(--t-2xs)] text-slate-600 mb-3 leading-relaxed">
-        Single tickers above {WARN_PCT}% of NLV. Asset-class diversification
-        (Risk Parity audit) doesn't catch within-class concentration —
-        e.g. NVDA 42% inside equity_us. {WARN_PCT}% = warning, {CRIT_PCT}% = critical.
-      </p>
+      {/* Concentration visual — one bar dominating the others. Card only
+          renders when a position has crossed WARN_PCT, so the imbalance
+          metaphor only shows in the moment of truth. */}
+      <div className="mb-3 flex items-start gap-3">
+        <img
+          src={`${import.meta.env.BASE_URL}concentration.jpg`}
+          alt=""
+          aria-hidden="true"
+          className="w-14 h-14 rounded-lg shrink-0"
+        />
+        <p className="text-[length:var(--t-2xs)] text-slate-500 leading-relaxed">
+          Single tickers above {WARN_PCT}% of NLV. Asset-class diversification
+          (Risk Parity audit) doesn't catch within-class concentration —
+          e.g. NVDA 42% inside equity_us. {WARN_PCT}% = warning, {CRIT_PCT}% = critical.
+        </p>
+      </div>
 
       <div className="space-y-2">
         {[...byAccount.entries()].map(([account, rows]) => (

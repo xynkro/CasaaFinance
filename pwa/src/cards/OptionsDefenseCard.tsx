@@ -167,6 +167,28 @@ export function OptionsDefenseCard({ alerts }: { alerts: OptionsDefenseRow[] }) 
         </div>
       </div>
 
+      {/* Breach banner — surfaces ONLY when at least one CRITICAL is active.
+          A strike-line being pierced from below; visual reinforcement of the
+          moment the audit said matters most. */}
+      {counts.CRITICAL > 0 && (
+        <div className="mb-3 flex items-center gap-3 rounded-xl border border-red-500/25 bg-red-500/5 p-2.5">
+          <img
+            src={`${import.meta.env.BASE_URL}breach.jpg`}
+            alt=""
+            aria-hidden="true"
+            className="w-14 h-14 rounded-lg shrink-0"
+          />
+          <div className="min-w-0">
+            <p className="text-[length:var(--t-xs)] font-bold text-red-300">
+              Short strike under pressure
+            </p>
+            <p className="text-[length:var(--t-2xs)] text-slate-400 mt-0.5 leading-snug">
+              {counts.CRITICAL} CRIT · defend, roll, or close now.
+            </p>
+          </div>
+        </div>
+      )}
+
       <p className="text-[length:var(--t-2xs)] text-slate-600 mb-3 leading-relaxed">
         Updated {formatRelativeDate(alerts[0]?.date || "")} · day-over-day changes for each open option.
         Sorted by urgency.
