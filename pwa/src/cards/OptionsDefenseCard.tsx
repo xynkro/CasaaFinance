@@ -111,9 +111,17 @@ export function OptionsDefenseCard({ alerts }: { alerts: OptionsDefenseRow[] }) 
           <Shield size={14} className="text-emerald-400" />
           <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Daily Defense</h2>
         </div>
-        <div className="mt-2 flex items-center gap-2 text-emerald-400 text-[length:var(--t-sm)]">
-          <Shield size={16} />
-          <span>All positions nominal — no alerts today</span>
+        <div className="mt-3 flex flex-col items-center text-center px-2">
+          <img
+            src={`${import.meta.env.BASE_URL}all-clear.jpg`}
+            alt=""
+            aria-hidden="true"
+            className="w-32 h-32 rounded-2xl opacity-90 mb-3"
+          />
+          <p className="text-emerald-400 text-[length:var(--t-sm)] font-medium">All positions nominal</p>
+          <p className="text-[length:var(--t-2xs)] text-slate-600 mt-1 leading-relaxed">
+            No defense alerts today — every short strike has cushion.
+          </p>
         </div>
       </Card>
     );

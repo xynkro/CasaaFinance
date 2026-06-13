@@ -140,9 +140,17 @@ export function TodaysPlanCard({ plan, newsByTicker, exposurePosture, gexRegime,
         // not a quiet scan). Otherwise the tape genuinely had nothing today.
         const reasons = suppressionReasons(exposurePosture, gexRegime, scanMeta);
         return reasons.length ? (
-          <p className="text-[length:var(--t-2xs)] text-amber-300/90 pt-1.5 border-t border-white/5">
-            🔇 Premium-selling recs suppressed — gated by {reasons.join(" · ")}. The silence is the discipline.
-          </p>
+          <div className="pt-1.5 border-t border-white/5 flex items-start gap-2.5">
+            <img
+              src={`${import.meta.env.BASE_URL}standing-down.jpg`}
+              alt=""
+              aria-hidden="true"
+              className="w-10 h-10 rounded-lg opacity-90 shrink-0 mt-0.5"
+            />
+            <p className="text-[length:var(--t-2xs)] text-amber-300/90 leading-relaxed">
+              🔇 Premium-selling recs suppressed — gated by {reasons.join(" · ")}. The silence is the discipline.
+            </p>
+          </div>
         ) : (
           <p className="text-[length:var(--t-2xs)] text-slate-600 pt-1.5 border-t border-white/5">
             No fresh growth/income opportunities today — holding the standing allocation only.
