@@ -82,7 +82,7 @@ interface HeadlineStats {
   filled: number;
   killed: number;
   expired: number;
-  hitRate: number;          // 0-1
+  fillRate: number;         // 0-1 — share of closed decisions that became real fills
   avgConvFilled: number;    // 0-5
   avgConvKilled: number;
   avgConfFilled: number;    // 0-1
@@ -115,13 +115,19 @@ function computeHeadline(rows: DecisionRow[]): HeadlineStats {
     }
   }
   const total = filled + killed + expired;
-  const hitRate = total > 0 ? filled / total : 0;
+  // FILL RATE — NOT a hit rate. It measures how often a thesis became a real
+  // fill vs how often it was killed or expired without action. A "high" fill
+  // rate is not a virtue (it could mean we filled bad theses); a "low" one is
+  // not a vice (it could mean discipline). See the inline copy below for the
+  // disclaimer the user needs to read it correctly. Real win-rate would
+  // require post-fill P&L on each decision — not yet wired (see #6 audit).
+  const fillRate = total > 0 ? filled / total : 0;
   return {
     total,
     filled,
     killed,
     expired,
-    hitRate,
+    fillRate,
     avgConvFilled: convFilledN > 0 ? convFilledSum / convFilledN : 0,
     avgConvKilled: convKilledN > 0 ? convKilledSum / convKilledN : 0,
     avgConfFilled: confFilledN > 0 ? confFilledSum / confFilledN : 0,
@@ -130,11 +136,13 @@ function computeHeadline(rows: DecisionRow[]): HeadlineStats {
 }
 
 function HeadlineScorecard({ stats }: { stats: HeadlineStats }) {
-  const hitRatePct = (stats.hitRate * 100).toFixed(0);
-  const hitRateColor =
-    stats.hitRate >= 0.6 ? "#34d399" :
-    stats.hitRate >= 0.4 ? `rgb(var(--accent-rgb))` :
-    "#f87171";
+  const fillRatePct = (stats.fillRate * 100).toFixed(0);
+  // NEUTRAL — fill rate is NOT a quality metric. A high number could just mean
+  // "we filled too much" and a low one could mean "we held discipline". Slate
+  // for the number + bar; the disclaimer below tells the user why this isn't a
+  // hit/win rate. The realized win-rate would need P&L per decision and isn't
+  // yet wired (see audit #6).
+  const fillRateColor = "rgb(148 163 184)";
 
   // Calibration deltas (positive = brain works)
   const convDelta = stats.avgConvFilled - stats.avgConvKilled;
@@ -184,11 +192,11 @@ function HeadlineScorecard({ stats }: { stats: HeadlineStats }) {
           }}
         >
           <div className="text-[length:var(--t-2xs)] uppercase tracking-wider text-slate-500 font-medium mb-1">
-            Hit Rate
+            Fill Rate
           </div>
           <div className="font-mono font-bold tabular-nums"
-               style={{ fontSize: "var(--t-hero)", lineHeight: 1, color: hitRateColor }}>
-            {stats.total > 0 ? `${hitRatePct}%` : "—"}
+               style={{ fontSize: "var(--t-hero)", lineHeight: 1, color: fillRateColor }}>
+            {stats.total > 0 ? `${fillRatePct}%` : "—"}
           </div>
           <div
             className="mt-2 rounded-full overflow-hidden"
@@ -197,14 +205,25 @@ function HeadlineScorecard({ stats }: { stats: HeadlineStats }) {
             <div
               style={{
                 height: "100%",
-                width: `${stats.hitRate * 100}%`,
-                background: hitRateColor,
+                width: `${stats.fillRate * 100}%`,
+                background: fillRateColor,
                 transition: "width 0.3s",
               }}
             />
           </div>
         </div>
       </div>
+
+      {/* Honest disclaimer — fill rate is not a win rate. The audit (#6) flagged
+          that this number was being read as a quality grade; it isn't. Realized
+          P&L per closed decision would give a true win rate; until that's
+          wired, point the user at the Selection Skill card for the real signal. */}
+      <p className="text-[length:var(--t-2xs)] text-slate-600 leading-relaxed mb-3">
+        Fill rate is filled ÷ (filled+killed+expired) — how often a thesis turned
+        into a real fill, NOT how often it won. A true win rate needs realized
+        P&L per decision (not yet wired). For now, the Selection Skill card on
+        this page measures whether your discretion actually picks winners.
+      </p>
 
       {/* Calibration row (row 2 — does conviction predict?) */}
       <div className="grid grid-cols-2 gap-3">
@@ -276,7 +295,7 @@ interface BucketRow {
   filled: number;
   killed: number;
   expired: number;
-  hitRate: number;
+  fillRate: number;        // share of bucket that filled (NOT a hit rate — see HeadlineStats)
 }
 
 function computeBuckets(rows: DecisionRow[]): BucketRow[] {
@@ -285,7 +304,7 @@ function computeBuckets(rows: DecisionRow[]): BucketRow[] {
     const key = (r.bucket || "unknown").toLowerCase();
     let b = map.get(key);
     if (!b) {
-      b = { bucket: key, total: 0, filled: 0, killed: 0, expired: 0, hitRate: 0 };
+      b = { bucket: key, total: 0, filled: 0, killed: 0, expired: 0, fillRate: 0 };
       map.set(key, b);
     }
     b.total++;
@@ -295,7 +314,7 @@ function computeBuckets(rows: DecisionRow[]): BucketRow[] {
     else if (status === "expired") b.expired++;
   }
   for (const b of map.values()) {
-    b.hitRate = b.total > 0 ? b.filled / b.total : 0;
+    b.fillRate = b.total > 0 ? b.filled / b.total : 0;
   }
   return [...map.values()].sort((a, b) => b.total - a.total);
 }
@@ -313,10 +332,8 @@ function BucketBreakdown({ rows }: { rows: BucketRow[] }) {
           const fillW = b.total > 0 ? (b.filled / b.total) * 100 : 0;
           const killW = b.total > 0 ? (b.killed / b.total) * 100 : 0;
           const expW  = b.total > 0 ? (b.expired / b.total) * 100 : 0;
-          const hrColor =
-            b.hitRate >= 0.6 ? "#34d399" :
-            b.hitRate >= 0.4 ? `rgb(var(--accent-rgb))` :
-            "#f87171";
+          // Neutral — same logic as headline: fill rate isn't a quality metric.
+          const frColor = "rgb(148 163 184)";
           return (
             <div key={b.bucket}>
               <div className="flex items-center justify-between mb-1.5">
@@ -327,8 +344,8 @@ function BucketBreakdown({ rows }: { rows: BucketRow[] }) {
                   <span className="text-slate-500">
                     n=<span className="text-slate-300 font-semibold">{b.total}</span>
                   </span>
-                  <span className="font-mono font-bold tabular-nums" style={{ color: hrColor }}>
-                    {(b.hitRate * 100).toFixed(0)}%
+                  <span className="font-mono font-bold tabular-nums" style={{ color: frColor }}>
+                    {(b.fillRate * 100).toFixed(0)}%
                   </span>
                 </div>
               </div>

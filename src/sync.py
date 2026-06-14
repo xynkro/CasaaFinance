@@ -360,13 +360,17 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
         try:
             client = sh.authenticate()
 
+            # Grab runs every 30 min — must REPLACE today's rows, not append.
+            # The old append_rows stacked SCHD ×5 / AMD ×4 etc. by midday and
+            # broke every PWA consumer. replace_today_rows preserves history
+            # for earlier dates and atomically swaps today's batch in.
             if caspar_ok:
                 sh.ensure_headers(client, S.SnapshotCaspar.TAB_NAME, S.SnapshotCaspar.HEADERS)
-                sh.append_row(client, S.SnapshotCaspar.TAB_NAME, snap_c.to_row())
+                sh.replace_today_rows(client, S.SnapshotCaspar.TAB_NAME, [snap_c.to_row()])
                 result.rows_written[S.SnapshotCaspar.TAB_NAME] = 1
 
                 sh.ensure_headers(client, "positions_caspar", S.PositionRow.HEADERS)
-                n = sh.append_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
+                n = sh.replace_today_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
                 result.rows_written["positions_caspar"] = n
             else:
                 logger.warning(
@@ -376,11 +380,11 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
 
             if sarah_ok:
                 sh.ensure_headers(client, S.SnapshotSarah.TAB_NAME, S.SnapshotSarah.HEADERS)
-                sh.append_row(client, S.SnapshotSarah.TAB_NAME, snap_s.to_row())
+                sh.replace_today_rows(client, S.SnapshotSarah.TAB_NAME, [snap_s.to_row()])
                 result.rows_written[S.SnapshotSarah.TAB_NAME] = 1
 
                 sh.ensure_headers(client, "positions_sarah", S.PositionRow.HEADERS)
-                n = sh.append_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
+                n = sh.replace_today_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
                 result.rows_written["positions_sarah"] = n
             else:
                 logger.warning(
@@ -388,8 +392,9 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
                     "(account not connected). Sheet preserves prior snapshot."
                 )
 
-            # Options for both accounts -> unified `options` tab. Only
-            # append rows for accounts that returned data — otherwise we'd
+            # Options for both accounts -> unified `options` tab. Same
+            # replace-today semantics so the 30-min loop doesn't stack legs.
+            # Only write rows for accounts that returned data — otherwise we'd
             # write a misleading "options closed" signal for the
             # disconnected side. IBKR-known fields populated; cloud
             # options-refresh fills derived fields within 30 min,
@@ -401,7 +406,7 @@ def cmd_grab(args: argparse.Namespace, logger: logging.Logger) -> int:
                 opt_rows.extend(o.to_row() for o in opts_s)
             if opt_rows:
                 sh.ensure_headers(client, S.OptionRow.TAB_NAME, S.OptionRow.HEADERS)
-                n = sh.append_rows(client, S.OptionRow.TAB_NAME, opt_rows)
+                n = sh.replace_today_rows(client, S.OptionRow.TAB_NAME, opt_rows)
                 result.rows_written[S.OptionRow.TAB_NAME] = n
 
             result.sheet_ok = True

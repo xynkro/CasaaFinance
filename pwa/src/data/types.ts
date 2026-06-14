@@ -467,6 +467,31 @@ export interface ScanMetaRow {
   status?: string;       // OK | NO_CANDIDATES | HALTED
 }
 
+/**
+ * Single-row UPSERT tab written weekly by scripts/signal_feedback.py and
+ * mirrored into Firestore by mirror_to_firestore.py. Powers the Review tab's
+ * SelectionSkillCard — the in-PWA surface for "does your discretion actually
+ * pick winners over the raw engine?".
+ *
+ * `edge` is the headline metric: P(fill | WIN) − P(fill | LOSS), range −1…+1.
+ * When the matched sample is below the floor, `status` flips to
+ * BUILDING_SAMPLE and the rate / size fields are blank — the card renders a
+ * "Building sample" hint instead of a misleading number.
+ */
+export interface SelectionSkillRow {
+  as_of_date: string;        // ISO YYYY-MM-DD when the row was written
+  edge: string;              // signed decimal (−1…+1); "" when sample too small
+  fill_winner_pct: string;   // fill rate on WIN outcomes (0-100); "" when n/a
+  fill_loser_pct: string;    // fill rate on LOSS outcomes (0-100); "" when n/a
+  kill_loser_pct: string;    // kill rate on LOSS outcomes (0-100); "" when n/a
+  sample_size: string;       // matched WIN/LOSS pairs (n_win + n_loss)
+  n_win: string;             // # of WIN-outcome decisions matched
+  n_loss: string;            // # of LOSS-outcome decisions matched
+  graded_outcomes: string;   // total graded picks available (denominator context)
+  user_decisions: string;    // total real fill/kill/defer decisions read
+  status: string;            // "OK" | "BUILDING_SAMPLE" | "INERT"
+}
+
 // One curated pick from an external human-vetted source (Motley Fool Stock
 // Advisor today). Read in-session via Chrome MCP, classified into a role, fed
 // to the engine as INPUT — never an auto-signal. Every MF surface in the PWA
@@ -845,6 +870,7 @@ export interface DashboardData {
   dailyPlan: DailyPlanRow[];             // the unified plan the auto-trader executes (latest day)
   macroLean: MacroLeanRow | null;        // today's macro-surprise lean (tilts the plan sizing)
   scanMeta: ScanMetaRow | null;          // last scan run heartbeat (freshness — stale-data guard)
+  selectionSkill: SelectionSkillRow | null;  // latest selection-skill grade (Review > SelectionSkillCard)
   curatedPicks: CuratedPickRow[];        // raw curated picks, latest day (Motley Fool today)
   mfWatchlist: CuratedPickRow[];         // role=watchlist — research, not a buy
   mfOverlay: CuratedPickRow[];           // role=overlay — CSP-entry targets (suggestion-only)

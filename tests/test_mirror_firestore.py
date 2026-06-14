@@ -290,14 +290,15 @@ def test_main_all_failed_exit_two(monkeypatch):
     assert mir.main([]) == 2
 
 
-def test_pwa_tabs_is_the_40_tab_contract():
-    assert len(mir.PWA_TABS) == 40
-    assert len(set(mir.PWA_TABS)) == 40            # no dupes
+def test_pwa_tabs_is_the_41_tab_contract():
+    assert len(mir.PWA_TABS) == 41
+    assert len(set(mir.PWA_TABS)) == 41            # no dupes
     # spot-check both ends + a by-name-only tab
     assert mir.PWA_TABS[0] == "daily_brief_latest"
-    assert mir.PWA_TABS[-1] == "curated_picks"
+    assert mir.PWA_TABS[-1] == "selection_skill"   # SelectionSkillCard surface
     assert "uoa_alerts" in mir.PWA_TABS
     assert "scan_meta" in mir.PWA_TABS         # freshness heartbeat
+    assert "curated_picks" in mir.PWA_TABS
 
 
 # ── Per-tab freshness trim (the PWA-payload diet) ─────────────────────────────
@@ -420,3 +421,52 @@ class TestTabDaysKeptConfig:
     def test_iv_surface_scan_not_trimmed_by_days(self):
         """Single-day surface, capped by TAB_CAPS — not by date window."""
         assert "iv_surface_scan" not in TAB_DAYS_KEPT
+
+
+# ── Per-tab duplicate-row dedup (positions / options / snapshot tabs) ─────────
+
+from scripts.mirror_to_firestore import _dedup_rows, TAB_DEDUP_KEYS
+
+
+class TestDedupRows:
+    def test_collapses_same_key_keeps_last(self):
+        # 30-min IBKR grab simulation: same ticker stacked 3x; last write wins.
+        rows = [
+            {"ticker": "SCHD", "qty": "105", "last": "32.30"},
+            {"ticker": "SCHD", "qty": "105", "last": "32.35"},
+            {"ticker": "SCHD", "qty": "105", "last": "32.39"},
+            {"ticker": "TLT",  "qty": "7",   "last": "85.10"},
+        ]
+        out = _dedup_rows(rows, ("ticker",))
+        assert len(out) == 2
+        last_schd = next(r for r in out if r["ticker"] == "SCHD")
+        assert last_schd["last"] == "32.39"
+
+    def test_empty_keys_is_noop(self):
+        rows = [{"x": 1}, {"x": 1}]
+        assert _dedup_rows(rows, ()) == rows
+
+    def test_empty_rows_safe(self):
+        assert _dedup_rows([], ("ticker",)) == []
+
+    def test_missing_key_field_collapses_to_one(self):
+        # Two rows with the key field missing are treated as the same row.
+        rows = [{"qty": "1"}, {"qty": "2"}]
+        out = _dedup_rows(rows, ("ticker",))
+        assert len(out) == 1 and out[0]["qty"] == "2"
+
+    def test_multi_field_key_for_options(self):
+        # Options are uniquely keyed by (account, ticker, right, strike, expiry)
+        rows = [
+            {"account": "caspar", "ticker": "NVDA", "right": "P", "strike": "190", "expiry": "20260919", "qty": "-3"},
+            {"account": "caspar", "ticker": "NVDA", "right": "P", "strike": "190", "expiry": "20260919", "qty": "-3"},  # dupe
+            {"account": "caspar", "ticker": "NVDA", "right": "P", "strike": "180", "expiry": "20260919", "qty": "+3"},  # diff strike
+        ]
+        out = _dedup_rows(rows, ("account", "ticker", "right", "strike", "expiry"))
+        assert len(out) == 2
+
+    def test_known_offenders_have_dedup_keys(self):
+        # Regression: removing the dedup config for these tabs re-introduces
+        # the SCHD×5 / AMD×3 bug observed in the live data.
+        for tab in ("positions_caspar", "positions_sarah", "options"):
+            assert TAB_DEDUP_KEYS.get(tab), f"{tab} lost its dedup key"

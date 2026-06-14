@@ -59,6 +59,7 @@ export type {
   DailyPlanRow,
   MacroLeanRow,
   ScanMetaRow,
+  SelectionSkillRow,
   CuratedPickRow,
   GexRegimeRow,
   AlpacaSnapshotRow,

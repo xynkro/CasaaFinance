@@ -133,3 +133,95 @@ def test_ragged_rows_pad_to_widest():
     values, _, _ = _written(ws)
     assert len(values) == 3  # padded up to prior 3 rows
     assert values[2] == ["", "", ""]  # blank row width matches widest (3)
+
+
+# ── replace_today_rows — the 30-min-grab dedup at the writer ──────────────────
+
+from datetime import date
+from unittest.mock import patch
+
+
+def _open_sheet_mock(ws):
+    """Patch _open_sheet to return an object whose .worksheet(name) returns ws."""
+    ss = MagicMock()
+    ss.worksheet.return_value = ws
+    return patch.object(sheets, "_open_sheet", return_value=ss)
+
+
+def test_replace_today_swaps_only_todays_rows():
+    """Yesterday's rows are PRESERVED; today's are REPLACED by the new batch."""
+    today = date.today().isoformat()
+    prior = [
+        ["date", "ticker", "qty"],
+        ["2026-06-13", "SCHD", "100"],         # historical — must survive
+        ["2026-06-14", "SCHD", "105"],         # also historical
+        [f"{today}T080000", "SCHD", "105"],    # stale today batch (5 stacked)
+        [f"{today}T080000", "TLT", "7"],
+        [f"{today}T083000", "SCHD", "105"],
+        [f"{today}T083000", "TLT", "7"],
+        [f"{today}T090000", "SCHD", "105"],
+    ]
+    new_batch = [[today, "SCHD", "105"], [today, "TLT", "7"], [today, "VIXM", "10"]]
+    ws = _make_ws(prior)
+
+    with _open_sheet_mock(ws):
+        n = sheets.replace_today_rows(MagicMock(), "positions_caspar", new_batch,
+                                      today_prefix=today)
+
+    assert n == 3
+    values, *_ = _written(ws)
+    # Header preserved
+    assert values[0] == ["date", "ticker", "qty"]
+    # The two historical rows survived (in order)
+    dates = [r[0] for r in values[1:]]
+    assert "2026-06-13" in dates and "2026-06-14" in dates
+    # ZERO of the audit-suffixed today rows remain
+    assert not any(d.startswith(f"{today}T") for d in dates)
+    # Fresh batch landed (3 today-prefixed rows)
+    assert sum(1 for d in dates if d.startswith(today)) == 3
+
+
+def test_replace_today_empty_batch_still_strips_today():
+    """Calling with no new rows is valid — removes today's stale rows."""
+    today = date.today().isoformat()
+    prior = [
+        ["date", "ticker"],
+        ["2026-06-13", "SCHD"],
+        [today, "SCHD"], [today, "TLT"],
+    ]
+    ws = _make_ws(prior)
+    with _open_sheet_mock(ws):
+        n = sheets.replace_today_rows(MagicMock(), "positions_caspar", [],
+                                      today_prefix=today)
+    assert n == 0
+    values, *_ = _written(ws)
+    # upsert_tab pads with blanks to wipe stale rows in one write — count the
+    # non-blank rows only.
+    non_blank = [r for r in values if any(c for c in r)]
+    assert non_blank == [["date", "ticker"], ["2026-06-13", "SCHD"]]
+
+
+def test_replace_today_empty_tab_falls_back_to_append():
+    """First-ever write to an empty tab uses append_rows, not upsert_tab."""
+    ws = _make_ws([])
+    today = date.today().isoformat()
+    with _open_sheet_mock(ws):
+        n = sheets.replace_today_rows(MagicMock(), "positions_caspar",
+                                      [[today, "SCHD"]], today_prefix=today)
+    assert n == 1
+    ws.append_rows.assert_called_once()
+    # upsert_tab NOT used in this path — only the append fast-path
+    assert ws.update.call_count == 0
+
+
+def test_replace_today_default_prefix_is_today_utc():
+    """today_prefix=None uses today's UTC ISO date."""
+    today = date.today().isoformat()
+    prior = [["date"], [today, "x"]]
+    ws = _make_ws(prior)
+    with _open_sheet_mock(ws):
+        # No today_prefix passed
+        sheets.replace_today_rows(MagicMock(), "any_tab", [[today, "fresh"]])
+    values, *_ = _written(ws)
+    # Stale today row got replaced
+    assert len(values) == 2 and values[1][1] == "fresh"

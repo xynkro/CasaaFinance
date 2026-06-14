@@ -55,6 +55,7 @@ import type {
   DailyPlanRow,
   MacroLeanRow,
   ScanMetaRow,
+  SelectionSkillRow,
   CuratedPickRow,
 } from "./types";
 
@@ -142,6 +143,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       macroLeanRows,
       curatedPickRows,
       scanMetaRows,
+      selectionSkillRows,
     ] = await Promise.all([
       fetchTab<LivePriceRow>("live_prices").catch(() => [] as LivePriceRow[]),
       fetchTab<EarningsRow>("earnings_calendar").catch(() => [] as EarningsRow[]),
@@ -164,6 +166,10 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTabByName<MacroLeanRow>("macro_lean").catch(() => [] as MacroLeanRow[]),
       fetchTabByName<CuratedPickRow>("curated_picks").catch(() => [] as CuratedPickRow[]),
       fetchTabByName<ScanMetaRow>("scan_meta").catch(() => [] as ScanMetaRow[]),
+      // Single-row UPSERT tab written by signal_feedback.py (weekly). Catch
+      // keeps the dashboard alive when the tab hasn't been written yet (the
+      // PWA card already tolerates a null selectionSkill).
+      fetchTabByName<SelectionSkillRow>("selection_skill").catch(() => [] as SelectionSkillRow[]),
     ]);
     const liveIdx = indexLivePrices(livePriceRows);
     const newsByTicker = summarizeNews(newsRows);
@@ -263,6 +269,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
       // Single-row heartbeat (upsert-overwritten each run) — no date field to
       // sort on; take the last row written.
       scanMeta: scanMetaRows[scanMetaRows.length - 1] ?? null,
+      // Same shape: one row, overwritten weekly by signal_feedback.py.
+      selectionSkill: selectionSkillRows[selectionSkillRows.length - 1] ?? null,
       ...(() => {
         const cp = latestGroup(curatedPickRows);
         return {
@@ -309,6 +317,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       dailyPlan: [],
       macroLean: null,
       scanMeta: null,
+      selectionSkill: null,
       curatedPicks: [], mfWatchlist: [], mfOverlay: [], mfReference: [],
       error: String(e),
     };

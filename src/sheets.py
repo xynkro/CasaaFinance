@@ -174,6 +174,45 @@ def append_rows(client: gspread.Client, tab_name: str, rows: Iterable[List[str]]
     return len(rows_list)
 
 
+def replace_today_rows(client: gspread.Client, tab_name: str,
+                       new_rows: Iterable[List[str]],
+                       today_prefix: str | None = None) -> int:
+    """Replace TODAY's rows with `new_rows` in one atomic write.
+
+    The 30-min IBKR grab loop used to append a fresh batch every cycle without
+    removing the prior one — by midday the positions tabs carried 5+ duplicate
+    rows per (account, ticker), which exploded every PWA consumer (Concentration
+    showed SCHD ×5, Movers showed AMD ×3, render churn lit Safari's
+    'significant energy' kill). This helper does the upsert the writer SHOULD
+    have been doing all along: keep every row whose date column doesn't start
+    with today's prefix, then write the fresh batch — all in a single
+    ``upsert_tab`` (no observable empty window).
+
+    Date prefix defaults to today's ISO date (UTC). Empty `new_rows` is still a
+    valid call — it removes today's stale rows without writing replacements
+    (useful for tabs an account no longer participates in). Returns the count
+    of rows in the fresh batch.
+    """
+    from datetime import date
+    rows_list = [list(r) for r in new_rows]
+    if today_prefix is None:
+        today_prefix = date.today().isoformat()
+    ss = _open_sheet(client)
+    ws = ss.worksheet(tab_name)
+    existing = ws.get_all_values()
+    if not existing:
+        # Empty tab — fall back to a plain append (ensure_headers will plant a
+        # header row first when it ran before this).
+        if rows_list:
+            ws.append_rows(rows_list, value_input_option="USER_ENTERED")
+        return len(rows_list)
+    header = existing[0]
+    keep = [r for r in existing[1:]
+            if r and not (r[0] or "").startswith(today_prefix)]
+    upsert_tab(ws, [header] + keep + rows_list)
+    return len(rows_list)
+
+
 def upsert_tab(
     ws: gspread.Worksheet,
     values: Sequence[Sequence[Any]],

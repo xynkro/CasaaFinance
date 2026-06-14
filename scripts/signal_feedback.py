@@ -582,9 +582,29 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
     # 7. Compute signal accuracy report (carries the real-user-decisions section
     #    + selection grade, JOINing decisions onto the full graded history).
     graded_outcomes = _normalize_outcomes(historical_outcomes, new_outcomes)
+    grade = (_grade_selection_skill(user_decisions, graded_outcomes)
+             if user_decisions and graded_outcomes else None)
     report = _build_report(new_outcomes, signal_hits, stats,
                            user_decisions=user_decisions,
                            graded_outcomes=graded_outcomes)
+
+    # 7b. Mirror the selection-skill grade into the `selection_skill` Sheet tab
+    # so the PWA can read it without firing off its own Firestore query (the
+    # mirror_to_firestore cron will then publish it as a single Firestore doc).
+    # Telegram already gets it via _send_telegram(report) — this is the in-app
+    # surface (Review tab → SelectionSkillCard). Inert/no-op on --dry.
+    # Even when `grade is None` (sample too small) we write a single row whose
+    # status field tells the PWA card to render "Building sample" rather than
+    # leaving the user staring at an empty/null state.
+    if not dry:
+        try:
+            _write_selection_skill(
+                client, grade=grade,
+                user_decisions_count=len(user_decisions),
+                graded_count=len(graded_outcomes),
+            )
+        except Exception as e:  # noqa: BLE001 — never fatal: report still goes out
+            logger.warning(f"selection_skill sheet write failed: {e}")
 
     # 8. Send Telegram summary
     if not dry:
@@ -1093,6 +1113,98 @@ def format_calibration_report(results: dict) -> str:
             )
         lines.append("")
     return "\n".join(lines)
+
+
+# ── selection_skill sheet upsert (the PWA SelectionSkillCard surface) ──────
+
+# Single-row tab: weekly UPSERT — we OVERWRITE the (header + 1 row) every run
+# rather than append a history, because the PWA card just wants "as of latest
+# run, here's the edge". The mirror_to_firestore cron then ships exactly one
+# row to the PWA. Headers stay positional-stable so a future reader can rely
+# on them; status is the human-readable verdict for the card.
+SELECTION_SKILL_TAB = "selection_skill"
+SELECTION_SKILL_HEADERS = [
+    "as_of_date",            # ISO YYYY-MM-DD when this row was written
+    "edge",                  # selection_edge in [-1, +1], "" when sample too small
+    "fill_winner_pct",       # fill rate on WIN-outcomes, 0-100, "" when n/a
+    "fill_loser_pct",        # fill rate on LOSS-outcomes, 0-100, "" when n/a
+    "kill_loser_pct",        # kill rate on LOSS-outcomes, 0-100, "" when n/a
+    "sample_size",           # # of matched WIN/LOSS pairs feeding the edge (n)
+    "n_win",                 # # of WIN pairs in the sample
+    "n_loss",                # # of LOSS pairs in the sample
+    "graded_outcomes",       # total graded picks available (denominator context)
+    "user_decisions",        # total real user fill/kill/defer decisions read
+    "status",                # OK | BUILDING_SAMPLE | INERT
+]
+
+
+def _selection_skill_row(
+    *, grade: dict | None, user_decisions_count: int, graded_count: int,
+) -> list[str]:
+    """Build the single Sheet row for `selection_skill`.
+
+    When `grade` is None we still write a row so the PWA can show
+    "Building sample — N closed decisions so far" rather than a missing card.
+    Status = OK when an edge was computable; BUILDING_SAMPLE otherwise.
+    """
+    as_of = datetime.now().strftime("%Y-%m-%d")
+    if grade is None:
+        return [
+            as_of, "", "", "", "", "0", "0", "0",
+            str(graded_count), str(user_decisions_count), "BUILDING_SAMPLE",
+        ]
+    return [
+        as_of,
+        f"{grade['selection_edge']:.4f}",
+        f"{grade['fill_rate_on_winners'] * 100:.1f}",
+        f"{grade['fill_rate_on_losers'] * 100:.1f}",
+        f"{grade['kill_rate_on_losers'] * 100:.1f}",
+        str(grade["n"]),
+        str(grade["n_win"]),
+        str(grade["n_loss"]),
+        str(graded_count),
+        str(user_decisions_count),
+        "OK",
+    ]
+
+
+def _write_selection_skill(
+    client,
+    *,
+    grade: dict | None,
+    user_decisions_count: int,
+    graded_count: int,
+) -> None:
+    """UPSERT the single-row `selection_skill` tab — header + 1 row, overwrite
+    in place each run. Idempotent and order-independent (PWA reads only the
+    most recent row).
+
+    The flow mirrors how other single-row heartbeat tabs are written:
+      1. ensure_headers() — creates the tab if missing and pins the header row.
+      2. read existing rows; if there's already a data row, overwrite it via
+         worksheet.update; otherwise append.
+    """
+    ws = sh.ensure_headers(client, SELECTION_SKILL_TAB, SELECTION_SKILL_HEADERS)
+    row = _selection_skill_row(
+        grade=grade,
+        user_decisions_count=user_decisions_count,
+        graded_count=graded_count,
+    )
+    existing = ws.get_all_values()
+    if len(existing) <= 1:
+        # Only the header (or empty) — append the data row.
+        ws.append_row(row, value_input_option="USER_ENTERED")
+    else:
+        # Overwrite the existing data row in place. A1 notation: row 2,
+        # columns A..K (the 11 SELECTION_SKILL_HEADERS).
+        last_col_letter = chr(ord("A") + len(SELECTION_SKILL_HEADERS) - 1)
+        ws.update(f"A2:{last_col_letter}2", [row], value_input_option="USER_ENTERED")
+    # Pre-format outside the f-string — nested quotes inside an f-string
+    # expression are a 3.11- SyntaxError (\"" inside \" ").
+    edge_str = "—" if grade is None else f"{grade['selection_edge']:+.2f}"
+    n_str    = "0" if grade is None else str(grade["n"])
+    status_str = "BUILDING_SAMPLE" if grade is None else "OK"
+    logger.info(f"✓ Wrote selection_skill: edge={edge_str} n={n_str} status={status_str}")
 
 
 # ── Telegram ───────────────────────────────────────────────────────────────

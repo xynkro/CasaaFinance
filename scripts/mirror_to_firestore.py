@@ -51,7 +51,7 @@ from typing import Any, Callable, Optional
 log = logging.getLogger("mirror_to_firestore")
 
 
-# --- the exact 39 tabs the PWA fetches (from data.ts `fetchDashboard`) ---
+# --- the exact 41 tabs the PWA fetches (from data.ts `fetchDashboard`) ---
 # Authoritative list lives in docs/plans/2026-06-07-private-read-path-plan.md.
 # Order is informational; mirroring is per-tab and order-independent.
 PWA_TABS: list[str] = [
@@ -95,6 +95,10 @@ PWA_TABS: list[str] = [
     "daily_plan",
     "macro_lean",
     "curated_picks",
+    # Single-row UPSERT tab written weekly by scripts/signal_feedback.py.
+    # The PWA Review tab → SelectionSkillCard reads it; no date column → the
+    # _filter_recent freshness trim falls through to "no trim" (one row, kept).
+    "selection_skill",
 ]
 
 # Per-doc serialized-size ceiling. Firestore's hard limit is 1 MiB/doc; we leave
@@ -145,6 +149,21 @@ _DATE_FIELD_CANDIDATES = (
     "date", "datetime", "transaction_date", "filing_date",
     "published_at", "updated_at", "report_date", "ts",
 )
+
+# Per-tab "collapse duplicate rows by THESE keys, keep the latest" config.
+# The IBKR 30-min grab loop calls append_rows without an upsert, so each
+# same-day run stacks fresh copies of every (account, ticker) — by midday the
+# positions tabs carry 5x+ duplicates that explode every consumer in the PWA
+# (Concentration says SCHD warning ×5, Movers shows AMD ×3, render churn lit
+# Safari's "significant energy" warning). Dedupe at the mirror as a safety net
+# in front of the writer-side fix.
+TAB_DEDUP_KEYS: dict[str, tuple[str, ...]] = {
+    "positions_caspar": ("ticker",),
+    "positions_sarah":  ("ticker",),
+    "options":          ("account", "ticker", "right", "strike", "expiry"),
+    "snapshot_caspar":  ("date",),
+    "snapshot_sarah":   ("date",),
+}
 
 _ENV_KEY = "FIREBASE_SERVICE_ACCOUNT_JSON"
 
@@ -225,6 +244,24 @@ def _filter_recent(rows: list[dict], days_kept: int) -> list[dict]:
         return rows
     kept_days = set(distinct[:days_kept])
     return [r for r in rows if _date_prefix(r.get(field)) in kept_days]
+
+
+def _dedup_rows(rows: list[dict], key_fields: tuple[str, ...]) -> list[dict]:
+    """Collapse rows that share the same `key_fields` to ONE row each, keeping
+    the LAST occurrence (rows are chronological → the latest write wins).
+
+    Order is preserved by the latest occurrence of each key (Python 3.7+ dict
+    ordering). Empty `key_fields` or `rows` is a safe no-op. Missing fields
+    contribute an empty string to the key so two rows with a blank field
+    still collapse together rather than diverging silently.
+    """
+    if not rows or not key_fields:
+        return rows
+    out: dict[tuple, dict] = {}
+    for r in rows:
+        k = tuple(str(r.get(f, "") or "") for f in key_fields)
+        out[k] = r  # overwrite — last write wins
+    return list(out.values())
 
 
 def _cap_rows(rows: list[dict], cap: int) -> list[dict]:
@@ -317,6 +354,10 @@ def mirror_tab(read_tab: Callable[[str], list[dict]], db: Any, name: str,
     # never renders, slashing the first-load payload (e.g. news_sentiment
     # 14,771 → ~600). The cap is then a safety ceiling on top.
     rows = _filter_recent(rows, TAB_DAYS_KEPT.get(name, 0))
+    # Collapse same-day duplicates from writers that append-without-upsert
+    # (positions are stacked 5× by the 30-min IBKR grab; without this the
+    # PWA reads SCHD×5 / AMD×3 etc.).
+    rows = _dedup_rows(rows, TAB_DEDUP_KEYS.get(name, ()))
     rows = _cap_rows(rows, TAB_CAPS.get(name, cap))
     source_hash = _source_hash(rows)
 
