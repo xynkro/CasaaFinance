@@ -63,3 +63,13 @@ jobs:
             ARGS="--execute"
           fi
           python scripts/alpaca_paper_execute.py $ARGS
+
+      # Snapshot the paper account AFTER the executor places trades, so the
+      # PWA's Paper view reflects today's book. This used to ride on the
+      # retired execute-decisions.yml; when that workflow's cron was disabled
+      # (2026-06-03) the snapshot froze while the executor + benchmark kept
+      # running. Re-attached here, with the creds this job already carries.
+      # `if: always()` so the snapshot still runs on a dry-run / executor blip.
+      - name: Snapshot Alpaca paper account → Sheet
+        if: always()
+        run: python scripts/sync_alpaca.py
