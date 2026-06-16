@@ -9,7 +9,7 @@ import { AlertTriangle, RotateCw } from "lucide-react";
  * switching tabs auto-recovers.
  */
 export class ErrorBoundary extends Component<
-  { children: ReactNode },
+  { children: ReactNode; fallback?: ReactNode },
   { error: Error | null }
 > {
   state: { error: Error | null } = { error: null };
@@ -25,6 +25,9 @@ export class ErrorBoundary extends Component<
 
   render() {
     if (this.state.error) {
+      // Custom fallback wins (e.g. the root gate shows a full-page reload
+      // screen rather than the per-tab "other tabs still work" copy).
+      if (this.props.fallback) return this.props.fallback;
       return (
         <div className="flex flex-col items-center justify-center text-center gap-3 px-6 py-16 fade-up">
           <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-amber-500/15 text-amber-400">

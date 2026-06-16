@@ -396,25 +396,54 @@ function PinGatedApp() {
   return <Dashboard />;
 }
 
+/** Shown when the lazy FirebaseGate chunk can't load even after an auto-reload
+ *  (genuinely-missing chunk / offline). Without this, the Suspense fallback
+ *  below would spin forever — the "stuck loading, no data" report. */
+function GateLoadError() {
+  return (
+    <div className="h-screen flex flex-col items-center justify-center text-center gap-4 px-6 relative">
+      <div className="bg-layer" aria-hidden="true" />
+      <div className="relative max-w-xs flex flex-col items-center gap-3">
+        <RefreshCw size={26} className="text-sky-400" aria-hidden="true" />
+        <h2 className="text-[length:var(--t-base)] font-semibold text-slate-100">
+          Couldn’t finish loading
+        </h2>
+        <p className="text-[length:var(--t-xs)] text-slate-400 leading-relaxed">
+          A new version was deployed. Tap reload to pull it — your data is safe.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-1 flex items-center gap-2 px-5 py-2.5 rounded-xl text-[length:var(--t-sm)] font-semibold text-slate-100 active:scale-[0.98]"
+          style={{ background: "var(--surface-bright)", border: "1px solid var(--border-bright)" }}
+        >
+          <RefreshCw size={15} aria-hidden="true" /> Reload
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Google-sign-in-gated app (firestore path). */
 function FirestoreGatedApp() {
   return (
-    <Suspense
-      fallback={
-        <div className="h-screen flex flex-col items-center justify-center relative">
-          <div className="bg-layer" aria-hidden="true" />
-          <div className="w-full max-w-sm">
-            <LoadingState rows={2} label="Loading…" />
+    <ErrorBoundary fallback={<GateLoadError />}>
+      <Suspense
+        fallback={
+          <div className="h-screen flex flex-col items-center justify-center relative">
+            <div className="bg-layer" aria-hidden="true" />
+            <div className="w-full max-w-sm">
+              <LoadingState rows={2} label="Loading…" />
+            </div>
           </div>
-        </div>
-      }
-    >
-      <FirebaseGate>
-        {({ user, signOut }) => (
-          <Dashboard authCtx={{ email: user.email, signOut }} />
-        )}
-      </FirebaseGate>
-    </Suspense>
+        }
+      >
+        <FirebaseGate>
+          {({ user, signOut }) => (
+            <Dashboard authCtx={{ email: user.email, signOut }} />
+          )}
+        </FirebaseGate>
+      </Suspense>
+    </ErrorBoundary>
   );
 }
 
