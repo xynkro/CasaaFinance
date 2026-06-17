@@ -93,6 +93,12 @@ export function PositionsTable({
             const mv = liveMktVal(pos);
             const weightPct = totalLiveMktVal > 0 ? mv / totalLiveMktVal : Number(pos.weight);
             const weight = pctFmt(String(weightPct));
+            // Concentration color on the weight (UI-audit #8): amber as a
+            // single name nears a third of the book, red past 40%.
+            const weightColor = weightPct >= 0.40 ? "text-red-400"
+              : weightPct >= 0.30 ? "text-amber-400"
+              : weightPct >= 0.25 ? "text-amber-300/80"
+              : "text-slate-500";
             const isUp = upl >= 0;
             const exitPlan = exitByTicker.get(pos.ticker);
 
@@ -130,7 +136,7 @@ export function PositionsTable({
                       <span className={`text-[length:var(--t-xs)] font-medium font-tabular ${isUp ? "text-emerald-400" : "text-red-400"}`}>
                         {isUp ? "+" : ""}{fmt(String(upl), "")}
                       </span>
-                      <span className="text-[length:var(--t-2xs)] text-slate-500 font-tabular">
+                      <span className={`text-[length:var(--t-2xs)] font-tabular font-semibold ${weightColor}`}>
                         {weight.text}
                       </span>
                     </div>

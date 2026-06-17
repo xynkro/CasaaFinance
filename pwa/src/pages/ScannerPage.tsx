@@ -14,11 +14,12 @@ interface ScannerPageProps {
   exposurePosture?: ExposurePostureRow | null;
   gexRegime?: GexRegimeRow[] | null;
   scanMeta?: ScanMetaRow | null;
+  heldTickers?: Set<string>;
 }
 
 /* ---------- component ---------- */
 
-export function ScannerPage({ ivSurfaceScan, loading, exposurePosture, gexRegime, scanMeta }: ScannerPageProps) {
+export function ScannerPage({ ivSurfaceScan, loading, exposurePosture, gexRegime, scanMeta, heldTickers }: ScannerPageProps) {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<"P" | "C" | "both">("P");
@@ -188,6 +189,7 @@ export function ScannerPage({ ivSurfaceScan, loading, exposurePosture, gexRegime
         exposurePosture={exposurePosture}
         gexRegime={gexRegime}
         scanMeta={scanMeta}
+        heldTickers={heldTickers}
       />
 
       {/* Chain View */}

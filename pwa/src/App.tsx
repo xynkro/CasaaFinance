@@ -140,6 +140,17 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
     (d) => d.severity === "CRITICAL" || d.severity === "HIGH",
   ).length;
 
+  // Tickers held in either account — feeds the Scanner's HELD chip so adding
+  // to an already-held name is flagged at the point of decision (UI-audit #8).
+  const heldTickers = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of [...(data?.casparPositions ?? []), ...(data?.sarahPositions ?? [])]) {
+      const t = (p.ticker || "").toUpperCase();
+      if (t) s.add(t);
+    }
+    return s;
+  }, [data]);
+
   const renderPage = () => {
     switch (tab) {
       case 0:
@@ -193,6 +204,7 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
             exposurePosture={data?.exposurePosture ?? null}
             gexRegime={data?.gexRegime ?? null}
             scanMeta={data?.scanMeta ?? null}
+            heldTickers={heldTickers}
           />
         );
       case 4:

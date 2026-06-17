@@ -12,9 +12,10 @@
  *   30-40%  amber      — warning
  *   40%+    red        — critical (rebalance candidate)
  *
- * Returns null when no position crosses the lowest threshold (the
- * common case for a properly diversified book) so the card doesn't
- * eat home-page real estate when there's nothing to say.
+ * ALWAYS renders the top holding per account (a compact one-liner) so
+ * drift is visible BEFORE it crosses the warn line — e.g. SCHD at 27%
+ * surfaces before it becomes a 30% problem (UI-audit #8). Escalates to
+ * the full illustrated hotspot view once a name crosses WARN.
  */
 import type { PositionRow, SnapshotRow } from "../data";
 import { Card } from "./Card";
@@ -92,6 +93,30 @@ const SEVERITY_CONFIG: Record<Severity, { color: string; bg: string; border: str
   },
 };
 
+interface TopHolding { account: "caspar" | "sarah"; ticker: string; pct: number; }
+
+/** The single largest holding in an account, as a % of NLV — computed
+ *  regardless of threshold so drift is visible BEFORE it crosses the warn
+ *  line (UI-audit #8: see SCHD at 27% before it becomes a 30% problem). */
+function topHolding(
+  account: "caspar" | "sarah",
+  positions: PositionRow[],
+  snapshot: SnapshotRow | null,
+): TopHolding | null {
+  if (!positions.length) return null;
+  const totalMkt = positions.reduce((s, r) => s + numeric(r.mkt_val), 0);
+  const denom = snapshot ? numeric(snapshot.net_liq) || totalMkt : totalMkt;
+  if (denom <= 0) return null;
+  let best: TopHolding | null = null;
+  for (const p of positions) {
+    const pct = (numeric(p.mkt_val) / denom) * 100;
+    if (!best || pct > best.pct) {
+      best = { account, ticker: (p.ticker || "").toUpperCase(), pct };
+    }
+  }
+  return best;
+}
+
 export function ConcentrationCard({
   casparPositions,
   sarahPositions,
@@ -108,11 +133,43 @@ export function ConcentrationCard({
     ...evaluateAccount("sarah", sarahPositions, sarahSnapshot ?? null),
   ];
 
-  // Render-only when at least one warn-or-worse exists. Plain "watch"
-  // (25-30%) is normal for a concentrated book — surface only on
-  // request via the link if needed; don't auto-fire on it.
   const hasMeaningful = hotspots.some((h) => h.severity !== "watch");
-  if (!hasMeaningful) return null;
+
+  // CALM state: nothing has crossed WARN, but ALWAYS surface the top holding
+  // per account (UI-audit #8 — drift visibility). Compact one-liner, no
+  // illustration, minimal footprint.
+  if (!hasMeaningful) {
+    const tops = [
+      topHolding("caspar", casparPositions, casparSnapshot ?? null),
+      topHolding("sarah", sarahPositions, sarahSnapshot ?? null),
+    ].filter((t): t is TopHolding => t !== null);
+    if (!tops.length) return null;
+    return (
+      <Card>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Eye size={14} className="text-slate-500" />
+            <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Concentration</h2>
+          </div>
+          <span className="text-[length:var(--t-2xs)] text-slate-600">top holding / account</span>
+        </div>
+        <div className="space-y-1">
+          {tops.map((t) => {
+            const color = t.pct >= WARN_PCT ? "#fcd34d" : t.pct >= WATCH_PCT ? "#cbd5e1" : "#64748b";
+            return (
+              <div key={t.account} className="flex items-center justify-between">
+                <span className="text-[length:var(--t-2xs)] uppercase tracking-wide text-slate-500">{t.account}</span>
+                <span className="text-[length:var(--t-xs)] tabular-nums">
+                  <span className="text-slate-300 font-semibold">{t.ticker}</span>{" "}
+                  <span className="font-bold" style={{ color }}>{t.pct.toFixed(1)}%</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    );
+  }
 
   // Group by account so the user can see "caspar has NVDA 42% AND TSLA 31%"
   // at a glance.

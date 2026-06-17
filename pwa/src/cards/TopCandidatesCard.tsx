@@ -61,9 +61,11 @@ function WarningDots({ row }: { row: IvSurfaceScanRow }) {
 function CandidateRow({
   row,
   onSelect,
+  held,
 }: {
   row: IvSurfaceScanRow;
   onSelect?: (r: IvSurfaceScanRow) => void;
+  held?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -94,6 +96,12 @@ function CandidateRow({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[length:var(--t-sm)] font-bold text-white">{row.ticker ?? "—"}</span>
+          {held && (
+            <span className="px-1 py-0.5 rounded text-[length:var(--t-2xs)] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                  title="You already hold this name — adding here concentrates further">
+              HELD
+            </span>
+          )}
           <TypeBadge type={row.type ?? "P"} />
           <span className="text-[length:var(--t-2xs)] tabular-nums text-slate-300 font-semibold">
             ${strike.toFixed(0)}
@@ -182,12 +190,16 @@ export function TopCandidatesCard({
   exposurePosture,
   gexRegime,
   scanMeta,
+  heldTickers,
 }: {
   contracts: IvSurfaceScanRow[];
   onSelectContract?: (row: IvSurfaceScanRow) => void;
   exposurePosture?: ExposurePostureRow | null;
   gexRegime?: GexRegimeRow[] | null;
   scanMeta?: ScanMetaRow | null;
+  /** Upper-cased tickers already held in either account — drives the HELD
+   *  chip so adding concentration is flagged at the point of decision. */
+  heldTickers?: Set<string>;
 }) {
   const [showAll, setShowAll] = useState(false);
 
@@ -264,6 +276,7 @@ export function TopCandidatesCard({
             key={`${r.ticker}-${r.type}-${r.strike}-${r.expiry}-${i}`}
             row={r}
             onSelect={onSelectContract}
+            held={heldTickers?.has((r.ticker || "").toUpperCase())}
           />
         ))}
       </div>
