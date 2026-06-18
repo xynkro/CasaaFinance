@@ -17,6 +17,7 @@
  */
 export { ConvictionDots, type ConvictionDotsProps } from "./ConvictionDots";
 export { Chip, type ChipProps } from "./Chip";
+export { CHIP_TONE } from "./tones";
 export { StatusPill, type StatusPillProps } from "./StatusPill";
 export {
   DECISION_STATUS,

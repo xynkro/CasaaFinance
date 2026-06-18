@@ -19,14 +19,7 @@
  * CASH_PRIORITY days. Renders null when none of the three feeds has data.
  */
 import type { ExposurePostureRow, GexRegimeRow, ScanMetaRow } from "../data";
-import { Chip } from "./ui";
-
-const TONE = {
-  emerald: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  amber: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  red: "bg-red-500/15 text-red-400 border-red-500/30",
-  slate: "bg-slate-500/10 text-slate-400 border-slate-500/20",
-};
+import { Chip, CHIP_TONE as TONE } from "./ui";
 
 const POSTURE_CFG: Record<string, { cls: string; label: string }> = {
   CASH_PRIORITY: { cls: TONE.red, label: "CASH PRIORITY" },

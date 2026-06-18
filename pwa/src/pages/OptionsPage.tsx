@@ -189,6 +189,7 @@ export function OptionsPage({
               sarahPositions={sarahPositions}
               technicalScores={technicalScores}
               exitPlans={exitPlans}
+              optionsDefense={optionsDefense}
               loading={loading}
             />
           </div>

@@ -399,16 +399,23 @@ export function WheelCard({
   };
   // Defense join: only rows the mechanics flag as in trouble get the inline
   // action (assignment_risk HIGH or trend_risk BREACHING), matched by
-  // account + ticker + right + strike.
+  // account + ticker + right + strike. Bucketed by account|ticker (mirroring
+  // optionPlans above) so the per-row lookup is O(1) on a tiny bucket rather
+  // than an O(rows × alerts) scan of the whole defense array.
+  const defenseByKey = new Map<string, OptionsDefenseRow[]>();
+  for (const d of optionsDefense ?? []) {
+    if (!d.action) continue;
+    const k = `${d.account}|${d.ticker}`;
+    const arr = defenseByKey.get(k) ?? [];
+    arr.push(d);
+    defenseByKey.set(k, arr);
+  }
   const defenseFor = (opt: OptionRow): OptionsDefenseRow | undefined => {
     if (opt.assignment_risk !== "HIGH" && opt.trend_risk !== "BREACHING") return undefined;
-    return (optionsDefense ?? []).find(
+    return defenseByKey.get(`${opt.account}|${opt.ticker}`)?.find(
       (d) =>
-        d.ticker === opt.ticker &&
-        d.account === opt.account &&
         (!d.right || d.right === opt.right) &&
-        Math.abs(numeric(d.strike) - numeric(opt.strike)) < 0.5 &&
-        !!d.action,
+        Math.abs(numeric(d.strike) - numeric(opt.strike)) < 0.5,
     );
   };
   if (loading) {

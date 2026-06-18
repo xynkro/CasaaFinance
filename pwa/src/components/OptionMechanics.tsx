@@ -19,7 +19,7 @@
  * number (never NaN, never a fabricated 0). Inputs are plain numbers — call
  * sites convert sheet strings via `numOrUndef` so blank ≠ zero.
  */
-import { Chip } from "./ui";
+import { Chip, CHIP_TONE as TONE } from "./ui";
 
 // Hardcoded mechanics thresholds — deliberately NOT user-configurable
 // (post-mortem rule: the numbers that were paid for in losses don't drift).
@@ -69,13 +69,6 @@ function fmtUsd(n: number): string {
   if (abs >= 1000) return `$${(abs / 1000).toFixed(1)}k`;
   return `$${abs.toFixed(0)}`;
 }
-
-const TONE = {
-  emerald: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  amber: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  red: "bg-red-500/15 text-red-400 border-red-500/30",
-  slate: "bg-slate-500/10 text-slate-400 border-slate-500/20",
-};
 
 export function OptionMechanics({
   credit,
