@@ -1,6 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { ExposurePostureRow, GexRegimeRow, IvSurfaceScanRow, ScanMetaRow } from "../data";
 import { numeric } from "../data";
+import { fetchTab } from "../data/transport";
 import { IvSmileChart } from "../cards/IvSmileChart";
 import { TopCandidatesCard } from "../cards/TopCandidatesCard";
 import { ChainViewCard } from "../cards/ChainViewCard";
@@ -9,8 +10,6 @@ import { ScannerHowTo } from "../cards/ScannerHowTo";
 /* ---------- types ---------- */
 
 interface ScannerPageProps {
-  ivSurfaceScan: IvSurfaceScanRow[];
-  loading: boolean;
   exposurePosture?: ExposurePostureRow | null;
   gexRegime?: GexRegimeRow[] | null;
   scanMeta?: ScanMetaRow | null;
@@ -19,7 +18,21 @@ interface ScannerPageProps {
 
 /* ---------- component ---------- */
 
-export function ScannerPage({ ivSurfaceScan, loading, exposurePosture, gexRegime, scanMeta, heldTickers }: ScannerPageProps) {
+export function ScannerPage({ exposurePosture, gexRegime, scanMeta, heldTickers }: ScannerPageProps) {
+  // The IV-surface scan is ~1 MB and ONLY this tab consumes it — so fetch it
+  // lazily when the Scanner opens instead of in the eager 41-doc dashboard
+  // load. Keeps that megabyte off every cold open (the 27s slow-load) and out
+  // of the localStorage cache budget (so stale-while-revalidate actually fits).
+  const [ivSurfaceScan, setIvSurfaceScan] = useState<IvSurfaceScanRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    fetchTab<IvSurfaceScanRow>("iv_surface_scan")
+      .then((rows) => { if (alive) setIvSurfaceScan(rows); })
+      .catch(() => { /* empty-state copy handles the no-data case */ })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<"P" | "C" | "both">("P");

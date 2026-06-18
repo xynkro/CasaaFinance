@@ -47,7 +47,6 @@ import type {
   UoaAlertRow,
   HarvestScanRow,
   ScanResultRow,
-  IvSurfaceScanRow,
   AlpacaSnapshotRow,
   AlpacaPositionRow,
   PaperBenchmarkRow,
@@ -134,7 +133,6 @@ export async function fetchDashboard(): Promise<DashboardData> {
       uoaRows,
       harvestScanRows,
       scanResultRows,
-      ivSurfaceScanRows,
       alpacaSnapRaw,
       alpacaPosRows,
       paperBenchmarkRows,
@@ -157,7 +155,9 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTabByName<UoaAlertRow>("uoa_alerts").catch(() => [] as UoaAlertRow[]),
       fetchTab<HarvestScanRow>("harvest_scan").catch(() => [] as HarvestScanRow[]),
       fetchTabByName<ScanResultRow>("scan_results").catch(() => [] as ScanResultRow[]),
-      fetchTab<IvSurfaceScanRow>("iv_surface_scan").catch(() => [] as IvSurfaceScanRow[]),
+      // iv_surface_scan is NOT fetched here — it's ~1 MB and only the Scanner
+      // tab uses it, so ScannerPage fetches it lazily on open. Keeping it out
+      // of the eager load is the bulk of the cold-load + cache-size win.
       fetchTab<Record<string, string>>("snapshot_alpaca").catch(() => [] as Record<string, string>[]),
       fetchTab<AlpacaPositionRow>("positions_alpaca").catch(() => [] as AlpacaPositionRow[]),
       fetchTabByName<PaperBenchmarkRow>("paper_benchmark").catch(() => [] as PaperBenchmarkRow[]),
@@ -256,7 +256,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
         return sDate && hDate && hDate < sDate ? [] : h;
       })(),
       scanResults: latestGroup(scanResultRows),
-      ivSurfaceScan: ivSurfaceScanRows,
+      ivSurfaceScan: [],   // lazily fetched by ScannerPage on open (see above)
       alpaca: (() => {
         const rows = normalizeSnapshot(alpacaSnapRaw) as unknown as AlpacaSnapshotRow[];
         return rows.length ? rows.reduce((a, b) => (a.date > b.date ? a : b)) : null;

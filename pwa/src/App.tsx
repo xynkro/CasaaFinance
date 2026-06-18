@@ -210,8 +210,6 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
       case 3:
         return (
           <ScannerPage
-            ivSurfaceScan={data?.ivSurfaceScan ?? []}
-            loading={loading && !data}
             exposurePosture={data?.exposurePosture ?? null}
             gexRegime={data?.gexRegime ?? null}
             scanMeta={data?.scanMeta ?? null}
