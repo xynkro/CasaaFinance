@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { fetchDashboard, type DashboardData } from "./data";
+import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { evaluateTrigger } from "./data/normalize";
 import type { TechnicalScoreRow } from "./data";
 import { PinGate } from "./PinGate";
@@ -50,8 +51,13 @@ type AuthCtx = { email: string | null; signOut: () => void } | null;
 
 function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
   const { settings, update: updateSettings } = useSettings();
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // STALE-WHILE-REVALIDATE: hydrate from the last good dashboard so a reopen
+  // paints INSTANTLY from cache, then refreshes in the background. Without this
+  // every cold open re-fetches all 41 Firestore docs before showing anything
+  // (the SW that used to cache the shell was removed to fix the spinner bug).
+  const [data, setData] = useState<DashboardData | null>(readDashboardCache);
+  const hadCache = useRef(data !== null);
+  const [loading, setLoading] = useState(!hadCache.current);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [tab, setTab] = useState(settings.defaultTab);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -59,10 +65,14 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
   const [lookupTicker, setLookupTicker] = useState<string | null>(null);
   const [lookupTechScore, setLookupTechScore] = useState<TechnicalScoreRow | undefined>();
 
-  const load = () => {
-    setLoading(true);
+  // `silent` skips the loading spinner — used for background refreshes (mount
+  // when we already have cache, the 15-min timer, foreground re-entry) so they
+  // never flash a skeleton over data the user is already looking at.
+  const load = (silent = false) => {
+    if (!silent) setLoading(true);
     return fetchDashboard().then((d) => {
       setData(d);
+      writeDashboardCache(d);
       setLoading(false);
       setLastRefresh(new Date());
     });
@@ -72,15 +82,16 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
   // "load when component mounts", and React's docs explicitly call it out
   // as fine for external-system sync (network → state).
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(hadCache.current); }, []);
 
-  // Auto-refresh: every 15 min + whenever the app comes back to foreground
+  // Auto-refresh: every 15 min + whenever the app comes back to foreground.
+  // Both are SILENT — data is already on screen; don't flash a spinner.
   useEffect(() => {
     const INTERVAL_MS = 15 * 60 * 1000;
-    const timer = setInterval(() => { load(); }, INTERVAL_MS);
+    const timer = setInterval(() => { load(true); }, INTERVAL_MS);
 
     const onVisibility = () => {
-      if (document.visibilityState === "visible") load();
+      if (document.visibilityState === "visible") load(true);
     };
     document.addEventListener("visibilitychange", onVisibility);
 
@@ -350,7 +361,7 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
 
       {/* Scrollable content */}
       <main ref={scrollRef} className="app-content">
-        <PullToRefresh onRefresh={load} scrollRef={scrollRef}>
+        <PullToRefresh onRefresh={() => load()} scrollRef={scrollRef}>
           {data?.error && (
             <div className="mx-4 mb-3 rounded-xl p-3 text-[length:var(--t-sm)] text-red-300 fade-up"
                  style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)" }}>
