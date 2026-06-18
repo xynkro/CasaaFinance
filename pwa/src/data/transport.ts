@@ -95,6 +95,16 @@ export const GIDS: Record<string, string> = {
 const DATA_SOURCE = import.meta.env.VITE_DATA_SOURCE;
 const USE_FIRESTORE = DATA_SOURCE === "firestore";
 
+/** Prefetch every Firestore tab in ONE collection read so the per-tab fetches
+ *  below hit memory instead of ~40 separate round-trips (the cellular slow-load
+ *  fix). No-op in gviz mode. Best-effort: on failure the per-tab reads just go
+ *  individually as before. */
+export async function prefetchDashboard(): Promise<void> {
+  if (!USE_FIRESTORE) return;
+  const { prefetchAllTabs } = await import("../lib/firebase");
+  await prefetchAllTabs();
+}
+
 export async function fetchTab<T>(tab: keyof typeof GIDS): Promise<T[]> {
   // fetchTab's key IS the sheet tab name (= Firestore doc id), so it maps
   // straight onto the mirror doc.

@@ -9,7 +9,7 @@
  * the ``DashboardData`` type are re-exported from ``../data`` so existing
  * importers keep resolving unchanged.
  */
-import { fetchTab, fetchTabByName } from "./transport";
+import { fetchTab, fetchTabByName, prefetchDashboard } from "./transport";
 import {
   normalizeSnapshot,
   indexLivePrices,
@@ -90,6 +90,12 @@ function dedup<T extends { date: string }>(rows: T[]): T[] {
 
 export async function fetchDashboard(): Promise<DashboardData> {
   try {
+    // ONE collection read up front (firestore mode) → the per-tab fetches below
+    // resolve from memory instead of ~40 round-trips. The cellular slow-load
+    // fix. Best-effort: if it fails the per-tab reads fall back to individual
+    // network reads, so this is strictly an optimization.
+    await prefetchDashboard();
+
     const [dailyRows, casparRaw, sarahRaw, casparPos, sarahPos, optionRows, techRows, wheelRows, exitRows, defenseRows, wsrSumRows, decisions, macroRows, archiveRows, regimeRows, postureRows, screenRows, tvRows, riskParityRows] =
       await Promise.all([
         fetchTab<DailyBriefRow>("daily_brief_latest"),

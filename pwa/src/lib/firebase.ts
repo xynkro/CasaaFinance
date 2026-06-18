@@ -31,6 +31,8 @@ import {
   getFirestore,
   doc,
   getDoc,
+  getDocs,
+  collection,
   setDoc,
   serverTimestamp,
   type Firestore,
@@ -121,7 +123,53 @@ function coerceRowToStrings(row: Record<string, unknown>): Record<string, string
   return out;
 }
 
+// ── One-shot collection prefetch ────────────────────────────────────────────
+// fetchDashboard reads ~40 tab docs. Done as ~40 individual getDoc round-trips
+// that is fine on a laptop but ~28s on a phone (latency × count). prefetchAllTabs
+// pulls the ENTIRE `tabs` collection in ONE getDocs query, reassembles chunked
+// tabs, and parks the result in `tabCache`; readFirestoreTab then serves from
+// memory. One round-trip replaces forty. Any failure leaves tabCache null and
+// the per-tab path falls back to individual reads, so this can't regress.
+let tabCache: Map<string, Record<string, string>[]> | null = null;
+
+export async function prefetchAllTabs(): Promise<void> {
+  try {
+    const snap = await getDocs(collection(db, "tabs"));
+    const bases = new Map<string, { rows: Record<string, unknown>[]; chunks: number }>();
+    const chunkRows = new Map<string, Map<number, Record<string, unknown>[]>>();
+    snap.forEach((d) => {
+      const data = d.data() as { rows?: Record<string, unknown>[]; chunks?: number };
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      const m = d.id.match(/^(.+)__(\d+)$/);
+      if (m) {
+        const cm = chunkRows.get(m[1]) ?? new Map<number, Record<string, unknown>[]>();
+        cm.set(Number(m[2]), rows);
+        chunkRows.set(m[1], cm);
+      } else {
+        bases.set(d.id, { rows, chunks: Number(data.chunks) || 0 });
+      }
+    });
+    const out = new Map<string, Record<string, string>[]>();
+    for (const [name, { rows, chunks }] of bases) {
+      const all = [...rows];
+      for (let i = 1; i <= chunks; i++) {
+        const cr = chunkRows.get(name)?.get(i);
+        if (cr) all.push(...cr);
+      }
+      out.set(name, all.map(coerceRowToStrings));
+    }
+    tabCache = out;
+  } catch {
+    tabCache = null; // fall back to individual reads
+  }
+}
+
 export async function readFirestoreTab<T>(name: string): Promise<T[]> {
+  // Served from the one-shot collection prefetch when present (the cellular
+  // win). A populated cache that lacks `name` means the tab genuinely doesn't
+  // exist → []. Falls through to an individual read only when no prefetch ran.
+  if (tabCache) return (tabCache.get(name) ?? []) as T[];
+
   const baseSnap = await getDoc(doc(db, "tabs", name));
   if (!baseSnap.exists()) return [];
 
