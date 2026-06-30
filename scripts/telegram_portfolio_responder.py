@@ -122,7 +122,11 @@ def get_updates(offset: int, timeout: int = 0) -> list[dict]:
 
 
 def reply_to(thread_id: int, text: str, reply_to_message_id: int | None = None) -> dict:
-    """Reply inside the Portfolio Ping topic, optionally quoting the trigger msg."""
+    """Reply inside the Portfolio Ping topic, optionally quoting the trigger msg.
+
+    Use ONLY for non-sensitive content (acks, nudges). Account figures must go
+    through send_dm — the topic is in the shared group, which has other members.
+    """
     payload = {
         "chat_id": GROUP_CHAT_ID,
         "message_thread_id": thread_id,
@@ -131,6 +135,13 @@ def reply_to(thread_id: int, text: str, reply_to_message_id: int | None = None) 
     if reply_to_message_id is not None:
         payload["reply_to_message_id"] = reply_to_message_id
     return _api("sendMessage", payload)
+
+
+def send_dm(user_id: int, text: str) -> dict:
+    """Privately DM a user (no group, no topic). Used for the portfolio summary
+    so NLV/cash never lands in the shared group. Raises if the bot can't reach
+    the user (e.g. they have never opened a chat with it)."""
+    return _api("sendMessage", {"chat_id": user_id, "text": text})
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -296,7 +307,22 @@ def process_update(client, update: dict, user_to_account: dict[int, str], logger
     logger.info(f"  ↳ {user_name} (user_id={user_id}, account={account}) — {text!r}")
     summary = fetch_account_summary(client, account, logger)
     if not dry:
-        reply_to(PORTFOLIO_PING_TOPIC, summary, reply_to_message_id=msg_id)
+        # PRIVATE: the summary carries NLV/cash. DM it to the asker; never post
+        # it in the shared group topic. A neutral ack tells them to check their
+        # DM; if the bot can't DM them yet, we ask them to open a chat (and still
+        # post no figures in the group).
+        try:
+            send_dm(user_id, summary)
+            reply_to(PORTFOLIO_PING_TOPIC, "📩 Sent your portfolio to your DM.",
+                     reply_to_message_id=msg_id)
+        except Exception as e:
+            logger.warning(f"  ↳ DM to user_id={user_id} failed ({e}); asking them to open a DM")
+            reply_to(
+                PORTFOLIO_PING_TOPIC,
+                "I can't DM you yet — tap my name → Start to open a private chat, then ask "
+                "again. I won't post account figures in the group.",
+                reply_to_message_id=msg_id,
+            )
 
 
 # ────────────────────────────────────────────────────────────────────

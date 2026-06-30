@@ -46,9 +46,17 @@ MACRO_NEWS_TOPIC = _env_int("TELEGRAM_MACRO_NEWS_TOPIC", 6)
 OPTIONS_INTEL_TOPIC = _env_int("TELEGRAM_OPTIONS_INTEL_TOPIC", 492)
 INSIDER_TRADING_TOPIC = _env_int("TELEGRAM_INSIDER_TRADING_TOPIC", 510)
 
-# Personal-chat fallback — not used by the production helpers below
-# but kept as a backstop for ad-hoc scripts that pre-date routing.
+# Personal DM — the owner's 1:1 chat with the bot. Private financial content
+# (balances, holdings, P&L, plan sizing, account-tailored ideas) is routed here
+# instead of the shared Finance supergroup, which has other members.
 PERSONAL_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "922547929")
+
+# Topics that ARE the personal lanes: Multi-Day-Swing (FinancePWA position +
+# account alerts) and Options-Intel (options activity, plan, scan digest). Every
+# message bound for these discloses something account-specific, so send() below
+# redirects them to PERSONAL_CHAT_ID. Impersonal lanes (Macro News, Insider
+# Trading) carry only market/news/flow data and stay in the group.
+_PRIVATE_TOPICS = {MULTI_DAY_SWING_TOPIC, OPTIONS_INTEL_TOPIC}
 
 
 def send(
@@ -80,6 +88,14 @@ def send(
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_BOT_TOKEN not set in environment")
+
+    # Privacy routing: a message bound for one of the personal topics (and not
+    # already pinned to an explicit chat) discloses account-specific data, so it
+    # goes to the owner's DM, not the shared group. Topics don't exist in a 1:1
+    # chat, so the thread id is dropped. An explicit chat_id always wins.
+    if chat_id is None and message_thread_id in _PRIVATE_TOPICS:
+        chat_id = PERSONAL_CHAT_ID
+        message_thread_id = None
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload: dict = {
@@ -1449,9 +1465,12 @@ def ping_unusual_options(
     if pwa_url:
         lines.append(f'📱 <a href="{_html.escape(pwa_url)}">Full alerts in PWA → Flow tab</a>')
 
+    # Market-wide scan (not the owner's positions) → impersonal intel, so it
+    # stays in the group. Explicit chat_id overrides the personal-topic redirect.
     return send(
         "\n".join(lines),
         parse_mode="HTML",
+        chat_id=FINANCE_CHAT_ID,
         message_thread_id=OPTIONS_INTEL_TOPIC,
         disable_web_page_preview=True,
     )
