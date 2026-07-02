@@ -324,12 +324,14 @@ def test_sizing_note_halves_when_degraded():
     assert "HALVED: MACRO_DEGRADED" in degraded
 
 
-def test_sizing_note_halves_premium_selling_on_sell_caution_not_long_call():
-    macro = {"vix": 15.0, "spx_above_200sma": True, "sell_caution": True}
-    csp = dos._sizing_note(_cand("CSP"), _STATES, macro)
-    assert "HALVED: SELL_CAUTION" in csp and "→" in csp
-    lc = dos._sizing_note(_cand("LONG_CALL"), _STATES, macro)
-    assert "HALVED" not in lc and "→" not in lc
+def test_sizing_note_not_halved_on_sell_caution_or_cash_priority():
+    # User directive 2026-06-30: regime/cash no longer cut the suggested size —
+    # only missing macro data (degraded) does. SELL_CAUTION / CASH_PRIORITY still
+    # ride as ⚠ tags, but the user sizes the trade.
+    for flag in ("sell_caution", "cash_priority"):
+        macro = {"vix": 15.0, "spx_above_200sma": True, flag: True}
+        csp = dos._sizing_note(_cand("CSP"), _STATES, macro)
+        assert "HALVED" not in csp and "→" not in csp, f"{flag} must not halve size"
 
 
 # ── MacroRow schema: column appended LAST ───────────────────────────────────

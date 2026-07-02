@@ -2178,50 +2178,43 @@ def _apply_macro_warnings(candidates: list[dict], macro: dict) -> int:
 def gate_digest_candidates(
     candidates: list[dict], macro: dict,
 ) -> tuple[list[dict], str | None]:
-    """SELL_CAUTION / CASH_PRIORITY digest gate (user-approved 2026-06-10).
+    """Informational premium-selling overlay for the digest (NO LONGER a gate).
 
-    The paper executor refuses premium selling under GEX SELL_CAUTION — the
-    human-facing Telegram digest had no such brake, which is how short-vol
-    recs kept flowing into the 06-05..06-09 selloff. Under either flag this
-    DROPS the premium-selling candidates from the digest and returns a banner
-    explaining the silence; debit/long ideas (LONG_CALL, PMCC) pass through.
-    The Sheet/PWA still carry the full tagged+halved candidate set — the gate
-    applies only to the push channel the user trades from.
+    History: this used to DROP premium-selling ideas from the Telegram digest
+    under GEX SELL_CAUTION / posture CASH_PRIORITY (added after short-vol recs
+    flowed into the 06-05..06-09 selloff). Per user directive 2026-06-30 it no
+    longer suppresses anything — the user decides. Every idea flows to the digest
+    with its ⚠ SELL_CAUTION / ⚠ CASH_PRIORITY tags; when a caution flag is active
+    we only PREPEND a heads-up banner so the risk-off / low-cash context is
+    explicit. Nothing is hidden.
 
-    Returns (kept_candidates, banner_or_None).
+    Returns (all_candidates, banner_or_None).
     """
     reasons = []
     if macro.get("sell_caution"):
         reasons.append("GEX SELL_CAUTION")
     if macro.get("cash_priority"):
         reasons.append("posture CASH_PRIORITY")
-    if not reasons:
+    n_prem = sum(1 for c in candidates
+                 if str(c.get("strategy") or "").upper() in PREMIUM_SELLING_STRATS)
+    if not reasons or n_prem == 0:
         return candidates, None
-
-    kept = [c for c in candidates
-            if str(c.get("strategy") or "").upper() not in PREMIUM_SELLING_STRATS]
-    n_suppressed = len(candidates) - len(kept)
-    if n_suppressed == 0:
-        return candidates, None
-    banner = (f"🔇 {n_suppressed} premium-selling idea"
-              f"{'s' if n_suppressed != 1 else ''} suppressed — {' + '.join(reasons)}. "
-              "Standing down new short premium is the discipline, not a glitch. "
-              "Full tagged list stays in the PWA.")
-    return kept, banner
+    banner = (f"⚠️ Heads-up — {' + '.join(reasons)}. Showing all {n_prem} "
+              f"premium-selling idea{'s' if n_prem != 1 else ''} anyway; sizing and "
+              "whether to sell are your call.")
+    return candidates, banner
 
 
 def _halve_reasons(strategy: str, macro: dict) -> list[str]:
     """Why this candidate's suggested contract count gets halved ([] = no halve).
-    degraded → halve EVERYTHING (the gate couldn't verify VIX / SPX-200dma);
-    SELL_CAUTION / CASH_PRIORITY → halve the premium-selling strategies."""
+    degraded → halve EVERYTHING: the gate couldn't verify VIX / SPX-200dma, so
+    the suggested size is conservative out of honest uncertainty (missing data),
+    not a market view. Regime/cash no longer halve (user directive 2026-06-30):
+    SELL_CAUTION / CASH_PRIORITY inform via tags, but the user sizes the trade —
+    the system does not cut it for them. `strategy` kept for call-site stability."""
     reasons = []
     if macro.get("degraded"):
         reasons.append("MACRO_DEGRADED")
-    if str(strategy or "").upper() in PREMIUM_SELLING_STRATS:
-        if macro.get("sell_caution"):
-            reasons.append("SELL_CAUTION")
-        if macro.get("cash_priority"):
-            reasons.append("CASH_PRIORITY")
     return reasons
 
 
