@@ -128,15 +128,62 @@ def macro_sizing_context(macro: dict) -> tuple[float, bool, bool]:
 
 
 def income_skip_reason(strat: str, gex_caution: bool, blackout_event: dict | None) -> str | None:
-    """Pre-placement gates for NEW premium-selling legs (None = proceed).
-    Mirrors: GEX SELL_CAUTION skip + macro event blackout (high-impact US event
-    inside 48h → don't open fresh short premium into FOMC/CPI/NFP)."""
-    if strat in PREMIUM_SELLING:
-        if gex_caution:
-            return "skipped:GEX SELL_CAUTION"
-        if blackout_event:
-            return "skipped:EVENT_BLACKOUT"
+    """Pre-placement gate for NEW premium-selling legs (None = proceed).
+
+    Event blackout ONLY: a high-impact US event (FOMC/CPI/NFP) inside 48h → don't
+    open fresh short premium into it. GEX SELL_CAUTION no longer skips (user
+    directive 2026-06-30): the paper book now mirrors the ungated recommendation
+    policy — premium-selling proceeds in a cautious tape, and exit discipline
+    (src.paper_exits: 50% take / 2x stop / 21-DTE) manages the risk in place of a
+    hard entry brake. `gex_caution` is surfaced as an informational note at the
+    call site."""
+    if strat in PREMIUM_SELLING and blackout_event:
+        return "skipped:EVENT_BLACKOUT"
     return None
+
+
+def manage_exits(alpaca, today: "date", execute: bool) -> int:
+    """Close FinancePWA's OWN short-premium legs per the mechanical exit rules
+    (50% take-profit / 2x-credit stop / 21-DTE). Returns the number of closes
+    submitted (0 in dry-run).
+
+    SAFETY: only symbols in `financepwa_symbols` (legs whose opening order carried
+    the `casaa-` client_order_id) are ever touched — so this can never close a
+    position belonging to another bot in the shared paper account (e.g. ZeroDTE's
+    SPY 0-DTE). Only SHORT option legs (qty<0) are managed; equities and long legs
+    pass through. Spread long legs are left in place (defined-risk, harmless on
+    paper) — full-spread cleanup is a follow-up.
+    """
+    from src.paper_exits import plan_exits
+    try:
+        orders = alpaca.get_orders(status="all", limit=500)
+        casaa_syms = alpaca.financepwa_symbols(orders)
+        positions = alpaca.get_positions()
+    except Exception as e:
+        print(f"  (exit check skipped — Alpaca read failed: {e})")
+        return 0
+    intents = plan_exits(positions, casaa_syms, today=today)
+    if not intents:
+        print("  No casaa-* short legs at a take / stop / 21-DTE trigger.")
+        return 0
+    existing = {o.get("client_order_id") for o in orders}
+    tag = {"take_profit": "💰 TAKE 50%", "stop": "🛑 STOP 2x", "dte_close": "⏳ 21-DTE"}
+    closed = 0
+    for it in intents:
+        coid = f"casaa-exit-{today.isoformat()}-{it.symbol}"[:48]
+        print(f"  EXIT {tag.get(it.action, it.action):10} {it.symbol} ×{it.qty} "
+              f"(captured {it.captured_pct:+.0%}, {it.dte}DTE)")
+        if not execute:
+            continue
+        if coid in existing:
+            print(f"    already submitted ({coid}) — skip")
+            continue
+        try:
+            alpaca.submit_option_order(it.symbol, it.qty, "buy", client_order_id=coid)
+            closed += 1
+        except Exception as e:
+            print(f"    close FAILED for {it.symbol}: {e}")
+    return closed
 
 
 def norm_expiry(e: str) -> str:
@@ -384,9 +431,21 @@ def main() -> int:
               "macro tab; sizing HALVED (0.5× CAUTION-equivalent), never full-size.")
     if gexg.get("note"):
         print(f"  GEX: {gexg['note']}")
+    if gex_caution:
+        print("  ℹ GEX SELL_CAUTION — informational only; premium-selling proceeds "
+              "(ungated policy), risk managed by exit discipline (50% / 2x / 21-DTE).")
     if blackout_event:
         print(f"  ⛔ EVENT BLACKOUT: {blackout_event.get('event', '?')} in "
               f"{blackout_event.get('_minutes_until', '?')}min — premium-selling legs will be skipped")
+
+    # ── Exit management FIRST — realize profit / cut losers / roll 21-DTE on our
+    # own open legs BEFORE opening anything new (fixes the round-trip leak the
+    # MAE/MFE audit found). Runs even when today has no new plan rows.
+    from src import alpaca as _alpaca_exits
+    print("\n— Exit management (take-profit 50% / stop 2x / 21-DTE) —")
+    manage_exits(_alpaca_exits, date.today(), args.execute)
+    print()
+
     if not plan_rows:
         print("No daily_plan rows for today (run build_daily_plan.py first). Nothing to do.")
         return 0
@@ -438,8 +497,7 @@ def main() -> int:
             skip = income_skip_reason(strat, gex_caution, blackout_event)
             if skip:
                 statuses[key] = skip
-                detail = ("GEX SELL_CAUTION (short gamma)" if "GEX" in skip else
-                          f"event blackout ({(blackout_event or {}).get('event', '?')} <48h)")
+                detail = f"event blackout ({(blackout_event or {}).get('event', '?')} <48h)"
                 print(f"  SKIP {strat:10} {tk:6} — {detail}")
                 continue
             pick = scan_idx.get((tk, strat))

@@ -225,15 +225,18 @@ def test_contracts_for_degraded_halves_count():
 
 # ── event blackout: NEW premium legs skipped inside 48h of high-impact ──────
 
-def test_income_skip_reason_gex_and_blackout():
+def test_income_skip_reason_blackout_only_gex_no_longer_skips():
+    # User directive 2026-06-30: GEX SELL_CAUTION no longer skips new premium
+    # (paper mirrors the ungated policy; exit discipline manages the risk). Only
+    # the event blackout still gates.
     ev = {"event": "FOMC", "_minutes_until": 120}
-    assert ex.income_skip_reason("CSP", True, None) == "skipped:GEX SELL_CAUTION"
+    assert ex.income_skip_reason("CSP", True, None) is None       # GEX alone → proceed
     assert ex.income_skip_reason("CSP", False, ev) == "skipped:EVENT_BLACKOUT"
     for strat in ("CC", "PCS", "CCS", "IC"):
         assert ex.income_skip_reason(strat, False, ev) == "skipped:EVENT_BLACKOUT"
-    # GEX caution takes precedence when both fire (existing behavior preserved)
-    assert ex.income_skip_reason("IC", True, ev) == "skipped:GEX SELL_CAUTION"
-    # Debit strategies are NOT premium selling — unaffected by either gate
+    # Blackout gates even when GEX caution is also on (GEX itself is now a no-op)
+    assert ex.income_skip_reason("IC", True, ev) == "skipped:EVENT_BLACKOUT"
+    # Debit strategies are NOT premium selling — unaffected by the gate
     assert ex.income_skip_reason("LONG_CALL", True, ev) is None
     assert ex.income_skip_reason("CSP", False, None) is None
 
