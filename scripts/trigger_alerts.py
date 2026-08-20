@@ -83,6 +83,56 @@ CLOSE_THRESHOLD_PCT = 0.03
 # Public PWA URL for Telegram push. Override via env if rebuilt elsewhere.
 PWA_URL = "https://xynkro.github.io/CasaaFinance/"
 
+# ── Repeat-alert cooldown (2026-08-20 audit fix) ────────────────────────────
+# `decision_key` embeds the DATE, so every new day minted a fresh key with no
+# memory of yesterday's page. Grading the 18 alerts that ever fired found 9
+# genuinely wrong — and SIX of those nine were three names repeating: META TRIM
+# x3 while META climbed (+4.1%, +4.6%, +1.2% against), XLP BUY_DIP x3 into a
+# falling knife, UNH CC x3 into a rising name. The cooldown keys on
+# (account, ticker, strategy) WITHOUT the date so a name that already paged
+# cannot re-page while the same thesis is still playing out.
+# 0 disables it.
+ALERT_COOLDOWN_DAYS = int(os.environ.get("ALERT_COOLDOWN_DAYS", "7") or 7)
+
+
+def cooldown_blocker(
+    ticker: str, account: str, strategy: str,
+    prior_alerts: dict[str, dict], today: str,
+    cooldown_days: int = ALERT_COOLDOWN_DAYS,
+) -> str | None:
+    """Date of the most recent page for this (account, ticker, strategy) when it
+    falls inside the cooldown window, else None (None = free to fire).
+
+    `today` and the ledger's `last_alert_at` are SGT ('YYYY-MM-DD...'); only the
+    date half is compared, so the window is whole days. FAILS OPEN — an
+    unparseable timestamp returns None, because a duplicate page is a far better
+    failure than silently swallowing every alert.
+    """
+    if cooldown_days <= 0:
+        return None
+    try:
+        today_d = date(*(int(p) for p in today[:10].split("-")))
+    except (ValueError, TypeError):
+        return None
+    tk, ac, st = ticker.upper(), account.lower(), strategy.upper()
+    latest: str | None = None
+    for rec in prior_alerts.values():
+        if (str(rec.get("ticker") or "").upper() != tk
+                or str(rec.get("account") or "").lower() != ac
+                or str(rec.get("strategy") or "").upper() != st):
+            continue
+        at = str(rec.get("last_alert_at") or "").strip()
+        if not at:
+            continue
+        try:
+            d = date(*(int(p) for p in at[:10].split("-")))
+        except (ValueError, TypeError):
+            continue
+        if (today_d - d).days <= cooldown_days and d <= today_d:
+            if latest is None or at[:10] > latest:
+                latest = at[:10]
+    return latest
+
 # ────────────────────────────────────────────────────────────────────
 # Alert-lane tuning — module-level so tests can import them.
 # ────────────────────────────────────────────────────────────────────
@@ -1423,6 +1473,7 @@ def main() -> int:
     fires: list[tuple[Decision, TriggerEval, float]] = []
     soft_fires: list[tuple[Decision, TriggerEval, float]] = []
     skipped: list[tuple[Decision, str]] = []
+    cooled: list[tuple[Decision, str]] = []   # suppressed by the repeat-alert cooldown
 
     for d in decisions:
         cur = live_prices.get(d.ticker.upper())
@@ -1448,6 +1499,20 @@ def main() -> int:
             and prior_alert_state != "act_now"
             and prior_state != "act_now"
         ) or (args.force_resend and ev.state == "act_now")
+
+        # Repeat-alert cooldown: this (account, ticker, strategy) already paged
+        # within ALERT_COOLDOWN_DAYS. `decision_key` embeds the date, so without
+        # this a name re-pages every day its thesis keeps failing (META TRIM x3,
+        # XLP BUY_DIP x3, UNH CC x3). --force-resend bypasses it deliberately.
+        if should_fire and not args.force_resend:
+            blocked_on = cooldown_blocker(
+                d.ticker, d.account, d.strategy, prior_alerts, now_iso[:10])
+            if blocked_on:
+                should_fire = False
+                cooled.append((d, blocked_on))
+                logger.info(
+                    f"  ⏳ cooldown: {d.ticker} {d.strategy} ({d.account}) already paged "
+                    f"{blocked_on} — inside the {ALERT_COOLDOWN_DAYS}d window, not re-firing")
 
         # Soft-fire criteria (opt-in): NEW transition into close from
         # dormant. Suppress repeats by checking prior_alert_state too,

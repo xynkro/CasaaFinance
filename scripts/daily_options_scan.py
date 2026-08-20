@@ -25,6 +25,7 @@ import argparse
 import json
 import logging
 import math
+import os
 import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -2147,6 +2148,54 @@ _DEFINED_OR_DEBIT = {"PCS", "CCS", "IC", "PMCC", "LONG_CALL", "LONG_PUT"}
 # (HARVEST_CSP is the internal alias for discovery CSPs).
 PREMIUM_SELLING_STRATS = {"CSP", "CC", "PCS", "CCS", "IC", "HARVEST_CSP"}
 
+# ── Post-audit policy (2026-08-20) ──────────────────────────────────────────
+# Grading 2,328 evaluated recommendations (signal_outcomes, Apr–Aug 2026) showed
+# the defined-risk spreads lose systematically, and in EVERY month scanned:
+#     PCS  36% win, -4.7% avg forward return   (n=186)
+#     CCS  40% win, -3.5%                      (n=126)
+#     IC   39% win, -3.6%                      (n=211)
+# versus the wheel, which works: CSP 81% win / +1.4%, CC 62% / +2.8%. PCS is also
+# the strategy that lost real money in the June selloff. They are therefore OFF by
+# default. This is a policy default, not a lock — set SPREADS_ENABLED=true to
+# bring them back (the user decides; see the ungate directive of 2026-06-30).
+DISABLED_SPREAD_STRATS = {"PCS", "CCS", "IC"}
+SPREADS_ENABLED = os.environ.get("SPREADS_ENABLED", "").lower() in ("true", "1", "yes")
+
+
+def filter_disabled_strategies(
+    candidates: list[dict], spreads_enabled: bool = SPREADS_ENABLED,
+) -> tuple[list[dict], int]:
+    """Drop the losing defined-risk spreads. Returns (kept, n_dropped).
+
+    A candidate with a missing/None strategy is KEPT — we only ever drop a
+    strategy we can positively identify as one of the disabled ones.
+    """
+    if spreads_enabled:
+        return candidates, 0
+    kept = [c for c in candidates
+            if str(c.get("strategy") or "").upper() not in DISABLED_SPREAD_STRATS]
+    return kept, len(candidates) - len(kept)
+
+
+def ranking_key(c: dict) -> float:
+    """Sort key for candidate ranking: annualised yield.
+
+    Deliberately NOT `composite_score`. Grading the same 2,328 evaluations found
+    the composite is ANTI-predictive — the highest-score quartile averaged -1.77%
+    forward return versus +1.62% for the lowest, a monotonic decline across all
+    four quartiles (correlation -0.089). Since the digest pushes top-ranked ideas,
+    ranking by composite was actively surfacing the worst quartile.
+
+    Yield is not a proven predictor either — this is "stop using a measurably bad
+    ranker", not "we found a good one". It at least has an economic rationale
+    (premium per unit of collateral) and matches how the watchlist picks were
+    already ordered. composite_score is still carried on every row for display.
+    """
+    try:
+        return float(c.get("annual_yield_pct") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
 
 def _macro_warning_tags(macro: dict) -> str:
     """Visible warning tags from the macro gate's gex/posture overlay."""
@@ -2496,11 +2545,22 @@ def main() -> int:
     discovery_count = len(all_candidates) - watchlist_count
     logger.info(f"  Discovery scan: {discovery_count} harvest CSP candidates")
 
-    # Sort: HARVEST_CSP by conviction desc, others by yield desc
+    # Post-audit policy: drop the losing defined-risk spreads (PCS/CCS/IC) unless
+    # SPREADS_ENABLED=true. See DISABLED_SPREAD_STRATS for the evidence.
+    all_candidates, n_dropped = filter_disabled_strategies(all_candidates)
+    if n_dropped:
+        logger.info(
+            f"  Spread policy: dropped {n_dropped} PCS/CCS/IC candidate(s) — they graded "
+            f"36-40% win / -3.5 to -4.7% avg fwd over 523 evaluations. "
+            f"Set SPREADS_ENABLED=true to re-enable.")
+
+    # Sort BOTH pools by annualised yield. Previously harvest ranked on the
+    # composite conviction score, which grading proved anti-predictive (see
+    # ranking_key).
     harvest_picks = [c for c in all_candidates if c.get("strategy") == "HARVEST_CSP"]
     other_picks = [c for c in all_candidates if c.get("strategy") != "HARVEST_CSP"]
-    harvest_picks.sort(key=lambda c: c.get("_conviction", 0), reverse=True)
-    other_picks.sort(key=lambda c: c["annual_yield_pct"], reverse=True)
+    harvest_picks.sort(key=ranking_key, reverse=True)
+    other_picks.sort(key=ranking_key, reverse=True)
 
     logger.info(f"Total: {len(all_candidates)} candidates ({len(other_picks)} watchlist + {len(harvest_picks)} harvest)")
 
