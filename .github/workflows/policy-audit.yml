@@ -1,0 +1,64 @@
+name: Policy Audit — Monthly Edge Re-check
+
+# Re-runs the 2026-08-20 audit that set the current scan policy, so the policy
+# is re-tested against fresh data instead of remembered:
+#   • per-strategy win rate / forward return  (are spreads still losing? is the
+#     wheel still working?)
+#   • composite_score quartiles + correlation (is it still anti-predictive?)
+#   • alert quality of the pages actually sent (right / wrong / noise)
+# Every figure prints beside the 2026-08-20 baseline so drift is obvious.
+#
+# Also refreshes the mae_mfe tab (exit-quality: profit reached vs profit kept),
+# which was previously a one-shot script and went stale.
+#
+# Read-only against the Sheet apart from the mae_mfe tab it owns. The Telegram
+# summary names strategies/positions, so it goes to the DM — never the group.
+
+on:
+  schedule:
+    # 14:00 UTC on the 1st = 22:00 SGT — after the weekend, before the week starts
+    - cron: "0 14 1 * *"
+  workflow_dispatch:
+    inputs:
+      telegram:
+        description: "DM the summary"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: policy-audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OAUTH_TOKEN_JSON:   ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:           ${{ secrets.SHEET_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Refresh MAE/MFE exit-quality tab
+        # Non-fatal: a thin paper book shouldn't fail the audit run.
+        continue-on-error: true
+        run: python scripts/mae_mfe_analysis.py
+
+      - name: Run policy audit
+        run: |
+          ARGS=""
+          if [ "${{ inputs.telegram }}" != "false" ]; then ARGS="--telegram"; fi
+          python scripts/policy_audit.py $ARGS
