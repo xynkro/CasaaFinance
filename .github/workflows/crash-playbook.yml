@@ -1,0 +1,55 @@
+name: Crash Playbook — Weekly Hedge & Tier Check
+
+# Answers "do we actually have a plan?" every week, while calm:
+#   • HEDGE DRIFT — is the protective sleeve on, at the weight the plan states?
+#     (First run, 2026-08-24, found VIXM — the only convex crash hedge — at 1.6%
+#     of book against a 5% target.)
+#   • DRAWDOWN TIER — where is SPX vs its trailing high, and what was the
+#     pre-committed response for that tier?
+#
+# Reports state only. It never places an order and never invents a target; the
+# tier actions are pre-commitments set in scripts/crash_playbook.py.
+#
+# The summary names holdings and account cash, so it goes to the DM — never the
+# shared Finance group.
+
+on:
+  schedule:
+    # 14:00 UTC Sunday = 22:00 SGT Sunday — same slot as the other weekly checks
+    - cron: "0 14 * * 0"
+  workflow_dispatch:
+    inputs:
+      telegram:
+        description: "DM the playbook"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crash-playbook
+  cancel-in-progress: true
+
+jobs:
+  playbook:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OAUTH_TOKEN_JSON:   ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:           ${{ secrets.SHEET_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Run crash playbook
+        run: |
+          ARGS=""
+          if [ "${{ inputs.telegram }}" != "false" ]; then ARGS="--telegram"; fi
+          python scripts/crash_playbook.py $ARGS

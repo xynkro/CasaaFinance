@@ -196,7 +196,16 @@ def replace_today_rows(client: gspread.Client, tab_name: str,
     from datetime import date
     rows_list = [list(r) for r in new_rows]
     if today_prefix is None:
-        today_prefix = date.today().isoformat()
+        # Derive the prefix from the BATCH being written, never the wall clock.
+        # Rows are stamped SGT (now_sgt_iso) while CI runs UTC, so throughout US
+        # market hours (21:30-04:00 SGT) `date.today()` was a full day BEHIND the
+        # row's own date stamp. The prefix therefore never matched, dedup silently
+        # never fired, and every 30-min grab appended instead of replacing —
+        # positions_sarah reached 10x duplicate rows per ticker per day (180 rows
+        # for 18 tickers), inflating every downstream sum tenfold. Using the
+        # batch's own date makes this correct under any runner timezone.
+        first = str(rows_list[0][0]).strip() if (rows_list and rows_list[0]) else ""
+        today_prefix = first[:10] if len(first) >= 10 else date.today().isoformat()
     ss = _open_sheet(client)
     ws = ss.worksheet(tab_name)
     existing = ws.get_all_values()
