@@ -524,6 +524,10 @@ class UoaAlertRow:
         "volume", "open_interest", "vol_oi_ratio", "implied_vol",
         "notional", "moneyness", "underlying_last", "option_price",
         "severity", "detail",
+        # Quality layer appended 2026-08-25 — APPEND-ONLY so existing consumers
+        # (PWA Flow tab, Telegram digest) keep their column positions.
+        "bid", "ask", "last_price", "aggressor", "structure", "bias",
+        "extrinsic_pct", "quality",
     ]
 
     date: str
@@ -543,6 +547,14 @@ class UoaAlertRow:
     option_price: float     # mid price per share (bid+ask)/2
     severity: int           # 1=notable, 2=significant, 3=extreme
     detail: str             # human-readable explanation
+    bid: float = 0.0
+    ask: float = 0.0
+    last_price: float = 0.0
+    aggressor: str = "UNKNOWN"   # BUY_INITIATED | SELL_INITIATED | MID | UNKNOWN
+    structure: str = "UNCLEAR"   # LONG_CALL | SHORT_CALL | LONG_PUT | SHORT_PUT
+    bias: str = "UNKNOWN"        # BULLISH | BEARISH | NEUTRAL | UNKNOWN
+    extrinsic_pct: float = 0.0   # time value as % of premium
+    quality: int = 0             # 0-100 confidence this reflects a VIEW
 
     def to_row(self) -> List[str]:
         return [
@@ -553,6 +565,9 @@ class UoaAlertRow:
             _num(self.notional, 0), self.moneyness,
             _num(self.underlying_last, 2), _num(self.option_price, 2),
             str(self.severity), self.detail,
+            _num(self.bid, 2), _num(self.ask, 2), _num(self.last_price, 2),
+            self.aggressor, self.structure, self.bias,
+            _num(self.extrinsic_pct, 1), str(self.quality),
         ]
 
 

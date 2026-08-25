@@ -1,0 +1,40 @@
+name: Dupe Guard — Daily Sheet Invariant
+
+# Catches a regression of the SGT/UTC dedup bug, which silently 10x-duplicated
+# positions_sarah for months with no error and no failing test. Asserts the
+# invariant directly: one write-time per calendar day, per tab. Red job + DM on
+# failure. Runs after the US session closes so the day's grabs are all in.
+
+on:
+  schedule:
+    # 21:00 UTC = 05:00 SGT next day — after the US close (04:00 SGT), which is
+    # exactly the window where the timezone mismatch used to fire.
+    - cron: "0 21 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dupe-guard
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OAUTH_TOKEN_JSON:   ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:           ${{ secrets.SHEET_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Check sheet invariants
+        run: python scripts/dupe_guard.py --telegram --days 5

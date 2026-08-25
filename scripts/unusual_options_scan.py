@@ -34,6 +34,10 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from src.logging_util import setup_logging  # noqa: E402
+from src.uoa_quality import (  # noqa: E402
+    aggressor_side, directional_read, extrinsic_pct, is_near_parity,
+    quality_score, safe_vol_oi,
+)
 
 
 # ─── Scanner parameters ────────────────────────────────────────────────────
@@ -47,6 +51,12 @@ PC_SKEW_THRESHOLD  = 3.0    # put/call or call/put ratio to flag
 MAX_ALERTS         = 30     # max alerts per day
 TG_ALERTS          = 10     # max alerts sent to Telegram
 MAX_EXPIRATIONS    = 6      # scan nearest N expirations per ticker
+# Quality gates (2026-08-25). Reviewing the 08-24 digest, 4 of the 10 loudest
+# alerts were deep-ITM PARITY contracts (ARM $430 put carried $0.85 of time
+# value) — stock substitutes, not views — and 3 ranked loudest only because
+# their OI was 1-4, so Vol/OI exploded arithmetically. Both are now filtered.
+DROP_NEAR_PARITY   = True   # skip contracts whose time value is < 5% of premium
+MIN_QUALITY        = 25     # 0-100; below this a print is noise, not a view
 
 
 # ─── Default universe: watchlist + high-activity names ──────────────────────
@@ -87,6 +97,16 @@ class UoaAlert:
     option_price: float    # mid price per share (bid+ask)/2
     detail: str            # human-readable explanation
     severity: int          # 1-3 (1=notable, 2=significant, 3=extreme)
+    # Quality layer — the scanner already pulled bid/ask/lastPrice from yfinance
+    # and discarded them; persisting them is what makes buy-vs-sell answerable.
+    bid: float = 0.0
+    ask: float = 0.0
+    last_price: float = 0.0
+    aggressor: str = "UNKNOWN"      # BUY_INITIATED | SELL_INITIATED | MID | UNKNOWN
+    structure: str = "UNCLEAR"      # LONG_CALL | SHORT_CALL | LONG_PUT | SHORT_PUT
+    bias: str = "UNKNOWN"           # BULLISH | BEARISH | NEUTRAL | UNKNOWN
+    extrinsic_pct: float = 0.0      # time value as % of premium
+    quality: int = 0                # 0-100 confidence this reflects a VIEW
 
     def to_dict(self) -> dict:
         return {
@@ -101,6 +121,11 @@ class UoaAlert:
             "underlying_last": round(self.underlying_last, 2),
             "option_price": round(self.option_price, 2),
             "detail": self.detail, "severity": self.severity,
+            "bid": round(self.bid, 2), "ask": round(self.ask, 2),
+            "last_price": round(self.last_price, 2),
+            "aggressor": self.aggressor, "structure": self.structure,
+            "bias": self.bias, "extrinsic_pct": round(self.extrinsic_pct, 1),
+            "quality": self.quality,
         }
 
 
@@ -182,6 +207,11 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
             df["impliedVolatility"] = pd.to_numeric(df["impliedVolatility"], errors="coerce").fillna(0)
             df["bid"] = pd.to_numeric(df.get("bid", 0), errors="coerce").fillna(0)
             df["ask"] = pd.to_numeric(df.get("ask", 0), errors="coerce").fillna(0)
+            # lastPrice needs the same numeric coercion as bid/ask: it feeds the
+            # aggressor-side read, and a NaN there would silently classify every
+            # print as "MID" instead of UNKNOWN.
+            df["lastPrice"] = pd.to_numeric(
+                df.get("lastPrice", 0), errors="coerce").fillna(0)
             df["mid"] = (df["bid"] + df["ask"]) / 2
             df.loc[df["mid"] <= 0, "mid"] = pd.to_numeric(
                 df.get("lastPrice", 0), errors="coerce"
@@ -213,6 +243,27 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                 moneyness = _classify_moneyness(strike, price, side_name)
                 sev = _severity(vol_oi, vol, notional)
 
+                # ── Quality layer ────────────────────────────────────────────
+                bid = float(row.get("bid", 0) or 0)
+                ask = float(row.get("ask", 0) or 0)
+                last_px = float(row.get("lastPrice", 0) or 0)
+                ext_pct = extrinsic_pct(side_name, strike, price, mid)
+                # Parity contracts (deep ITM, ~100 delta, no time value) are
+                # stock substitutes / financing legs, never a directional view.
+                if DROP_NEAR_PARITY and is_near_parity(side_name, strike, price, mid):
+                    continue
+                aggr = aggressor_side(last_px, bid, ask)
+                structure, bias = directional_read(side_name, aggr)
+                qual = quality_score(
+                    extrinsic_pct_val=ext_pct,
+                    vol_oi=safe_vol_oi(vol, oi),   # None when OI too small to trust
+                    aggressor=aggr, notional=notional, persist_days=1)
+                if qual < MIN_QUALITY:
+                    continue
+                _q = dict(bid=bid, ask=ask, last_price=last_px, aggressor=aggr,
+                          structure=structure, bias=bias,
+                          extrinsic_pct=ext_pct, quality=qual)
+
                 # ── Check 1: Volume/OI spike ──
                 if vol_oi >= VOL_OI_THRESHOLD:
                     alerts.append(UoaAlert(
@@ -224,7 +275,7 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                         underlying_last=price, option_price=mid,
                         detail=f"Vol/OI {vol_oi:.1f}x — {vol:,} contracts vs {oi:,} OI "
                                f"(${notional:,.0f} notional)",
-                        severity=sev,
+                        severity=sev, **_q,
                     ))
 
                 # ── Check 2: Strike concentration ──
@@ -300,7 +351,11 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
             seen[key] = a
     deduped.extend(seen.values())
 
-    return sorted(deduped, key=lambda a: (a.severity, a.notional), reverse=True)
+    # Rank by QUALITY first. Ranking by (severity, notional) is what pushed the
+    # parity trades to the top of the 08-24 digest: they were the largest and
+    # noisiest prints in the list while carrying no directional information.
+    return sorted(deduped, key=lambda a: (a.quality, a.severity, a.notional),
+                  reverse=True)
 
 
 def main() -> int:
