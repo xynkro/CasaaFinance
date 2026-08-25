@@ -49,3 +49,8 @@ docs/2026-06-08-quant-audit-findings.json
 # stray large media in repo root
 51132802981_e748ed1ebd_o.jpg
 docs/audit-build/
+
+# Sheet backups written by scripts/cleanup_positions_dupes.py --execute.
+# Full portfolio snapshots (holdings, NLV) — this repo is PUBLIC, never commit them.
+.state/
+.state/**
