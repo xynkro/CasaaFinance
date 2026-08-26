@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src.uoa_quality import (
-    aggressor_side, classify_open_close, directional_read, extrinsic_pct,
+    adverse_flow, aggressor_side, classify_open_close, directional_read, extrinsic_pct,
     extrinsic_value, is_near_parity, persistence, quality_score, safe_vol_oi,
 )
 
@@ -162,3 +162,67 @@ def test_score_is_bounded():
     assert 0 <= quality_score(extrinsic_pct_val=999, vol_oi=999,
                               aggressor="BUY_INITIATED", notional=1e12,
                               persist_days=99) <= 100
+
+
+# ── adverse_flow: UOA as a risk filter on the wheel ─────────────────────────
+def _a(date, ticker, structure, quality=60, volume=1000, notional=2e6):
+    return {"date": date, "ticker": ticker, "structure": structure,
+            "quality": quality, "volume": volume, "notional": notional}
+
+
+def test_csp_warned_when_someone_is_buying_puts():
+    """Selling a put = short downside. Buy-initiated puts = they want that downside."""
+    alerts = [_a("2026-08-24", "NVDA", "LONG_PUT")]
+    w = adverse_flow("CSP", "NVDA", alerts)
+    assert w and w["level"] == "WARN" and w["structure"] == "LONG_PUT"
+    assert "downside" in w["reason"]
+
+
+def test_repeat_days_escalate_to_alert():
+    alerts = [_a("2026-08-22", "NVDA", "LONG_PUT"), _a("2026-08-24", "NVDA", "LONG_PUT")]
+    w = adverse_flow("CSP", "NVDA", alerts)
+    assert w["level"] == "ALERT" and w["days"] == 2
+
+
+def test_cc_warned_on_call_buying_not_put_buying():
+    """Covered call = short upside; only call buying conflicts."""
+    assert adverse_flow("CC", "NVDA", [_a("2026-08-24", "NVDA", "LONG_CALL")])
+    assert adverse_flow("CC", "NVDA", [_a("2026-08-24", "NVDA", "LONG_PUT")]) is None
+
+
+def test_csp_not_warned_by_call_buying():
+    assert adverse_flow("CSP", "NVDA", [_a("2026-08-24", "NVDA", "LONG_CALL")]) is None
+
+
+def test_someone_selling_puts_is_not_adverse_to_a_csp():
+    """SHORT_PUT flow agrees with our position — no conflict."""
+    assert adverse_flow("CSP", "NVDA", [_a("2026-08-24", "NVDA", "SHORT_PUT")]) is None
+
+
+def test_harvest_csp_alias_is_covered():
+    assert adverse_flow("HARVEST_CSP", "NVDA", [_a("2026-08-24", "NVDA", "LONG_PUT")])
+
+
+def test_low_quality_flow_is_ignored():
+    assert adverse_flow("CSP", "NVDA", [_a("2026-08-24", "NVDA", "LONG_PUT", quality=10)]) is None
+
+
+def test_other_tickers_do_not_warn():
+    assert adverse_flow("CSP", "AMD", [_a("2026-08-24", "NVDA", "LONG_PUT")]) is None
+
+
+def test_non_premium_strategy_never_warns():
+    assert adverse_flow("LONG_CALL", "NVDA", [_a("2026-08-24", "NVDA", "LONG_PUT")]) is None
+
+
+def test_lookback_window_is_respected():
+    alerts = [_a("2026-07-01", "NVDA", "LONG_PUT")]
+    assert adverse_flow("CSP", "NVDA", alerts, recent_days=["2026-08-24"]) is None
+    assert adverse_flow("CSP", "NVDA", alerts, recent_days=["2026-07-01"])
+
+
+def test_aggregates_contracts_and_notional():
+    alerts = [_a("2026-08-23", "NVDA", "LONG_PUT", volume=1000, notional=2e6),
+              _a("2026-08-24", "NVDA", "LONG_PUT", volume=1500, notional=3e6)]
+    w = adverse_flow("CSP", "NVDA", alerts)
+    assert w["contracts"] == 2500 and w["notional"] == 5e6

@@ -177,3 +177,67 @@ def quality_score(*, extrinsic_pct_val: float, vol_oi: float | None,
     # Repetition across sessions (0-10).
     score += min(10, max(0, persist_days - 1) * 5)
     return max(0, min(100, score))
+
+
+# ── UOA as a RISK FILTER on the wheel ───────────────────────────────────────
+# The evidence says use this defensively, not as a new directional strategy.
+# The graded record is CSP 81% win / CC 62% versus directional alerts running
+# 1 right / 9 wrong. So the highest-value use of options flow is protecting the
+# premium-selling book, where being wrong only costs a skipped trade.
+#
+# The logic is a direct conflict-of-interest check. Selling a cash-secured put
+# is being SHORT downside; persistent buy-initiated PUT flow means someone with
+# size is paying up for exactly that downside. Selling a covered call is being
+# SHORT upside; persistent buy-initiated CALL flow is the mirror image.
+
+# Flow adverse to a short put (we are short downside; they are buying it).
+_ADVERSE = {"CSP": "LONG_PUT", "HARVEST_CSP": "LONG_PUT", "CC": "LONG_CALL"}
+
+WHEEL_MIN_QUALITY = 40     # ignore low-confidence prints entirely
+WHEEL_LOOKBACK_DAYS = 5    # a working week of flow
+
+
+def adverse_flow(strategy: str, ticker: str, alerts: list[dict], *,
+                 min_quality: int = WHEEL_MIN_QUALITY,
+                 recent_days: list[str] | None = None) -> dict | None:
+    """Warn when recent flow is adverse to a wheel leg. None = no conflict.
+
+    `alerts` are uoa_alerts rows carrying `structure` and `quality` (written by
+    the quality layer). `recent_days` bounds the window; when omitted every
+    supplied alert counts, so the caller controls the lookback.
+
+    Returns {level, structure, days, contracts, notional, reason} or None.
+    """
+    want = _ADVERSE.get((strategy or "").upper())
+    if not want:
+        return None                      # not a premium-selling leg
+    tk = (ticker or "").upper()
+    hits = []
+    for a in alerts:
+        if (a.get("ticker") or "").upper() != tk:
+            continue
+        if (a.get("structure") or "") != want:
+            continue
+        try:
+            if int(_f(a.get("quality"))) < min_quality:
+                continue
+        except (TypeError, ValueError):
+            continue
+        day = (a.get("date") or "")[:10]
+        if recent_days is not None and day not in recent_days:
+            continue
+        hits.append(a)
+    if not hits:
+        return None
+    days = sorted({(a.get("date") or "")[:10] for a in hits})
+    contracts = sum(int(_f(a.get("volume"))) for a in hits)
+    notional = sum(_f(a.get("notional")) for a in hits)
+    # Repetition across sessions is the discriminator: one print is plausibly a
+    # hedge, the same direction on several days is much harder to explain away.
+    level = "ALERT" if len(days) >= 2 else "WARN"
+    side = "downside" if want == "LONG_PUT" else "upside"
+    reason = (f"{len(hits)} {want} print(s) over {len(days)} day(s) — "
+              f"{contracts:,} contracts, ${notional:,.0f} notional. Someone is "
+              f"paying up for {side} in {tk} while this leg sells it.")
+    return {"level": level, "structure": want, "days": len(days),
+            "contracts": contracts, "notional": notional, "reason": reason}

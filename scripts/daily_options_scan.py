@@ -2224,6 +2224,36 @@ def _apply_macro_warnings(candidates: list[dict], macro: dict) -> int:
     return n
 
 
+def _apply_uoa_warnings(candidates: list[dict], uoa_alerts: list[dict],
+                        recent_days: list[str] | None = None) -> int:
+    """Tag wheel candidates whose ticker shows ADVERSE options flow.
+
+    Selling a cash-secured put is being short downside; persistent buy-initiated
+    PUT flow means size is paying up for exactly that downside. Covered calls are
+    the mirror. This is the defensive use of UOA — the graded record is CSP 81%
+    win / CC 62% versus directional alerts at 1 right / 9 wrong, so flow is worth
+    far more as a veto on premium selling than as a directional signal of its own.
+    Tags only; it never drops a candidate (the user decides).
+    """
+    if not uoa_alerts:
+        return 0
+    from src.uoa_quality import adverse_flow
+    n = 0
+    for c in candidates:
+        w = adverse_flow(str(c.get("strategy") or ""), str(c.get("ticker") or ""),
+                         uoa_alerts, recent_days=recent_days)
+        if not w:
+            continue
+        icon = "🟥" if w["level"] == "ALERT" else "🟧"
+        tag = f"{icon} ADVERSE FLOW: {w['structure']} x{w['days']}d"
+        notes = c.get("notes") or ""
+        c["notes"] = f"{tag} | {notes}" if notes else tag
+        c["uoa_adverse"] = w["level"]
+        c["uoa_adverse_reason"] = w["reason"]
+        n += 1
+    return n
+
+
 def gate_digest_candidates(
     candidates: list[dict], macro: dict,
 ) -> tuple[list[dict], str | None]:
@@ -2563,6 +2593,21 @@ def main() -> int:
     other_picks.sort(key=ranking_key, reverse=True)
 
     logger.info(f"Total: {len(all_candidates)} candidates ({len(other_picks)} watchlist + {len(harvest_picks)} harvest)")
+
+    # ── UOA adverse-flow tags: flag wheel legs whose ticker shows persistent
+    # OPPOSING option buying (see _apply_uoa_warnings). Best-effort — a missing
+    # or empty uoa_alerts tab must never abort the scan.
+    try:
+        _uoa_rows = _tab_dicts(ss, "uoa_alerts")
+        _recent = sorted({(r.get("date") or "")[:10] for r in _uoa_rows if r.get("date")})[-5:]
+        n_uoa = _apply_uoa_warnings(all_candidates, _uoa_rows, recent_days=_recent)
+        if n_uoa:
+            logger.warning(f"  ⚠ UOA adverse flow — tagged {n_uoa} wheel candidate(s) "
+                           f"whose ticker shows persistent opposing option buying")
+    except Exception as e:
+        # WARNING, not debug: a silent skip here is how a broken filter would go
+        # unnoticed for months (exactly the SGT/UTC failure mode).
+        logger.warning(f"  ⚠ UOA adverse-flow tagging SKIPPED: {type(e).__name__}: {e}")
 
     # ── Macro overlay: tag premium-selling candidates (sheet + Telegram both
     # read these notes). Tag + halve, never zero-out (pending user decision).
