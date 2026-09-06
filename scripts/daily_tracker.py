@@ -732,27 +732,33 @@ def push_to_sheet(results: dict):
         except Exception as e:
             print(f"  trades ledger write failed: {e}")
 
+    # UPSERT, never append. These five tabs are one-snapshot-per-day; appending
+    # stacked a fresh copy every run. src/sync.py:cmd_grab was fixed to use
+    # replace_today_rows but THIS writer was missed, so positions_sarah,
+    # snapshot_sarah and options kept accumulating ~3 copies/day while the
+    # caspar tabs self-healed (the 30-min grab replaced them later the same day).
+    # Found 2026-09-06 by the dupe guard, which had been failing daily since 09-02.
     snap_c = results["snap_caspar"]
     sh.ensure_headers(client, S.SnapshotCaspar.TAB_NAME, S.SnapshotCaspar.HEADERS)
-    sh.append_row(client, S.SnapshotCaspar.TAB_NAME, snap_c.to_row())
+    sh.replace_today_rows(client, S.SnapshotCaspar.TAB_NAME, [snap_c.to_row()])
 
     pos_c = results["pos_caspar"]
     sh.ensure_headers(client, "positions_caspar", S.PositionRow.HEADERS)
-    sh.append_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
+    sh.replace_today_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
 
     snap_s = results["snap_sarah"]
     sh.ensure_headers(client, S.SnapshotSarah.TAB_NAME, S.SnapshotSarah.HEADERS)
-    sh.append_row(client, S.SnapshotSarah.TAB_NAME, snap_s.to_row())
+    sh.replace_today_rows(client, S.SnapshotSarah.TAB_NAME, [snap_s.to_row()])
 
     pos_s = results["pos_sarah"]
     sh.ensure_headers(client, "positions_sarah", S.PositionRow.HEADERS)
-    sh.append_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
+    sh.replace_today_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
 
     # Options
     opts = results.get("options", [])
     if opts:
         sh.ensure_headers(client, S.OptionRow.TAB_NAME, S.OptionRow.HEADERS)
-        sh.append_rows(client, S.OptionRow.TAB_NAME, [o.to_row() for o in opts])
+        sh.replace_today_rows(client, S.OptionRow.TAB_NAME, [o.to_row() for o in opts])
 
     # Technical scores
     tech = results.get("technical_scores", [])

@@ -226,23 +226,27 @@ def cmd_wsr(args: argparse.Namespace, logger: logging.Logger) -> int:
         try:
             client = sh.authenticate()
 
+            # UPSERT, never append — same one-snapshot-per-day contract as
+            # cmd_grab. replace_today_rows takes its date prefix from the batch
+            # being written, so a ledger dated other than today still replaces
+            # the right day.
             # snapshot_caspar
             sh.ensure_headers(client, S.SnapshotCaspar.TAB_NAME, S.SnapshotCaspar.HEADERS)
-            sh.append_row(client, S.SnapshotCaspar.TAB_NAME, snap_c.to_row())
+            sh.replace_today_rows(client, S.SnapshotCaspar.TAB_NAME, [snap_c.to_row()])
             result.rows_written[S.SnapshotCaspar.TAB_NAME] = 1
 
             # positions_caspar
             sh.ensure_headers(client, "positions_caspar", S.PositionRow.HEADERS)
-            n = sh.append_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
+            n = sh.replace_today_rows(client, "positions_caspar", [p.to_row() for p in pos_c])
             result.rows_written["positions_caspar"] = n
 
             # Sarah — only if ledger carries her portfolio
             if snap_s:
                 sh.ensure_headers(client, S.SnapshotSarah.TAB_NAME, S.SnapshotSarah.HEADERS)
-                sh.append_row(client, S.SnapshotSarah.TAB_NAME, snap_s.to_row())
+                sh.replace_today_rows(client, S.SnapshotSarah.TAB_NAME, [snap_s.to_row()])
                 result.rows_written[S.SnapshotSarah.TAB_NAME] = 1
                 sh.ensure_headers(client, "positions_sarah", S.PositionRow.HEADERS)
-                n = sh.append_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
+                n = sh.replace_today_rows(client, "positions_sarah", [p.to_row() for p in pos_s])
                 result.rows_written["positions_sarah"] = n
 
             # decision_queue

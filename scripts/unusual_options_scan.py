@@ -290,7 +290,7 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                         underlying_last=price, option_price=mid,
                         detail=f"{conc_pct:.0f}% of {exp_str} {side_name.lower()} volume "
                                f"on ${strike:.0f} strike ({vol:,} of {total_exp_vol:,})",
-                        severity=sev,
+                        severity=sev, **_q,
                     ))
 
                 # ── Check 3: Far-OTM volume ──
@@ -305,7 +305,7 @@ def scan_ticker(ticker: str, logger) -> list[UoaAlert]:
                         underlying_last=price, option_price=mid,
                         detail=f"Far-OTM ({otm_pct:.1f}% away) {side_name.lower()} — "
                                f"{vol:,} contracts, ${notional:,.0f} notional",
-                        severity=sev,
+                        severity=sev, **_q,
                     ))
 
     # ── Check 4: Put/Call skew across all expirations ──
@@ -428,6 +428,14 @@ def main() -> int:
                 option_price=a.option_price,
                 severity=a.severity,
                 detail=a.detail,
+                # Carry the quality layer across the UoaAlert -> UoaAlertRow
+                # boundary. Omitting these silently persisted the dataclass
+                # DEFAULTS (aggressor=UNKNOWN, quality=0) for 240 alerts while
+                # the scanner had computed real values — the fields existed on
+                # both sides and nothing errored.
+                bid=a.bid, ask=a.ask, last_price=a.last_price,
+                aggressor=a.aggressor, structure=a.structure, bias=a.bias,
+                extrinsic_pct=a.extrinsic_pct, quality=a.quality,
             )
             rows.append(row.to_row())
         sh.append_rows(client, S.UoaAlertRow.TAB_NAME, rows)
