@@ -174,6 +174,34 @@ def append_rows(client: gspread.Client, tab_name: str, rows: Iterable[List[str]]
     return len(rows_list)
 
 
+def replace_today_rows_ws(ws, new_rows, today_prefix: str | None = None) -> int:
+    """Worksheet-level upsert of one calendar day's rows. See replace_today_rows.
+
+    Exists because several writers hold a gspread WORKSHEET rather than a client
+    + tab name (options_refresh_cloud, yahoo_grab). Those call sites used the raw
+    ``ws.append_rows(...)`` method and so were invisible to a grep for the
+    ``sh.append_rows(client, ...)`` helper — which is exactly how they kept
+    duplicating one-per-day tabs after the "all writers now upsert" check passed.
+    """
+    from datetime import date
+    rows_list = [list(r) for r in new_rows]
+    if today_prefix is None:
+        # Prefix from the BATCH, never the wall clock (rows are SGT-stamped
+        # while CI runs UTC — see replace_today_rows).
+        first = str(rows_list[0][0]).strip() if (rows_list and rows_list[0]) else ""
+        today_prefix = first[:10] if len(first) >= 10 else date.today().isoformat()
+    existing = ws.get_all_values()
+    if not existing:
+        if rows_list:
+            ws.append_rows(rows_list, value_input_option="USER_ENTERED")
+        return len(rows_list)
+    header = existing[0]
+    keep = [r for r in existing[1:]
+            if r and not (r[0] or "").startswith(today_prefix)]
+    upsert_tab(ws, [header] + keep + rows_list)
+    return len(rows_list)
+
+
 def replace_today_rows(client: gspread.Client, tab_name: str,
                        new_rows: Iterable[List[str]],
                        today_prefix: str | None = None) -> int:

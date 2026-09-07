@@ -133,6 +133,7 @@ def refresh_account(
     dry: bool,
     logger: logging.Logger,
 ) -> None:
+    from src.sheets import replace_today_rows_ws  # lazy, matches main()'s style
     ws_pos = ss.worksheet(cfg["pos_tab"])
     ws_snap = ss.worksheet(cfg["snap_tab"])
 
@@ -210,8 +211,10 @@ def refresh_account(
             row[7] = "0"
 
     if not dry:
-        # Append new position rows (keeps history)
-        ws_pos.append_rows(updated_rows, value_input_option="USER_ENTERED")
+        # UPSERT today's rows. updated_rows is the COMPLETE position set (its
+        # weights are computed across the whole set), so appending stacked a
+        # duplicate snapshot on every run of the 13-21 UTC schedule.
+        replace_today_rows_ws(ws_pos, updated_rows)
         logger.info(f"  → Wrote {len(updated_rows)} position rows to {cfg['pos_tab']}")
     else:
         logger.info(f"  [DRY] Would write {len(updated_rows)} rows to {cfg['pos_tab']}")
@@ -243,7 +246,7 @@ def refresh_account(
     logger.info(f"  Snapshot: net_liq={snap_row[1]} cash={cash:.2f} upl={snap_row[3]} upl_pct={snap_row[4]}")
 
     if not dry:
-        ws_snap.append_row(snap_row, value_input_option="USER_ENTERED")
+        replace_today_rows_ws(ws_snap, [snap_row])
         logger.info(f"  → Wrote snapshot row to {cfg['snap_tab']}")
     else:
         logger.info(f"  [DRY] Would write snapshot row to {cfg['snap_tab']}")

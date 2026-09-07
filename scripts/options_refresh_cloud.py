@@ -448,8 +448,12 @@ def main() -> int:
         logger.info("No rows to write")
         return 0
 
-    ws.append_rows(refreshed_rows, value_input_option="USER_ENTERED")
-    logger.info(f"OK Appended {len(refreshed_rows)} refreshed option rows to `options`")
+    # UPSERT, not append. refreshed_rows is the COMPLETE current option set
+    # (refreshed + preserved), so replacing today's rows is the correct
+    # semantics. Appending stacked a full copy every run — this was one of the
+    # two writers still duplicating the one-per-day tabs after the 2026-09-06 fix.
+    sh.replace_today_rows_ws(ws, refreshed_rows)
+    logger.info(f"OK Upserted {len(refreshed_rows)} refreshed option rows to `options`")
     logger.info("=== options-refresh-cloud done ===")
     return 0
 
