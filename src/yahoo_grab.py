@@ -109,18 +109,76 @@ def fetch_usdsgd() -> float:
     return 1.35  # fallback
 
 
-def read_latest_positions(ws, logger: logging.Logger) -> tuple[list[dict], list[str]]:
-    """Read all rows from the positions worksheet, return latest-date rows + all raw rows."""
+def read_latest_positions(ws, logger: logging.Logger) -> tuple[list[dict], list[str], list[dict]]:
+    """Latest-date rows, headers, and the FULL history.
+
+    History is returned because cost basis has to be recovered from it — see
+    avg_cost_index().
+    """
     all_rows = ws.get_all_values()
     if not all_rows:
-        return [], []
+        return [], [], []
     headers = all_rows[0]
     data = [dict(zip(headers, r)) for r in all_rows[1:] if any(r)]
     if not data:
-        return [], headers
+        return [], headers, []
     latest_date = max(r.get("date", "") for r in data)
     logger.info(f"Latest position date: {latest_date}")
-    return [r for r in data if r.get("date") == latest_date], headers
+    return [r for r in data if r.get("date") == latest_date], headers, data
+
+
+def _f(x) -> float:
+    """Sheet cells arrive as strings and sometimes as junk. 0.0 on anything odd."""
+    try:
+        return float(str(x).replace(",", "").strip() or 0)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def avg_cost_index(all_positions: list[dict]) -> dict[str, float]:
+    """Last known POSITIVE avg_cost per ticker, in date order.
+
+    Cost basis only changes when you trade, so a 0 in today's row means the
+    upstream feed dropped the field — not that the position was free. IBKR's
+    Flex report stopped carrying costBasisPrice when the local TWS grab died
+    (~2026-06-10); because this module reads its own previous row back each
+    run, that one zero propagated forward for three months and turned every
+    `upl` into the full market value.
+    """
+    index: dict[str, float] = {}
+    seen_date: dict[str, str] = {}
+    for row in all_positions:
+        ticker = str(row.get("ticker", "")).strip()
+        cost = _f(row.get("avg_cost"))
+        if not ticker or cost <= 0:
+            continue
+        date = str(row.get("date", ""))
+        # Rows can arrive unsorted after a dedup rewrite — keep the newest.
+        if date >= seen_date.get(ticker, ""):
+            index[ticker] = cost
+            seen_date[ticker] = date
+    return index
+
+
+def resolve_cost_and_upl(
+    row_avg_cost,
+    qty: float,
+    price: float,
+    ticker: str,
+    cost_index: dict[str, float],
+) -> tuple[float | None, float | None]:
+    """(avg_cost, upl) for one position, or (None, None) when cost is unknown.
+
+    Never substitutes 0 for a missing cost basis: that reports the whole
+    market value as profit. An unknown cost is written blank instead, so the
+    gap shows up as a gap rather than as a 100% gain.
+    """
+    cost = _f(row_avg_cost)
+    if cost <= 0:
+        cost = cost_index.get(ticker, 0.0)
+    if cost <= 0:
+        return None, None
+    return cost, (price - cost) * qty
 
 
 def refresh_account(
@@ -137,10 +195,13 @@ def refresh_account(
     ws_pos = ss.worksheet(cfg["pos_tab"])
     ws_snap = ss.worksheet(cfg["snap_tab"])
 
-    latest_positions, headers = read_latest_positions(ws_pos, logger)
+    latest_positions, headers, all_positions = read_latest_positions(ws_pos, logger)
     if not latest_positions:
         logger.warning(f"No positions found for {account}")
         return
+
+    # Cost basis survives in history even when today's feed drops it.
+    cost_index = avg_cost_index(all_positions)
 
     from src.schema import now_sgt_iso
     now_ts = now_sgt_iso()  # SGT-anchored so cloud + Mac writes sort consistently
@@ -156,7 +217,6 @@ def refresh_account(
             continue
         try:
             qty = float(pos.get("qty", 0))
-            avg_cost = float(pos.get("avg_cost", 0))
         except (ValueError, TypeError):
             continue
 
@@ -166,9 +226,13 @@ def refresh_account(
             price = float(pos.get("last", 0) or 0)
 
         mkt_val = qty * price
-        upl = (price - avg_cost) * qty
+        avg_cost, upl = resolve_cost_and_upl(pos.get("avg_cost"), qty, price, ticker, cost_index)
+        if upl is None:
+            # No cost basis anywhere in history. Leave P&L blank rather than
+            # reporting the position as pure profit.
+            logger.warning(f"  {ticker}: no cost basis — writing blank upl")
         total_mkt_val += mkt_val
-        total_upl += upl
+        total_upl += upl or 0.0
 
         # ── FX-normalise to account base currency for the snapshot total ────
         # SGX positions are quoted in SGD, US positions in USD. Caspar's
@@ -178,26 +242,27 @@ def refresh_account(
         is_sgx = ticker in SGX_TICKERS
         if cfg["currency"] == "USD" and is_sgx:
             mkt_val_acct = mkt_val / usdsgd  # SGD → USD
-            upl_acct = upl / usdsgd
+            upl_acct = (upl or 0.0) / usdsgd
         elif cfg["currency"] == "SGD" and not is_sgx:
             mkt_val_acct = mkt_val * usdsgd  # USD → SGD (Sarah's USD stocks)
-            upl_acct = upl * usdsgd
+            upl_acct = (upl or 0.0) * usdsgd
         else:
             mkt_val_acct = mkt_val
-            upl_acct = upl
+            upl_acct = upl or 0.0
         total_mkt_val_acct += mkt_val_acct
         total_upl_acct += upl_acct
 
-        logger.info(f"  {ticker:8} qty={qty:6.0f}  last={price:10.4f}  mkt_val={mkt_val:10.2f}  upl={upl:+9.2f}")
+        upl_txt = f"{upl:+9.2f}" if upl is not None else "  unknown"
+        logger.info(f"  {ticker:8} qty={qty:6.0f}  last={price:10.4f}  mkt_val={mkt_val:10.2f}  upl={upl_txt}")
 
         row = [
             now_ts,
             ticker,
             f"{qty:.4f}",
-            f"{avg_cost:.4f}",
+            f"{avg_cost:.4f}" if avg_cost is not None else "",
             f"{price:.4f}",
             f"{mkt_val:.2f}",
-            f"{upl:.2f}",
+            f"{upl:.2f}" if upl is not None else "",
             "",  # weight — filled below
         ]
         updated_rows.append(row)

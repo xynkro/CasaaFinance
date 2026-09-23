@@ -141,12 +141,42 @@ CASPAR_ACCOUNT = "U6773281"
 GRABS_DIR = "PortfolioGrabs"
 
 
+def flex_cost_price(p: dict, multiplier: float = 1.0) -> float:
+    """PER-SHARE cost basis from a Flex OpenPosition row.
+
+    `costBasisPrice` is the direct field, but Flex has been returning it empty
+    for this account since ~2026-06-10 — which wrote avg_cost 0 into the sheet
+    and made every position read as pure profit. `costBasisMoney` is a
+    separate column on the same row and survives when the price one does not,
+    so derive from it.
+
+    costBasisMoney = costBasisPrice x qty x multiplier, so options MUST pass
+    their multiplier: dividing by qty alone leaves a PER-CONTRACT figure, and
+    the option caller then scales by the multiplier a second time — a 100x
+    overstatement. abs() on both because a short's cost money and quantity are
+    negative while the per-share basis is not.
+    """
+    direct = float(p.get("cost_price", 0) or 0)
+    if direct:
+        return direct
+    money = float(p.get("cost_money", 0) or 0)
+    qty = float(p.get("qty", 0) or 0)
+    # A 0 multiplier means the contract size is unknown — return 0 (== "no
+    # cost basis") rather than silently defaulting to 1 and emitting a figure
+    # that is wrong by the contract size.
+    mult = float(multiplier)
+    if not money or not qty or not mult:
+        return 0.0
+    return abs(money) / (abs(qty) * mult)
+
+
 def _flex_stock_row(p: dict, nlv: float) -> dict:
     mkt_val = p["value"]
-    upl = p["upl"] or round((p["mark"] - p["cost_price"]) * p["qty"], 2)
+    cost_price = flex_cost_price(p)
+    upl = p["upl"] or round((p["mark"] - cost_price) * p["qty"], 2)
     return {
         "symbol": p["symbol"], "sec_type": "STK", "exchange": "",
-        "qty": p["qty"], "avg_cost": p["cost_price"], "last": p["mark"],
+        "qty": p["qty"], "avg_cost": cost_price, "last": p["mark"],
         "mkt_val": mkt_val, "upl": upl,
         "weight_pct": round(abs(mkt_val) / nlv * 100, 2) if nlv else 0,
     }
@@ -156,8 +186,9 @@ def _flex_option_row(p: dict) -> dict:
     mult = int(float(p["multiplier"] or 100))
     # Flex costBasisPrice is PER SHARE; the grab schema (ib_insync averageCost)
     # carries options PER CONTRACT — scale by the multiplier to match.
-    avg_cost = round(p["cost_price"] * mult, 2)
-    upl = p["upl"] or round((p["mark"] - p["cost_price"]) * p["qty"] * mult, 2)
+    cost_price = flex_cost_price(p, mult)
+    avg_cost = round(cost_price * mult, 2)
+    upl = p["upl"] or round((p["mark"] - cost_price) * p["qty"] * mult, 2)
     side_dir = "short" if p["qty"] < 0 else "long"
     side_type = "call" if p["put_call"] == "C" else "put"
     return {
