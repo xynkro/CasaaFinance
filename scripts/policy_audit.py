@@ -46,8 +46,16 @@ WANT_UP = {"BUY_DIP", "CSP", "PMCC", "LONG_CALL", "PCS", "HARVEST_CSP"}
 SPREADS = {"PCS", "CCS", "IC"}
 
 # 2026-08-20 baseline (n=2328 evaluations, 18 alerts) — what the policy was set on.
+#
+# RE-BASELINED 2026-09-28. The return half of the original baseline was read off
+# `fwd_return_pct` (the underlying's move), while its win rates came from the
+# realised-P&L path. The two are not comparable, so the old return figures
+# — CSP 1.4, CC 2.8, IC -3.6, PCS -4.7, CCS -3.5 — are superseded rather than
+# carried forward. Win rates are unchanged; they were always P&L-derived.
+# New figures are mean `outcome_pnl_pct` over the same 2026-04-17..2026-09-13
+# window that produced the win rates.
 BASELINE_STRATEGY = {
-    "CSP": (81, 1.4), "CC": (62, 2.8), "IC": (39, -3.6),
+    "CSP": (81, 1.01), "CC": (62, 1.78), "IC": (39, -3.6),
     "PCS": (36, -4.7), "CCS": (40, -3.5),
 }
 BASELINE_QUARTILE = (1.62, -1.77)   # (lowest-score avg fwd, highest-score avg fwd)
@@ -87,14 +95,22 @@ def dedupe(rows: list[dict]) -> list[dict]:
 
 
 def grade_by_strategy(rows: list[dict]) -> list[dict]:
-    """Per-strategy win rate + forward return, most-evaluated first."""
+    """Per-strategy win rate + realised P&L, most-evaluated first.
+
+    Averages `outcome_pnl_pct` — the realised option P&L from csp_settle_pct /
+    cc_settle_pct — NOT `fwd_return_pct`, which is the underlying's move between
+    scan and eval. This table previously mixed the two: win rates came from the
+    P&L path (`strategy_outcome`) while the returns column came from the stock
+    path, so its two halves described different quantities and the returns
+    column read roughly 60% high for CSP (+1.61% stock vs +1.01% realised).
+    """
     by = defaultdict(list)
     for r in rows:
         s = str(r.get("strategy") or "?").upper()
         by[s].append(r)
     out = []
     for s, g in by.items():
-        fw = [v for v in (_f(r.get("fwd_return_pct")) for r in g) if v is not None]
+        fw = [v for v in (_f(r.get("outcome_pnl_pct")) for r in g) if v is not None]
         outs = [str(r.get("strategy_outcome") or "").upper() for r in g]
         graded = [o for o in outs if o]
         wins = sum(1 for o in graded if o == "WIN")
@@ -163,7 +179,7 @@ def render_report(strat_rows, quarts, corr, alerts, window) -> str:
     L.append(f"window: {window}")
     L.append("")
     L.append("1. BY STRATEGY (baseline = 2026-08-20, the audit the policy was set on)")
-    L.append(f"   {'strategy':12}{'n':>6}{'win%':>8}{'avg fwd%':>11}   vs baseline")
+    L.append(f"   {'strategy':12}{'n':>6}{'win%':>8}{'avg P&L%':>11}   vs baseline")
     for r in strat_rows:
         b = BASELINE_STRATEGY.get(r["strategy"])
         note = ""

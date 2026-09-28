@@ -1,5 +1,11 @@
 # Wheel Alpha Trial — pre-registration
 
+> **STATUS: RETIRED BEFORE START, 2026-09-28.** Precondition 1 failed. The
+> pre-registered gate does not predict the outcome bucket, so H1 is refuted and
+> the RETIRE rule below fires without a single position being opened. Details in
+> "Precondition 1 result". The document is kept intact — the gates were written
+> before the test and the test was run against them unchanged.
+
 **Written 2026-09-26, BEFORE the trial runs. Do not edit the gates after the
 first position opens.** Amendments go in the log at the bottom, dated, with a
 reason. Changing a threshold after seeing results is how a losing strategy
@@ -148,8 +154,65 @@ decisions; interim numbers may be looked at but may not trigger an action.
 4. **The $2,321 NLV disagreement resolved.** Position sizing reads NLV; two
    writers currently disagree by ~21%.
 
+---
+
+## Precondition 1 result — 2026-09-28 — FAILED
+
+**The pre-registered gate is partly vacuous.** `exposure_posture.bias` is
+`NEUTRAL` on all 106 rows ever written, and `recommendation` only ever takes
+`CASH_PRIORITY` (83) or `REDUCE_ONLY` (23). It has never been `RISK_ON`, so the
+clause `recommendation != RISK_ON` is true on every day in history. The gate
+reduces to `market_breadth score < 50`.
+
+**The honest sample is 47 days, not 12,971 evaluations.** `regime_signals`
+starts 2026-05-06, and the graded evaluations that overlap it collapse to **47
+distinct scan dates**. The 12,971 evaluations are ~130 correlated observations
+per day; t-statistics computed on them are inflated by roughly the square root
+of that ratio. Everything below is computed at day level, one observation per
+scan date.
+
+**Result, against the RETIRE condition as written:**
+
+| | flat-or-down | vs base | z |
+|---|---|---|---|
+| base rate (47 days) | 63.8% | — | — |
+| **gate: breadth < 50** (23 days) | **60.9%** | **-3.0pp** | **-0.30** |
+
+RETIRE reads "flat-or-down rate <= base rate (gate adds nothing over no gate)".
+The gate scores *below* the base rate. **H1 is refuted; the trial does not run.**
+
+**Exploratory predicates** — seven were tested, so read them as hypothesis
+generation and nothing more:
+
+| predicate | days | flat-or-down | z |
+|---|---|---|---|
+| posture == REDUCE_ONLY | 20 | 90.0% | +2.44 |
+| breadth == Healthy | 17 | 88.2% | +2.09 |
+| distribution in {SEVERE,HIGH} | 33 | 54.5% | -1.11 |
+| breadth == Weakening | 17 | 47.1% | -1.44 |
+| posture == CASH_PRIORITY | 27 | 44.4% | -2.10 |
+| distribution == SEVERE | 17 | 17.6% | -3.96 |
+
+Two clear the bar nominally, and neither survives scrutiny. Seven tests put a
+Bonferroni-adjusted p on z=+2.44 at roughly 0.05 — borderline, on 20 days, in a
+single five-month window. More damning is the direction: **Healthy** breadth
+precedes *more* flat-or-down tape and **SEVERE** distribution precedes *less*,
+both backwards from what the labels mean. A layer whose labels invert against
+the next month is not a gate; it is the same failure mode already documented for
+`composite_score` at correlation -0.089.
+
+Re-registering REDUCE_ONLY as the gate would be selecting a predicate on its
+outcome across seven tries. That is the practice this file exists to prevent.
+
+**What would revive this.** A gate built from something with more than 47 days
+behind it and a mechanism that is not this system's own scoring layer — realised
+volatility, term structure, or SPY against its own moving average are all
+computable from price history going back years. That is a new hypothesis and
+needs its own pre-registration, written before it is tested.
+
 ## Amendment log
 
 | date | change | reason |
 |---|---|---|
 | 2026-09-26 | Created. | — |
+| 2026-09-28 | Status set to RETIRED BEFORE START. No gate edits. | Precondition 1 failed on the gate exactly as registered. |

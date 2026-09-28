@@ -47,9 +47,13 @@ def test_dedupe_keeps_genuinely_different_rows():
 
 
 # ── grade_by_strategy ────────────────────────────────────────────────────────
-def _row(strat, fwd, outcome):
-    return {"strategy": strat, "fwd_return_pct": fwd, "strategy_outcome": outcome,
-            "scan_date": "d", "eval_date": fwd, "ticker": strat, "strike": fwd,
+def _row(strat, pnl, outcome, stock=None):
+    """`stock` defaults to a deliberately different value from `pnl` so any
+    test that silently reverts to the fwd_return_pct column fails loudly."""
+    return {"strategy": strat, "outcome_pnl_pct": pnl,
+            "fwd_return_pct": stock if stock is not None else str(float(pnl) * 10),
+            "strategy_outcome": outcome,
+            "scan_date": "d", "eval_date": pnl, "ticker": strat, "strike": pnl,
             "expiry": "e"}
 
 
@@ -59,7 +63,7 @@ def test_grade_by_strategy_computes_win_rate_and_return():
     got = {g["strategy"]: g for g in grade_by_strategy(rows)}
     assert got["CSP"]["n"] == 3
     assert round(got["CSP"]["win_pct"]) == 67
-    assert got["CSP"]["avg_fwd"] == 0.0
+    assert got["CSP"]["avg_fwd"] == 0.0     # mean of the realised-P&L column
     assert got["PCS"]["win_pct"] == 0.0
 
 
