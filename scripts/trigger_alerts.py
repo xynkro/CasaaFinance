@@ -414,6 +414,10 @@ def load_decisions(client, logger: logging.Logger) -> list[Decision]:
     if len(rows) < 2:
         return []
     hdr = rows[0]
+    # Hold list (src/hold_list.py): TRIM/CC pages on a name Caspar has decided
+    # to keep are noise to him. Filtered after the loop; counted for the log.
+    from src.hold_list import read_hold_list, drop_held_sell_recs
+    holds = read_hold_list(ss)
 
     def col(name: str) -> int:
         try:
@@ -467,7 +471,13 @@ def load_decisions(client, logger: logging.Logger) -> list[Decision]:
             accumulation_plan=r[c_plan] if c_plan >= 0 and len(r) > c_plan else "",
             gates=r[c_gates] if c_gates >= 0 and len(r) > c_gates else "",
         ))
-    logger.info(f"Loaded {len(out)} watching decisions for {latest_date}")
+    out, held = drop_held_sell_recs(
+        out, holds,
+        account=lambda d: d.account, ticker=lambda d: d.ticker, strategy=lambda d: d.strategy)
+    for d in held:
+        logger.info(f"  hold-list: skipping {d.strategy.upper():5} {d.account}/{d.ticker.upper()}")
+    logger.info(f"Loaded {len(out)} watching decisions for {latest_date}"
+                + (f" ({len(held)} held-name sell recs skipped)" if held else ""))
     return out
 
 

@@ -106,6 +106,7 @@ from .macro import (
 # ---- Decisions / briefs / WSR / daily plan / curated / api usage / triggers -
 from .decisions import (
     DecisionRow,
+    HoldListRow,
     DailyBriefRow,
     WsrArchiveRow,
     WsrSummaryRow,
@@ -191,6 +192,7 @@ __all__ = [
     "macro_from_ledger",
     # decisions
     "DecisionRow",
+    "HoldListRow",
     "DailyBriefRow",
     "WsrArchiveRow",
     "WsrSummaryRow",

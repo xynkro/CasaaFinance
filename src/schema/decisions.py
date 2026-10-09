@@ -9,6 +9,23 @@ from ._base import _num, _ts_suffix
 
 
 @dataclass
+class HoldListRow:
+    """Positions Caspar has decided to keep — see src/hold_list.py. Hand-edited
+    tab; one row per (account, ticker). account "*" = every account."""
+    TAB_NAME = "hold_list"
+    HEADERS = ["date", "account", "ticker", "note"]
+
+    date: str
+    account: str
+    ticker: str
+    note: str = ""
+
+    def to_row(self, audit: bool = True) -> List[str]:
+        d = _ts_suffix(self.date) if audit else self.date
+        return [d, self.account.strip().lower(), self.ticker.strip().upper(), self.note]
+
+
+@dataclass
 class DecisionRow:
     TAB_NAME = "decision_queue"
     HEADERS = [

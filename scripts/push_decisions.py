@@ -150,6 +150,21 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
     ss = sh._open_sheet(client)
     ws = ss.worksheet(S.DecisionRow.TAB_NAME)
 
+    # Hold list: Caspar keeps underwater names rather than realising the loss
+    # (2026-10-09). Sell-side recs (TRIM/CC) on a held name are dropped here so
+    # the queue — and everything downstream of it — stops re-proposing them.
+    from src.hold_list import read_hold_list, drop_held_sell_recs
+    holds = read_hold_list(ss)
+    decisions, held = drop_held_sell_recs(
+        decisions, holds,
+        account=lambda d: d.get("account", "caspar"),
+        ticker=lambda d: d.get("ticker", ""),
+        strategy=lambda d: d.get("strategy", ""),
+    )
+    for d in held:
+        logger.info(f"  hold-list: dropped {str(d.get('strategy','')).upper():5} "
+                    f"{d.get('account','caspar')}/{str(d.get('ticker','')).upper()}")
+
     # Build new rows from JSON
     new_rows: list[list[str]] = []
     new_keys: set[tuple] = set()
@@ -198,7 +213,12 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
             logger.warning(f"  skip malformed entry: {e} ({d})")
 
     if not new_rows:
-        return {"ok": False, "error": "no valid decision rows after parsing"}
+        if held and not decisions:
+            # Everything the brain sent was a sell-rec on a held name. Not an
+            # error — the hold list did its job.
+            logger.info(f"  all {len(held)} decisions were held-name sell recs; nothing to write")
+            return {"ok": True, "added": 0, "dropped": 0, "held": len(held)}
+        return {"ok": False, "error": "no valid decision rows after parsing", "held": len(held)}
 
     # Upsert: drop existing rows where (date_prefix, account, ticker, strategy, strike) matches.
     # Legacy 9-col rows have no strategy/strike columns — they pad-read to "" / "0.00",
@@ -227,11 +247,11 @@ def push_decisions(payload: dict[str, Any], dry: bool = False) -> dict:
 
     if dry:
         logger.info(f"[DRY] would upsert {len(new_rows)} rows (dropped {dropped} stale)")
-        return {"ok": True, "added": len(new_rows), "dropped": dropped, "dry": True}
+        return {"ok": True, "added": len(new_rows), "dropped": dropped, "held": len(held), "dry": True}
 
     sh.upsert_tab(ws, keep_rows)
     logger.info(f"✓ Upserted {len(new_rows)} decision rows (dropped {dropped} stale)")
-    return {"ok": True, "added": len(new_rows), "dropped": dropped}
+    return {"ok": True, "added": len(new_rows), "dropped": dropped, "held": len(held)}
 
 
 def main() -> int:
