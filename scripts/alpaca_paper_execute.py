@@ -307,6 +307,17 @@ def contracts_for(pick: dict, nlv: float, excess_liq: float | None,
 GROWTH_PER_NAME_PCT = 0.10   # cap each growth stock at 10% of (mirrored) NLV
 GROWTH_TOP_N = 5             # momentum names to buy per run
 
+# Mirrors build_daily_plan.GROWTH_LEG_ENABLED (see the rationale there). The
+# builder stops EMITTING growth rows; this stops EXECUTING them, so a stale or
+# hand-edited daily_plan row cannot buy a momentum name while the leg is off.
+GROWTH_LEG_ENABLED = os.environ.get("GROWTH_LEG_ENABLED", "").lower() in ("true", "1", "yes")
+
+
+def growth_leg_skip_reason(enabled: bool = GROWTH_LEG_ENABLED) -> str | None:
+    """Pre-placement gate for the momentum leg (None = proceed). Same shape as
+    income_skip_reason so the dispatch loop treats both legs alike."""
+    return None if enabled else "skipped:growth leg disabled (GROWTH_LEG_ENABLED)"
+
 
 def select_growth_picks(rows: list[dict], today: str, top_n: int = GROWTH_TOP_N) -> list[dict]:
     """Top momentum stock candidates for `today` from screen_candidates
@@ -487,6 +498,11 @@ def main() -> int:
             print(f"  PLAN {spec['label']}  [rebalance]")
 
         elif leg == "growth":
+            skip = growth_leg_skip_reason()
+            if skip:
+                statuses[key] = skip
+                print(f"  SKIP GROWTH {tk:6} — momentum leg disabled (GROWTH_LEG_ENABLED)")
+                continue
             spec = {"kind": "equity", "symbol": tk, "side": "buy",
                     "notional": _f(r.get("notional")),
                     "label": f"GROWTH {tk} ${_f(r.get('notional')):,.0f}"}

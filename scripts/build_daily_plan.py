@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -57,6 +58,19 @@ INCOME_STRATEGIES = ("CSP", "CC", "PCS", "CCS", "IC", "LONG_CALL")
 WHEEL_STRATS = ("CSP", "CC")          # wheel side (incl. HARVEST_CSP→CSP)
 SPREAD_STRATS = ("PCS", "CCS", "IC")  # defined-risk spreads
 TOP_GROWTH = 5         # momentum satellite names in the plan (incl the AMD tier)
+
+# ── Momentum satellite switch ────────────────────────────────────────────────
+# 2026-10-09: GROWTH leg OFF by default. paper_benchmark (casaa-filtered) put
+# the momentum book — PLTR/ZS/U/CRWD/NET/SMCI/... — at -$2,701 alpha against
+# SPY-equivalent capital on 2026-09-26 and -$1,458 on 2026-10-09, with 11-12 of
+# ~45 names beating the index. Its ranking is the same 3-month-momentum family
+# as composite_score, which has re-tested anti-predictive (corr -0.089) on
+# three consecutive monthly audits. This is a strategy default in the mould of
+# SPREADS_ENABLED — a flat on/off, deliberately NOT a regime gate (the executor
+# mirrors ungated intent; regime only tags). GROWTH_LEG_ENABLED=true re-enables.
+# The mf_core sleeve (Motley Fool, human-curated) is a different leg and is
+# untouched by this switch.
+GROWTH_LEG_ENABLED = os.environ.get("GROWTH_LEG_ENABLED", "").lower() in ("true", "1", "yes")
 TOP_INCOME = 2         # option-income opportunities in the plan
 SATELLITE_PER_NAME_PCT = 0.05   # each momentum satellite ~5% NLV → ~25% across 5
 MF_CORE_CAP = 3                 # max MF Foundational names added to the satellite
@@ -249,15 +263,19 @@ _LEAN_TILT = {
 
 
 def build_plan(nlv: float, scan_rows: list[dict], screen_rows: list[dict],
-               today: str, lean: str = "neutral", curated_rows: list[dict] | None = None) -> list[dict]:
+               today: str, lean: str = "neutral", curated_rows: list[dict] | None = None,
+               growth_enabled: bool = GROWTH_LEG_ENABLED) -> list[dict]:
     """Assemble the full ranked plan: standing allocation + top opportunities,
-    with the growth satellite sized by today's macro-surprise `lean`."""
+    with the growth satellite sized by today's macro-surprise `lean` — or
+    omitted entirely when the momentum leg is switched off (see
+    GROWTH_LEG_ENABLED)."""
     plan = standing_allocation_rows(nlv)
     n_growth, sat_pct = _LEAN_TILT.get(lean, (TOP_GROWTH, SATELLITE_PER_NAME_PCT))
     # QUOTA, not raw top-2: best wheel idea + best spread idea (see _income_quota
     # — cross-strategy composites are incomparable; ICs saturate 100, wheel ~62).
     income = _income_quota(_income_candidates(scan_rows, today), TOP_INCOME)
-    growth = _growth_candidates(screen_rows, today, nlv, per_name_pct=sat_pct)[:n_growth]
+    growth = (_growth_candidates(screen_rows, today, nlv, per_name_pct=sat_pct)[:n_growth]
+              if growth_enabled else [])
     mf_core = _mf_core_candidates(curated_rows or [], today, nlv)
     if lean in _LEAN_TILT:
         tilt = "trimmed (hawkish/risk-off)" if n_growth < TOP_GROWTH else "leaned-in (dovish/risk-on)"

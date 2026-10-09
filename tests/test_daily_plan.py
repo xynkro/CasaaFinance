@@ -41,6 +41,9 @@ def test_plan_always_includes_core_hedge_protector():
 
 
 def test_opportunities_are_a_mix_capped_and_ranked():
+    # growth_enabled=True: the momentum leg is OFF by default since 2026-10-09
+    # (see GROWTH_LEG_ENABLED). These tests exercise the growth satellite's
+    # sizing/tilt mechanics, which must keep working for when it is re-enabled.
     scan = [
         {"date": TODAY, "ticker": "META", "strategy": "PCS", "strike": "585",
          "premium": "2.30", "dte": "39", "composite_score": "70", "notes": "x"},
@@ -53,7 +56,7 @@ def test_opportunities_are_a_mix_capped_and_ranked():
         {"date": TODAY, "source": "momentum", "ticker": "QCOM", "score": "80", "rationale": "mom"},
         {"date": TODAY, "source": "momentum", "ticker": "AVGO", "score": "79", "rationale": "mom"},
     ]
-    plan = bdp.build_plan(10_000, scan, screen, TODAY)
+    plan = bdp.build_plan(10_000, scan, screen, TODAY, growth_enabled=True)
     opps = [r for r in plan if r["leg"] in ("growth", "income")]
     # TOP_GROWTH (5) caps growth, TOP_INCOME (2) caps income → all 4 growth + 2 income
     assert sum(1 for r in opps if r["leg"] == "growth") == 4   # AMD included now
@@ -105,7 +108,7 @@ def _screen(n):
 def test_macro_lean_hawkish_trims_growth():
     """Hawkish lean → fewer growth names, smaller satellite size (don't add into
     a multiple-compressing tape)."""
-    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="hawkish")
+    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="hawkish", growth_enabled=True)
     g = [r for r in plan if r["leg"] == "growth"]
     assert len(g) == 3                       # trimmed from 5
     assert g[0]["notional"] == 300.0         # 3% of 10k, not 5%
@@ -113,14 +116,14 @@ def test_macro_lean_hawkish_trims_growth():
 
 
 def test_macro_lean_dovish_leans_in():
-    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="dovish")
+    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="dovish", growth_enabled=True)
     g = [r for r in plan if r["leg"] == "growth"]
     assert len(g) == 5
     assert g[0]["notional"] == 600.0         # leaned in to 6%
 
 
 def test_macro_lean_neutral_is_baseline():
-    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="neutral")
+    plan = bdp.build_plan(10_000, [], _screen(8), TODAY, lean="neutral", growth_enabled=True)
     g = [r for r in plan if r["leg"] == "growth"]
     assert len(g) == 5 and g[0]["notional"] == 500.0   # default 5/5%
 
