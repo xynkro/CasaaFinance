@@ -49,7 +49,36 @@ INSIDER_TRADING_TOPIC = _env_int("TELEGRAM_INSIDER_TRADING_TOPIC", 510)
 # Personal DM — the owner's 1:1 chat with the bot. Private financial content
 # (balances, holdings, P&L, plan sizing, account-tailored ideas) is routed here
 # instead of the shared Finance supergroup, which has other members.
-PERSONAL_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "922547929")
+#
+# 2026-10-30 leak fix. This used to be os.environ.get("TELEGRAM_CHAT_ID",
+# "922547929"). The GitHub workflows export `TELEGRAM_CHAT_ID:
+# ${{ secrets.TELEGRAM_CHAT_ID }}`, but that secret does not exist, so CI set
+# the variable to an EMPTY STRING — and .get() returns "" for a present-but-
+# empty key, not the default. send() then built chat_id as
+# `chat_id or FINANCE_CHAT_ID`, so every "private" message silently fell
+# through to the shared group: cash-floor, market-pressure (holdings),
+# concentration, held-news. The DM went quiet after 2026-09-08, when
+# trigger_alerts moved to CI.
+_PERSONAL_DEFAULT = "922547929"
+
+
+def _resolve_personal_chat_id() -> str:
+    """First usable 1:1 chat id: dedicated var, then the legacy var, then the
+    owner's id. Empty values are skipped, and anything that is a GROUP (a
+    negative id, or the Finance supergroup itself) is rejected — a personal
+    lane must never resolve to a shared chat."""
+    for key in ("TELEGRAM_PERSONAL_CHAT_ID", "TELEGRAM_USER_CASPAR", "TELEGRAM_CHAT_ID"):
+        v = os.environ.get(key, "").strip()
+        if v and not v.startswith("-") and v != FINANCE_CHAT_ID:
+            return v
+    return _PERSONAL_DEFAULT
+
+
+PERSONAL_CHAT_ID = _resolve_personal_chat_id()
+
+
+class PrivacyRoutingError(RuntimeError):
+    """A message bound for a personal lane resolved to a shared chat."""
 
 # Topics that ARE the personal lanes: Multi-Day-Swing (FinancePWA position +
 # account alerts) and Options-Intel (options activity, plan, scan digest). Every
@@ -93,13 +122,21 @@ def send(
     # already pinned to an explicit chat) discloses account-specific data, so it
     # goes to the owner's DM, not the shared group. Topics don't exist in a 1:1
     # chat, so the thread id is dropped. An explicit chat_id always wins.
-    if chat_id is None and message_thread_id in _PRIVATE_TOPICS:
+    private = chat_id is None and message_thread_id in _PRIVATE_TOPICS
+    if private:
         chat_id = PERSONAL_CHAT_ID
         message_thread_id = None
 
+    target = str(chat_id or FINANCE_CHAT_ID)  # MUST be string
+    if private and (not chat_id or target.startswith("-") or target == FINANCE_CHAT_ID):
+        # Fail CLOSED. Dropping one private alert is recoverable; posting
+        # someone's cash balance into a group with other members is not.
+        raise PrivacyRoutingError(
+            f"private-lane message resolved to shared chat {target!r}; not sent")
+
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload: dict = {
-        "chat_id": str(chat_id or FINANCE_CHAT_ID),  # MUST be string
+        "chat_id": target,
         "text": text,
     }
     if parse_mode != "none":

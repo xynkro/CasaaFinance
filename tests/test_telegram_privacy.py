@@ -64,3 +64,73 @@ def test_cash_floor_ping_goes_to_dm(captured):
     tg.ping_cash_floor(account="caspar", cash=487.0, nlv=27000.0, floor=540.0)
     assert captured["payload"]["chat_id"] == tg.PERSONAL_CHAT_ID
     assert "message_thread_id" not in captured["payload"]
+
+
+# ── 2026-10-30 leak: empty TELEGRAM_CHAT_ID in CI fell through to the group ──
+import importlib
+
+
+def _reload_with(monkeypatch, **env):
+    for k in ("TELEGRAM_PERSONAL_CHAT_ID", "TELEGRAM_USER_CASPAR", "TELEGRAM_CHAT_ID"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    return importlib.reload(tg)
+
+
+@pytest.fixture
+def reload_tg(monkeypatch):
+    yield lambda **env: _reload_with(monkeypatch, **env)
+    for k in ("TELEGRAM_PERSONAL_CHAT_ID", "TELEGRAM_USER_CASPAR", "TELEGRAM_CHAT_ID"):
+        monkeypatch.delenv(k, raising=False)
+    importlib.reload(tg)
+
+
+def _capture(monkeypatch, mod):
+    box = {}
+
+    class R:
+        ok = True; status_code = 200
+        def raise_for_status(self): pass
+        def json(self): return {"ok": True, "result": {}}
+
+    monkeypatch.setattr(mod.requests, "post", lambda url, json=None, timeout=None: (box.update(payload=json), R())[1])
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    return box
+
+
+def test_regression_ci_empty_chat_id_still_reaches_the_dm(monkeypatch, reload_tg):
+    """The exact CI shape: the secret doesn't exist, so the var is ''."""
+    mod = reload_tg(TELEGRAM_CHAT_ID="")
+    box = _capture(monkeypatch, mod)
+    mod.send("🪫 CASH FLOOR: caspar cash $80", message_thread_id=mod.MULTI_DAY_SWING_TOPIC)
+    assert box["payload"]["chat_id"] == "922547929"
+    assert box["payload"]["chat_id"] != mod.FINANCE_CHAT_ID
+    assert "message_thread_id" not in box["payload"]
+
+
+def test_group_id_is_never_accepted_as_personal(monkeypatch, reload_tg):
+    mod = reload_tg(TELEGRAM_CHAT_ID="-1003942004211")
+    assert mod.PERSONAL_CHAT_ID == "922547929"
+
+
+def test_dedicated_personal_var_wins(monkeypatch, reload_tg):
+    mod = reload_tg(TELEGRAM_PERSONAL_CHAT_ID="111", TELEGRAM_CHAT_ID="222")
+    assert mod.PERSONAL_CHAT_ID == "111"
+
+
+def test_send_fails_closed_if_personal_ever_points_at_a_group(monkeypatch, reload_tg):
+    mod = reload_tg()
+    box = _capture(monkeypatch, mod)
+    monkeypatch.setattr(mod, "PERSONAL_CHAT_ID", mod.FINANCE_CHAT_ID)
+    with pytest.raises(mod.PrivacyRoutingError):
+        mod.send("holdings", message_thread_id=mod.OPTIONS_INTEL_TOPIC)
+    assert "payload" not in box          # nothing was posted
+
+
+def test_explicit_dm_sends_from_scripts_use_the_resolved_id(monkeypatch, reload_tg):
+    """policy_audit / dupe_guard / crash_playbook pass chat_id=tg.PERSONAL_CHAT_ID."""
+    mod = reload_tg(TELEGRAM_CHAT_ID="")
+    box = _capture(monkeypatch, mod)
+    mod.send("audit report", chat_id=mod.PERSONAL_CHAT_ID)
+    assert box["payload"]["chat_id"] == "922547929"
