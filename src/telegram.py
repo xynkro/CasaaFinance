@@ -263,6 +263,18 @@ def ping_daily_ready(
     )
 
 
+def ping_daily_ideas(html_text: str) -> dict:
+    """The one daily ideas DM (scripts/daily_ideas_dm.py). It names account
+    cash and sizes, so it rides the Multi-Day-Swing lane: send() redirects that
+    to the personal DM and fails closed if the DM resolves to a group."""
+    return send(
+        html_text,
+        parse_mode="HTML",
+        message_thread_id=MULTI_DAY_SWING_TOPIC,
+        disable_web_page_preview=True,
+    )
+
+
 def ping_wsr_ready(
     date: str,
     pwa_url: str | None = None,
