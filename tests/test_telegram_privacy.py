@@ -59,6 +59,20 @@ def test_explicit_chat_id_is_never_overridden(captured):
     assert captured["payload"]["chat_id"] == "555"
 
 
+def test_daily_ideas_dm_goes_to_dm(captured):
+    tg.ping_daily_ideas("📈 <b>Ideas</b>\nSize: Sarah 4 sh · Caspar 1 sh")
+    assert captured["payload"]["chat_id"] == tg.PERSONAL_CHAT_ID
+    assert captured["payload"]["parse_mode"] == "HTML"
+    assert "message_thread_id" not in captured["payload"]
+
+
+def test_daily_ideas_dm_fails_closed(captured, monkeypatch):
+    monkeypatch.setattr(tg, "PERSONAL_CHAT_ID", tg.FINANCE_CHAT_ID)
+    with pytest.raises(tg.PrivacyRoutingError):
+        tg.ping_daily_ideas("cash $90")
+    assert "payload" not in captured
+
+
 def test_cash_floor_ping_goes_to_dm(captured):
     # End-to-end through the real ping: the literal "how low am I" message.
     tg.ping_cash_floor(account="caspar", cash=487.0, nlv=27000.0, floor=540.0)
