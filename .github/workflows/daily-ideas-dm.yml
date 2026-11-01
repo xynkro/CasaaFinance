@@ -1,0 +1,67 @@
+name: Daily Ideas DM — ~15 min after the US open
+
+# The one daily Telegram DM of sized buy/watch ideas (scripts/daily_ideas_dm.py,
+# design agreed with Caspar 2026-10-31). Every idea is re-checked on live prices
+# at send time, sized for both books, and shown with its source's graded record
+# vs SPY. It names account cash, so it goes to the personal DM lane only.
+#
+# Schedule: GitHub cron is UTC and best-effort (runs can land late), so three
+# slots fire and the script decides:
+#   13:45 UTC = 09:45 ET in summer (EDT) · 14:45 UTC = 09:45 ET in winter (EST)
+#   15:15 UTC = backstop if both were throttled
+# Only a run landing 09:40–11:30 ET on a day SPY has traded sends; the
+# `ideas_log` tab makes it once a day, so the extra slots are harmless no-ops.
+#
+# Required secrets: OAUTH_TOKEN_JSON, SHEET_ID, TELEGRAM_BOT_TOKEN
+# (TELEGRAM_CHAT_ID optional — the personal lane resolves to the owner's DM and
+# refuses any group id.)
+
+on:
+  schedule:
+    - cron: "45 13,14 * * 1-5"
+    - cron: "15 15 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      dry:
+        description: "Build the DM without sending it (not printed: job logs are public)"
+        type: boolean
+        default: true
+      force:
+        description: "Send even outside the window / if already sent today"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-ideas-dm
+  cancel-in-progress: false
+
+jobs:
+  dm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OAUTH_TOKEN_JSON:   ${{ secrets.OAUTH_TOKEN_JSON }}
+      SHEET_ID:           ${{ secrets.SHEET_ID }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+      GROWTH_LEG_ENABLED: ${{ vars.GROWTH_LEG_ENABLED }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Build and send the ideas DM
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
+          if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
+          python scripts/daily_ideas_dm.py $ARGS
