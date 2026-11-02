@@ -243,6 +243,8 @@ def parse_account(report_xml: str, account_id: str | None = None,
 #     (position ccy -> base) is used only for those aggregates and weight_pct.
 
 CASPAR_ACCOUNT = "U6773281"
+CASPAR_BASE_CCY = "SGD"      # his base at IBKR, for a report that doesn't state one
+SGX_TICKERS = frozenset({"C6L", "G3B", "D05", "O39", "U11", "Z74", "V03"})   # as src/yahoo_grab.py
 SARAH_ACCOUNT = "U16000287"
 SARAH_BASE = "SGD"
 ENV_SARAH_TOKEN = "IB_FLEX_TOKEN_SARAH"
@@ -461,22 +463,66 @@ def resolve_sarah(main_report: str, prev_grab: dict, env: Mapping[str, str],
     return None, "sarah: carried forward — " + "; ".join(reasons)
 
 
+def base_per_usd(base: str, positions: list[dict], fetch_rate=None) -> float:
+    """Units of the account's base currency per 1 USD. A position priced in USD
+    carries the statement's own rate; otherwise ask Yahoo, and refuse to guess:
+    a wrong rate would mis-size every idea for this book."""
+    if base == "USD":
+        return 1.0
+    if base != "SGD":
+        raise RuntimeError(f"unsupported base currency {base!r}: not writing the snapshot")
+    for p in positions:
+        if p.get("currency") == "USD" and p.get("fx_to_base"):
+            return float(p["fx_to_base"])
+    rate = (fetch_rate or _yahoo_usdsgd)()
+    if not rate or not 1.0 < rate < 2.0:
+        raise RuntimeError("no USD/SGD rate: not writing a snapshot in the wrong currency")
+    return rate
+
+
+def _yahoo_usdsgd() -> float | None:
+    import yfinance as yf
+    try:
+        s = yf.Ticker("SGD=X").history(period="5d")["Close"].dropna()
+        return float(s.iloc[-1]) if len(s) else None
+    except Exception:
+        return None
+
+
+def _row_usd(amount: float, p: dict, rate: float) -> float:
+    """A position amount, in USD. Rows are in the listing's currency: USD, or SGD
+    for an SGX name. Without Flex's currency field, the SGX list decides."""
+    ccy = p.get("currency") or ("SGD" if p.get("symbol") in SGX_TICKERS else "USD")
+    return amount / rate if ccy == "SGD" else amount
+
+
 def build_flex_grab(account: dict, positions: list[dict], prev_grab: dict,
-                    sarah: dict | None = None) -> dict:
+                    sarah: dict | None = None, fetch_rate=None) -> dict:
     """Assemble the PortfolioGrab JSON: fresh Flex Caspar + Sarah.
 
     `sarah` is a complete block from build_sarah_block, or None to carry her
     forward verbatim from `prev_grab` (the original behaviour).
+
+    Caspar's summary is written in USD whatever his base currency is, because
+    the Sheet's net_liq_usd/cash/upl columns and everything reading them mean
+    USD. His base is SGD, and writing those totals as they came made his book
+    read about 28% too big and flip against yahoo_grab's USD figure.
     """
     from datetime import datetime
-    nlv = float(account.get("nlv", 0) or 0)
+    base = (account.get("eq_currency") or account.get("currency") or CASPAR_BASE_CCY).upper()
     # Caspar's rows ONLY — when the Flex report also carries Sarah's account
     # (U16000287), her rows must not leak into his book; they go through
     # build_sarah_block instead.
     mine = [p for p in positions
             if (p.get("account") or CASPAR_ACCOUNT) == CASPAR_ACCOUNT]
-    stocks = [_flex_stock_row(p, nlv) for p in mine if p["asset"] == "STK"]
-    options = [_flex_option_row(p) for p in mine if p["asset"] == "OPT"]
+    rate = base_per_usd(base, mine, fetch_rate)
+    nlv = float(account.get("nlv", 0) or 0) / rate
+    my_stocks = [p for p in mine if p["asset"] == "STK"]
+    my_options = [p for p in mine if p["asset"] == "OPT"]
+    stocks = [_flex_stock_row(p, nlv) for p in my_stocks]
+    for row, p in zip(stocks, my_stocks):
+        row["weight_pct"] = round(abs(_row_usd(p["value"], p, rate)) / nlv * 100, 2) if nlv else 0
+    options = [_flex_option_row(p) for p in my_options]
     prev_caspar_summary = ((prev_grab.get("accounts") or {}).get("caspar") or {}).get("summary", {})
     now = datetime.now()
     return {
@@ -488,19 +534,20 @@ def build_flex_grab(account: dict, positions: list[dict], prev_grab: dict,
         "accounts": {
             "caspar": {
                 "account_id": account.get("account") or CASPAR_ACCOUNT,
-                "base_currency": account.get("currency") or "USD",
+                "base_currency": base,
+                "summary_currency": "USD",
                 "summary": {
                     "net_liquidation": nlv,
-                    "total_cash": float(account.get("cash", 0) or 0),
+                    "total_cash": float(account.get("cash", 0) or 0) / rate,
                     # Flex EOD statements don't carry margin fields — carry the
                     # previous grab's values forward rather than writing 0s that
                     # downstream sizing could misread as "no buying power".
                     "buying_power": float(prev_caspar_summary.get("buying_power", 0)),
                     "excess_liquidity": float(prev_caspar_summary.get("excess_liquidity", 0)),
-                    "unrealized_pnl": round(sum(s["upl"] for s in stocks)
-                                            + sum(o["upl"] for o in options), 2),
+                    "unrealized_pnl": round(sum(_row_usd(r["upl"], p, rate) for r, p in zip(stocks, my_stocks))
+                                            + sum(_row_usd(r["upl"], p, rate) for r, p in zip(options, my_options)), 2),
                     "realized_pnl": 0.0,
-                    "total_market_value": float(account.get("stock", 0) or 0),
+                    "total_market_value": float(account.get("stock", 0) or 0) / rate,
                 },
                 "positions": stocks,
                 "options": options,

@@ -159,7 +159,7 @@ class TestSarahUnits:
 
     def test_downstream_sheet_rows(self):
         """Through the real sync.py row builders."""
-        grab = build_flex_grab({"account": CASPAR_ACCOUNT, "nlv": 5123.0},
+        grab = build_flex_grab({"account": CASPAR_ACCOUNT, "nlv": 5123.0, "currency": "USD"},
                                [], {}, sarah=self._block())
         snap = snapshot_sarah_from_grab(grab)
         assert (snap.net_liq_sgd, snap.cash_sgd, snap.upl_sgd) == (SARAH_NLV, SARAH_CASH, SARAH_UPL_SGD)

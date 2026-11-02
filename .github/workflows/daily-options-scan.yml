@@ -3,7 +3,7 @@ name: Daily Options Scan — Unified Watchlist + Discovery
 on:
   schedule:
     # 02:35 UTC = 10:35 SGT (US market ~3h into session, fresh chains)
-    - cron: "35 2 * * 1-5"
+    - cron: "15 15 * * 1-5"
   workflow_dispatch:
     inputs:
       dry:
