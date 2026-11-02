@@ -1,16 +1,16 @@
-name: Daily Ideas DM — ~15 min after the US open
+name: Daily Ideas DM — pre-open plan and post-open re-check
 
-# The one daily Telegram DM of sized buy/watch ideas (scripts/daily_ideas_dm.py,
-# design agreed with Caspar 2026-10-31). Every idea is re-checked on live prices
-# at send time, sized for both books, and shown with its source's graded record
-# vs SPY. It names account cash, so it goes to the personal DM lane only.
+# The daily Telegram DM of sized buy/sell ideas, one section per book
+# (scripts/daily_ideas_dm.py). Every idea is re-checked on live prices, sized for
+# each book, and shown with its source's graded record vs SPY. It names account
+# cash, so it goes to the personal DM lane only.
 #
-# Schedule: GitHub cron is UTC and best-effort (runs can land late), so three
-# slots fire and the script decides:
-#   13:45 UTC = 09:45 ET in summer (EDT) · 14:45 UTC = 09:45 ET in winter (EST)
-#   15:15 UTC = backstop if both were throttled
-# Only a run landing 09:40–11:30 ET on a day SPY has traded sends; the
-# `ideas_log` tab makes it once a day, so the extra slots are harmless no-ops.
+# Schedule: deploy/vm/casaa_dispatch.py on the GCP VM starts this at 08:45 ET (the
+# plan) and 09:47 ET (the re-check), because GitHub's cron runs land hours late.
+# The cron below is only a backstop and the script decides what a run does:
+#   08:00-09:29 ET  send the plan if it hasn't gone
+#   09:40-11:30 ET  send the re-check if it hasn't gone (`ideas_log` is the ledger)
+#   after 11:30 ET  warn once if nothing went out today, so a dead timer can't stay silent
 #
 # Required secrets: OAUTH_TOKEN_JSON, SHEET_ID, TELEGRAM_BOT_TOKEN
 # (TELEGRAM_CHAT_ID optional — the personal lane resolves to the owner's DM and
@@ -33,6 +33,7 @@ on:
 
 permissions:
   contents: read
+  actions: write   # to start the Firestore mirror right after a send
 
 concurrency:
   group: daily-ideas-dm
@@ -60,8 +61,15 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Build and send the ideas DM
+        id: dm
         run: |
           ARGS=""
           if [ "${{ inputs.dry }}" = "true" ]; then ARGS="$ARGS --dry"; fi
           if [ "${{ inputs.force }}" = "true" ]; then ARGS="$ARGS --force"; fi
           python scripts/daily_ideas_dm.py $ARGS
+
+      - name: Copy the list to the app now (the mirror's own schedule runs hours late)
+        if: steps.dm.outputs.sent == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run mirror-firestore.yml --repo "$GITHUB_REPOSITORY"

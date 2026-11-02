@@ -506,16 +506,27 @@ export interface CuratedPickRow {
 // One card of the daily ideas DM (Sheet tab `daily_ideas`, written by
 // scripts/daily_ideas_dm.py). Every text field is the string the Telegram DM
 // carries with its markup removed, so the PWA shows the DM and computes nothing.
-// `section`: "meta" (one per DM: tape/lead/budget/waiting/dropped), "idea" (a sized
-// buy), "exit" (a take-profit sell), "exit_note" (take-profit levels only, when the
-// trim record is losing), "watch" (a no-size line). `sent_at` is naive
-// ET, "YYYY-MM-DDTHH:MM". `account` is only set on exit rows.
+// `section`: "meta" (one per DM: phase/tape/lead/direction/levels/recheck, plus the
+// shared dropped text), "book" (one per account, in display order: plan = cash
+// headline, status = one-line summary, warning, budget, notes = earnings lines,
+// waiting, dropped), "idea" (a sized buy), "exit" (a take-profit sell),
+// "exit_note" (take-profit levels only, when the trim record is losing), "watch"
+// (a no-size line). `sent_at` is naive ET, "YYYY-MM-DDTHH:MM". `account` names the
+// book on book/idea/exit/exit_note/watch rows; a watch row with a blank account
+// applies to both books. Lists sent before the book split have no book rows, blank
+// account on ideas, and none of the optional fields below.
 export interface DailyIdeaRow {
   date: string; sent_at: string; section: string; num: string; ticker: string;
   kind: string; action: string; source: string; tier: string; status: string;
   plan: string; stop: string; size: string; why: string; notes: string; record: string;
   tape: string; lead: string; budget: string; waiting: string; dropped: string;
   account: string;
+  // Optional: old caches and old-format lists lack these columns entirely.
+  phase?: string;       // meta: "preopen" | "open" ("" on old rows)
+  direction?: string;   // meta: lines joined by " | "
+  levels?: string;      // meta: lines joined by " | "
+  recheck?: string;     // meta: "Re-check 09:47 ET · 22:47 SGT on live prices" (blank in the open phase)
+  warning?: string;     // book: data warning, blank when there is none
 }
 
 export interface GexRegimeRow {

@@ -252,7 +252,8 @@ def test_red_trim_record_shows_levels_only():
                      kinds={}, earnings={}, blocked=[], exits=[ex], holdings={("sarah", "VVV"): (10, 350)})
     assert dm.exits == []
     assert "🔴 WSR profit-takes: 12/40 lagged SPY" in dm.text
-    assert "levels only: VVV $420 (Sarah)" in dm.text
+    assert "levels only: VVV $420" in dm.text
+    assert "<b>👤 Sarah</b> — No action" in dm.text
     assert "S1" not in dm.text
 
 
@@ -335,7 +336,7 @@ def test_red_source_ideas_show_levels_on_one_line_and_get_no_size():
                      sgd_per_usd=1.28, kinds={"EEE": "ETF"}, earnings={}, blocked=[])
     assert dm.sized == []
     assert "🔴 WSR dip-buys: 74/183 beat SPY" in dm.text
-    assert "levels only: EEE $70 (below)" in dm.text
+    assert "WSR dip-buys levels, no size: EEE $70 (below)" in dm.text
 
 
 # ── budget ──────────────────────────────────────────────────────────────────
@@ -429,19 +430,19 @@ def fixture_dm(capsys, monkeypatch):
 
 def test_fixture_dryrun_shapes_the_dm(fixture_dm):
     out = fixture_dm
-    assert out.startswith("📈 <b>Ideas · Mon 2 Nov · 09:47 ET</b>")
+    assert out.startswith("📈 <b>Ideas · Mon 2 Nov · 09:47 ET · 22:47 SGT</b>")
     assert "<b>1 · AAA · stock · BUY</b> — trigger hit today" in out
     assert "EEE · ETF · BUY" in out
     assert "GGG · option · BUY CALL" in out
-    assert "Caspar none (one contract is" in out           # too dear for the small book
+    assert "GGG: buy call, no size (one contract is" in out  # too dear for the small book
     assert "⚠ earnings Fri 6 Nov" in out
     assert "MMM 12.5% above $80" in out                     # waiting, not sized
     assert "QQC (stop hit today" in out                     # live re-check dropped it
-    assert "2 trims of underwater holdings (rule)" in out   # never-sell-a-loser
+    assert "of underwater holdings skipped (rule)" in out   # never-sell-a-loser
     assert "paper leg off" in out                           # momentum watch-only
     for gone in ("KIL", "OLD", "UUU", "TTT", "SPY · option"):
         assert gone not in out
-    assert "Nov budget (cash + deposit):" in out
+    assert "Nov budget:" in out
 
 
 def test_ci_dry_run_never_prints_the_dm(capsys, monkeypatch):
@@ -469,9 +470,9 @@ def test_fixture_dryrun_take_profits(fixture_dm):
     out = fixture_dm
     assert "<b>Take profits</b>" in out
     assert "WSR profit-takes:" in out and "lagged SPY after the trim" in out
-    assert "<b>S1 · WWW · Caspar · SELL</b> — WSR says sell now" in out
+    assert "<b>S1 · WWW · SELL</b> — WSR says sell now" in out
     assert "Sell 5 of his 20 sh at market" in out
-    assert "<b>S2 · VVV · Sarah · SELL</b> — 1.0% below the trim level" in out
+    assert "<b>S2 · VVV · SELL</b> — 1.0% below the trim level" in out
     assert "Sell 3 of her 10 sh with a limit at $420" in out
     assert "Waiting to trim: PPP 16.7% below $120" in out
     assert "S1 frees ≈" in out and "S2 frees ≈" in out
@@ -519,14 +520,16 @@ def test_cards_have_one_meta_row_and_match_the_dm_counts(fixture_built):
     assert all(isinstance(v, str) for c in cards for v in c.values())
     by = lambda s: [c for c in cards if c["section"] == s]
     assert len(by("meta")) == 1 and cards[0]["section"] == "meta"
-    assert len(by("idea")) == len(dm.sized) == 4
+    assert [c["account"] for c in by("book")] == ["Caspar", "Sarah"]
+    assert len({c["ticker"] for c in by("idea")}) == len(dm.sized) == 4
+    assert {c["account"] for c in by("idea")} == {"Caspar", "Sarah"}
     assert len(by("exit")) == len(dm.exits) == 2
-    assert len(by("watch")) == len(dm.watch) == 3
+    assert len([c for c in by("watch") if not c["account"]]) == len(dm.watch)
     assert {c["date"] for c in cards} == {"2026-11-02"}
     assert {c["sent_at"] for c in cards} == {"2026-11-02T09:47"}
-    assert [c["num"] for c in by("idea")] == ["1", "2", "3", "4"]
+    assert {c["num"] for c in by("idea")} == {"1", "2", "3", "4"}
     assert [c["num"] for c in by("exit")] == ["S1", "S2"]
-    assert [c["ticker"] for c in by("idea")] == [i.ticker for i in dm.sized]
+    assert {c["ticker"] for c in by("idea")} == {i.ticker for i in dm.sized}
 
 
 def test_card_strings_carry_no_telegram_markup(fixture_built):
@@ -547,34 +550,39 @@ def test_underwater_and_hold_list_names_never_become_cards(fixture_built):
 def test_idea_cards_repeat_the_dm_lines_exactly(fixture_built):
     dm = fixture_built
     lines = _plain_lines(dm)
-    ideas = {c["ticker"]: c for c in dm.cards if c["section"] == "idea"}
+    ideas = {(c["ticker"], c["account"]): c for c in dm.cards if c["section"] == "idea"}
 
-    aaa = ideas["AAA"]                                    # a stock
+    aaa = ideas[("AAA", "Caspar")]                        # a stock, first under Caspar
     assert f"{aaa['num']} · AAA · {aaa['kind']} · {aaa['action']} — {aaa['status']}" in lines
     entry, sep, target = aaa["plan"].partition(" · Target")
     assert sep and entry == "Entry ≤ $100 (now $100.40)" and entry in lines
     assert f"{aaa['stop']} · Target{target}" in lines
     assert aaa["stop"] == "Stop: close < $95.90 (20-day low, −4.1%)"
-    assert aaa["size"] == "Size: Sarah 7 sh ≈ $700 · Caspar 2 sh ≈ $200" and aaa["size"] in lines
+    assert aaa["size"].startswith("Size: 2 sh ≈ $200 · ") and aaa["size"] in lines
+    hers = ideas[("AAA", "Sarah")]
+    assert hers["size"].startswith("Size: 7 sh ≈ $700 · ") and hers["size"] in lines
+    assert hers["why"] == aaa["why"] and hers["record"] == aaa["record"]   # the app's copy stays full
+    assert f"Why and record: as #{aaa['num']} under Caspar." in lines      # the DM's points back
     assert aaa["why"] == "Why (WSR): post-earnings add on a pullback to support." and aaa["why"] in lines
     assert aaa["notes"] == "⚠ earnings Fri 6 Nov, inside the 20-day hold" and aaa["notes"] in lines
     assert aaa["record"].startswith("🟡 WSR dip-buys: 9/14 beat SPY after costs") and aaa["record"] in lines
     assert (aaa["source"], aaa["tier"], aaa["kind"], aaa["action"]) == ("wsr", "yellow", "stock", "BUY")
 
-    ggg = ideas["GGG"]                                    # an option
+    ggg = ideas[("GGG", "Sarah")]                         # an option, too dear for Caspar's book
+    assert ("GGG", "Caspar") not in ideas
     assert (ggg["kind"], ggg["action"], ggg["source"]) == ("option", "BUY CALL", "uoa")
     assert ggg["plan"] == "Buy 1× 20 Nov $150C ≤ $3.10 (mid $3.00)" and ggg["plan"] in lines
     assert "max loss $310 per contract" in ggg["stop"] and "breakeven $153.10" in ggg["stop"]
     assert ggg["stop"] in lines
     assert ggg["why"].startswith("Why: ") and ggg["why"] in lines      # not "Why (WSR)"
-    assert ggg["size"] in lines and "Caspar none (one contract is" in ggg["size"]
+    assert ggg["size"] in lines
 
 
 def test_exit_cards_name_the_book_and_repeat_the_dm_lines(fixture_built):
     dm = fixture_built
     lines = _plain_lines(dm)
     s1, s2 = [c for c in dm.cards if c["section"] == "exit"]
-    assert f"{s1['num']} · {s1['ticker']} · {s1['account']} · {s1['action']} — {s1['status']}" in lines
+    assert f"{s1['num']} · {s1['ticker']} · {s1['action']} — {s1['status']}" in lines
     assert (s1["account"], s1["status"]) == ("Caspar", "WSR says sell now")
     assert s1["plan"].startswith("Sell 5 of his 20 sh at market") and s1["plan"] in lines
     assert s1["size"].startswith("Locks ≈ +$60") and s1["size"] in lines
@@ -588,16 +596,20 @@ def test_meta_and_watch_cards_repeat_the_dm(fixture_built):
     lines = _plain_lines(dm)
     meta = dm.cards[0]
     assert meta["tape"] == lines[1] == "SPY 638.39 −1.2% · QQQ 670.49 −0.6% · broad sell-off"
-    assert meta["lead"] == lines[2] and meta["lead"].startswith("All at probation size")
-    budget = meta["budget"].split(" | ")
-    assert len(budget) == 2 and all(f"• {b}" in lines for b in budget)
-    assert meta["dropped"] == "2 trims of underwater holdings (rule) · QQC (stop hit today, −8%)"
-    assert f"Dropped: {meta['dropped']}" in lines
-    assert meta["waiting"] == "PPP 16.7% below $120" and f"• Waiting to trim: {meta['waiting']}" in lines
-    watch = [c["plan"] for c in dm.cards if c["section"] == "watch"]
-    assert any("MMM 12.5% above $80" in w for w in watch)      # once, under watch; not again in waiting
+    assert meta["lead"] in lines and meta["lead"].startswith("All at probation size")
+    assert meta["phase"] == "open" and meta["recheck"] == ""
+    assert all(x in lines for x in meta["levels"].split(" | "))
+    assert meta["dropped"] == "QQC (stop hit today, −8%)" and f"Dropped: {meta['dropped']}" in lines
+    books = {c["account"]: c for c in dm.cards if c["section"] == "book"}
+    assert all(b["budget"] in lines for b in books.values() if b["budget"])
+    assert sum("underwater" in b["dropped"] for b in books.values()) >= 1   # blocked trims name their book
+    assert any("PPP 16.7% below $120" in b["waiting"] for b in books.values())
+    assert "• Waiting to trim: PPP 16.7% below $120" in lines
+    watch = [c["plan"] for c in dm.cards if c["section"] == "watch" and not c["account"]]
     assert all(f"• {w}" in lines for w in watch)
     assert watch[0].startswith("ZZZ: momentum leader")
+    mine = [c["plan"] for c in dm.cards if c["section"] == "watch" and c["account"]]
+    assert all(f"• {w}" in lines for w in mine)
 
 
 def test_meta_row_is_written_even_when_nothing_is_sized():
@@ -681,7 +693,7 @@ def test_live_send_logs_the_ledger_before_the_cards_and_a_card_failure_costs_nei
     monkeypatch.setattr(dm_script, "fetch_kinds", lambda tickers: {})
     monkeypatch.setattr(dm_script, "fetch_earnings", lambda tickers: {})
     monkeypatch.setattr(dm_script, "fetch_option", lambda *a: None)
-    assert dm_script.main(["--force"]) == 1               # the card write failed
+    assert dm_script.main(["--force", "--phase", "open"]) == 1   # the card write failed
     names = [c[0] for c in fake.calls]
     assert len(sent) == 1                                  # sent once, never re-sent
     assert names.index("append_rows") < names.index("replace_today_rows")   # ledger first
@@ -701,5 +713,230 @@ def test_red_trim_levels_reach_the_pwa_as_an_exit_note():
                      kinds={}, earnings={}, blocked=[], exits=[ex], holdings={("sarah", "VVV"): (10, 350)})
     assert not [c for c in dm.cards if c["section"] == "exit"]
     notes = [c for c in dm.cards if c["section"] == "exit_note"]
-    assert [n["plan"] for n in notes] == ["levels only: VVV $420 (Sarah)"]
+    assert [(n["plan"], n["account"]) for n in notes] == [("levels only: VVV $420", "Sarah")]
     assert notes[0]["record"] in dm.text and notes[0]["record"].startswith("🔴 WSR profit-takes")
+
+
+# ── the pre-open plan, the direction block, and the books ───────────────────
+
+def test_premarket_bar_moves_the_price_but_never_the_record():
+    days = _days(30)
+    spy = _bars(days, [100.0] * 30)
+    tk = _bars(days, [50.0] * 30)
+    today = (date.fromisoformat(days[-1]) + timedelta(days=1)).isoformat()
+    bars = di.with_premarket({"SPY": spy, "TTT": tk}, {"SPY": (101, 102, 100.5, 101.5)}, today)
+    assert bars["SPY"].dates[-1] == today and bars["SPY"].c[-1] == 101.5
+    assert bars["TTT"].dates[-1] == days[-1]               # no quote: keeps its last close
+    last, chg, _ = di.move_stats(bars["SPY"], today)
+    assert (last, round(chg, 3)) == (101.5, 0.015)
+    ideas = [di.PastIdea("uoa", "SPY", days[2], None)]
+    before = di.grade("uoa", ideas, {"SPY": spy}, today)
+    after = di.grade("uoa", ideas, bars, today)
+    assert (before.n, before.mean_alpha) == (after.n, after.mean_alpha)
+
+
+def test_premarket_does_not_add_a_second_bar_once_today_exists():
+    days = _days(5)
+    b = _bars(days, [10.0] * 5)
+    assert di.with_premarket({"X": b}, {"X": (1, 1, 1, 1)}, days[-1])["X"] is b
+
+
+def test_session_labels_say_which_day_the_number_is_from():
+    days = _days(5, start=date(2026, 10, 26))              # Mon 26 to Fri 30 Oct
+    b = _bars(days, [100, 100, 100, 100, 98.0])
+    assert di.session_word(b, "2026-11-02") == "Fri"       # before any trade on Monday
+    assert di.session_change(b, "2026-11-02") == ("Fri", pytest.approx(-0.02))
+    assert di.session_word(b, days[-1]) == "today"
+
+
+def test_a_bounce_under_a_broken_stop_does_not_read_as_a_fresh_hit():
+    days = _days(5, start=date(2026, 10, 26))
+    b = _bars(days, [100.0] * 5)
+    assert di.stop_note(b, "2026-11-02", -0.11) == "stop hit Fri, −11%"
+    assert di.stop_note(b, days[-1], 0.01) == "still below its stop, +1% today"
+
+
+def test_stale_book_needs_cash_and_share_counts_both_frozen():
+    frozen = frozenset({("AAA", 10.0)})
+    same = [(f"2026-0{m}-01", frozen) for m in (6, 7, 8)]
+    cash = [("2026-06-01", 500.0), ("2026-07-01", 500.0), ("2026-08-01", 500.0)]
+    assert di.stale_since(cash, same, "2026-08-20") == "2026-06-01"
+    moving = cash[:-1] + [("2026-08-01", 500.2)]
+    assert di.stale_since(moving, same, "2026-08-05") == ""   # cash moved days ago
+    assert di.stale_since(moving, same, "2026-08-20") == "2026-08-01"
+    assert di.stale_since(cash, same, "2026-06-05") == ""     # not long enough yet
+    assert di.stale_since([], [], "2026-08-20") == ""
+
+
+def test_brief_record_scores_only_real_calls_on_trading_days():
+    days = _days(4, start=date(2026, 10, 26))              # Mon..Thu
+    spy = _bars(days, [100, 101, 100, 102])                # up, down, up
+    rows = [{"date": f"{days[1]}T100000", "sentiment": "bullish"},  # right
+            {"date": f"{days[2]}T100000", "sentiment": "bullish"},  # wrong
+            {"date": f"{days[3]}T100000", "sentiment": "neutral"},  # not a call
+            {"date": "2026-10-25T100000", "sentiment": "bearish"},  # a Sunday
+            {"date": "2026-10-31T100000", "sentiment": "bearish"}]  # today's: not scored yet
+    assert di.direction_record(rows, spy, "2026-10-31") == (1, 2)
+
+
+def test_direction_lines_show_the_read_and_say_when_it_is_old():
+    rows = [{"date": "2026-11-02T100410", "sentiment": "Bearish", "verdict": "Defensive   stance."}]
+    assert di.direction_lines(rows, None, "2026-11-02") == ["Morning brief: bearish. Defensive stance."]
+    assert di.direction_lines(rows, None, "2026-11-06") == ["No fresh brief: the last is from 2 Nov."]
+    assert di.direction_lines([], None, "2026-11-02") == []
+
+
+def test_level_lines_use_completed_closes_and_drop_old_dealer_levels():
+    days = _days(210)
+    today = (date.fromisoformat(days[-1]) + timedelta(days=1)).isoformat()
+    bars = {"SPY": _bars(days + [today], [100.0] * 210 + [999.0])}
+    gex = [{"symbol": "SPY", "date": days[-1], "put_wall": "95", "call_wall": "105", "regime": "NEGATIVE_TREND"}]
+    macro = [{"date": f"{days[-1]}T090000", "vix": "19.44", "us_10y": "4.929"}]
+    lines = di.level_lines(bars, gex, macro, today)
+    assert lines[0].startswith("SPY: 50d $100 · 200d $100 · dealer walls $95 / $105")
+    assert lines[1] == "VIX 19.4 · 10Y 4.93% · dealers short gamma, so moves can run further"
+    far = (date.fromisoformat(today) + timedelta(days=9)).isoformat()
+    assert "dealer walls" not in di.level_lines(bars, gex, [], far)[0]
+
+
+def test_book_earnings_lists_only_this_books_near_reports():
+    e = {"AAA": di.Earnings(upcoming=["2026-11-02"], checked=True),
+         "BBB": di.Earnings(upcoming=["2026-11-05"], checked=True),
+         "CCC": di.Earnings(upcoming=["2026-12-20"], checked=True),
+         "DDD": di.Earnings(upcoming=["2026-11-03"], checked=False)}
+    h = {("sarah", "BBB"): (5, 1), ("sarah", "AAA"): (5, 1), ("sarah", "CCC"): (5, 1),
+         ("caspar", "DDD"): (5, 1), ("sarah", "DDD"): (0, 0)}
+    assert di.book_earnings("sarah", h, e, "2026-11-02") == ["AAA today", "BBB Thu 5 Nov"]
+    assert di.book_earnings("caspar", h, e, "2026-11-02") == ["DDD Tue 3 Nov (date not cross-checked)"]
+
+
+def test_plan_changes_names_new_gone_and_crossed_levels():
+    prior = [{"section": "exit", "account": "Sarah", "ticker": "AAA", "action": "SELL", "status": "1.0% below the trim level"},
+             {"section": "exit", "account": "Sarah", "ticker": "BBB", "action": "SELL", "status": "WSR says sell now"},
+             {"section": "idea", "account": "Caspar", "ticker": "SAME", "action": "BUY", "status": "below trigger"},
+             {"section": "watch", "account": "", "ticker": "", "action": "", "status": ""}]
+    now = [{"section": "exit", "account": "Sarah", "ticker": "AAA", "action": "SELL", "status": "at the trim level"},
+           {"section": "idea", "account": "Caspar", "ticker": "SAME", "action": "BUY", "status": "trigger hit today"},
+           {"section": "idea", "account": "Sarah", "ticker": "NEW", "action": "BUY", "status": "below trigger"}]
+    assert di.plan_changes(prior, now) == ["Sarah AAA SELL reached its level", "new: Sarah NEW BUY", "gone: Sarah BBB SELL"]
+    assert di.plan_changes(now, now) == []
+
+
+def _preopen_run(monkeypatch, tabs_extra=None, now="2026-11-02T08:45:00", argv=(), traded_today=False):
+    """A live send against the fixture with every outside call stubbed."""
+    from src import sheets, sync, telegram
+    from datetime import datetime as real_dt
+    fake = _FakeSheets()
+    monkeypatch.delenv("GROWTH_LEG_ENABLED", raising=False)
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.setattr(sync, "load_env", lambda: None)
+    sent = []
+    monkeypatch.setattr(telegram, "ping_daily_ideas", lambda text: sent.append(text))
+    for n in ("authenticate", "ensure_headers", "append_rows", "replace_today_rows"):
+        monkeypatch.setattr(sheets, n, getattr(fake, n))
+    bars = dm_script.bars_from_csv(FIXTURE / "prices.csv")
+    tabs = dm_script.load_tabs_dir(FIXTURE)
+    tabs.update(tabs_extra or {})
+    monkeypatch.setattr(dm_script, "load_tabs_sheet", lambda: tabs)
+    # The fixture's prices run through 2 Nov; a pre-open run hasn't seen that bar yet.
+    cut = {t: di.Bars(b.dates[:-1], b.o[:-1], b.h[:-1], b.l[:-1], b.c[:-1], b.adj[:-1]) for t, b in bars.items()}
+    monkeypatch.setattr(dm_script, "fetch_bars", lambda tickers, start: dict(bars if traded_today else cut))
+    monkeypatch.setattr(dm_script, "fetch_fx", lambda: 1.28)
+    monkeypatch.setattr(dm_script, "fetch_kinds", lambda tickers: {})
+    monkeypatch.setattr(dm_script, "fetch_earnings", lambda tickers: {})
+    monkeypatch.setattr(dm_script, "fetch_option", lambda *a: None)
+    monkeypatch.setattr(dm_script, "fetch_premarket", lambda tickers, today: {"SPY": (640.0, 641.0, 639.0, 640.5)})
+
+    class Clock(real_dt):
+        @classmethod
+        def now(cls, tz=None):
+            return real_dt.fromisoformat(now).replace(tzinfo=tz)
+
+    monkeypatch.setattr(dm_script, "datetime", Clock)
+    return dm_script.main(list(argv)), sent, fake
+
+
+def test_preopen_send_writes_the_app_but_not_the_graded_ledger(monkeypatch):
+    rc, sent, fake = _preopen_run(monkeypatch)
+    assert rc == 0 and len(sent) == 1
+    assert sent[0].startswith("🌅 <b>Pre-open plan · Mon 2 Nov · 08:45 ET · 21:45 SGT</b>")
+    assert "pre-market, vs" in sent[0] and "Re-check 09:47 ET · 22:47 SGT on live prices." in sent[0]
+    names = [c[0] for c in fake.calls]
+    assert "append_rows" not in names and "replace_today_rows" in names
+    rows = fake.calls[names.index("replace_today_rows")][1][2]
+    phase = dm_script.CARD_HEADERS.index("phase")
+    assert {r[phase] for r in rows} == {"preopen"}
+
+
+def test_preopen_goes_once_and_never_on_a_holiday(monkeypatch):
+    already = [{"date": "2026-11-02", "section": "meta", "phase": "preopen", "sent_at": "2026-11-02T08:45"}]
+    rc, sent, _ = _preopen_run(monkeypatch, {"daily_ideas": already})
+    assert rc == 0 and sent == []
+    rc, sent, _ = _preopen_run(monkeypatch)
+    assert len(sent) == 1
+    monkeypatch.setattr(dm_script, "fetch_premarket", lambda tickers, today: {})
+    # (re-stub after _preopen_run so the holiday has no SPY quote)
+    from src import telegram
+    held = []
+    monkeypatch.setattr(telegram, "ping_daily_ideas", lambda text: held.append(text))
+    assert dm_script.main([]) == 0 and held == []
+
+
+def test_recheck_with_nothing_changed_is_one_short_message(monkeypatch):
+    rc, sent, fake = _preopen_run(monkeypatch)
+    names = [c[0] for c in fake.calls]
+    rows = fake.calls[names.index("replace_today_rows")][1][2]
+    plan = [dict(zip(dm_script.CARD_HEADERS, r)) for r in rows]
+    # The same inputs at 09:47: the fixture's own 2 Nov bars now apply, so compare via the pure function.
+    assert di.plan_changes(plan, plan) == []
+    dm = di.build_dm(now_et=_et("2026-11-02T09:47:00"), today="2026-11-02", records={}, wsr=[], uoa=[], gov=None,
+                     momentum=[], bars={}, accounts=[], sgd_per_usd=1.28, kinds={}, earnings={}, blocked=[],
+                     prior_cards=[{"section": "meta", "phase": "preopen", "sent_at": "2026-11-02T08:45"}])
+    assert dm.text.startswith("✅ <b>Re-check · Mon 2 Nov · 09:47 ET · 22:47 SGT</b>")
+    assert dm.text.endswith("Plan unchanged since the 08:45 ET plan.") and dm.changes == []
+    assert dm.cards[0]["phase"] == "open"    # the app still gets the fresh rows
+
+
+def test_recheck_says_what_changed_then_gives_the_whole_list():
+    prior = [{"section": "meta", "phase": "preopen", "sent_at": "2026-11-02T08:45"},
+             {"section": "exit", "account": "Sarah", "ticker": "OLD", "action": "SELL", "status": "WSR says sell now"}]
+    dm = di.build_dm(now_et=_et("2026-11-02T09:47:00"), today="2026-11-02", records={}, wsr=[], uoa=[], gov=None,
+                     momentum=[], bars={}, accounts=[], sgd_per_usd=1.28, kinds={}, earnings={}, blocked=[],
+                     prior_cards=prior)
+    assert dm.changes == ["gone: Sarah OLD SELL"]
+    assert "<b>Changed since the 08:45 ET plan:</b> gone: Sarah OLD SELL" in dm.text.splitlines()[1]
+    assert dm.text.startswith("📈 <b>Ideas")
+
+
+def test_stale_book_warns_in_the_dm_and_on_the_book_card():
+    from datetime import datetime
+    a = di.Account("sarah", "SGD", nlv=50_000, cash=1_500, stale_since="2026-06-04")
+    dm = di.build_dm(now_et=datetime(2026, 11, 2, 8, 45), today="2026-11-02", records={}, wsr=[], uoa=[], gov=None,
+                     momentum=[], bars={}, accounts=[a], sgd_per_usd=1.28, kinds={}, earnings={}, blocked=[],
+                     phase="preopen")
+    want = "⚠ Cash and share counts unchanged since 4 Jun: check against IBKR before acting."
+    assert want in dm.text
+    assert [c["warning"] for c in dm.cards if c["section"] == "book"] == [want]
+
+
+def test_a_run_after_the_window_warns_once_if_nothing_went_out(monkeypatch):
+    rc, sent, fake = _preopen_run(monkeypatch, now="2026-11-02T15:00:00", traded_today=True)
+    assert rc == 0 and len(sent) == 1 and sent[0].startswith("⚠️ <b>No ideas list today.</b>")
+    assert "15:00 ET · 04:00 SGT" in sent[0]
+    names = [c[0] for c in fake.calls]
+    assert "append_rows" in names               # so the next late run stays quiet
+    logged = [{"date": "2026-11-02", "source": "missed"}]
+    rc, sent, _ = _preopen_run(monkeypatch, {"ideas_log": logged}, now="2026-11-02T15:30:00", traded_today=True)
+    assert rc == 0 and sent == []
+
+
+def test_a_run_outside_the_windows_stays_quiet(monkeypatch):
+    for clock in ("2026-11-02T07:00:00", "2026-11-02T09:35:00", "2026-11-01T10:00:00"):
+        rc, sent, _ = _preopen_run(monkeypatch, now=clock)
+        assert rc == 0 and sent == []
+
+
+def _et(stamp: str):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.fromisoformat(stamp).replace(tzinfo=ZoneInfo("America/New_York"))
