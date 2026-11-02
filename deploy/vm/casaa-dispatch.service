@@ -1,0 +1,10 @@
+[Unit]
+Description=Start CasaaFinance's time-critical GitHub Actions jobs on time
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=xynkro
+ExecStart=/usr/bin/python3 /home/xynkro/casaa-dispatch/casaa_dispatch.py
+TimeoutStartSec=120
