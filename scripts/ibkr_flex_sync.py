@@ -552,11 +552,34 @@ def run_sync(report: str, root: str, env: Mapping[str, str], *,
     return r.returncode
 
 
+def report_fields(report_xml: str) -> list[str]:
+    """What a report carries: section names, row counts and field names, plus how
+    many rows have a cost basis. Never a value, so it is safe in a public CI log.
+    The only exception is the account currency, a three-letter code."""
+    root = ET.fromstring(report_xml)
+    lines = []
+    for tag in ("AccountInformation", "EquitySummaryByReportDateInBase", "OpenPosition"):
+        rows = [el.attrib for _, el in _iter_tagged(root, tag)]
+        names = sorted({k for r in rows for k in r})
+        lines.append(f"{tag}: {len(rows)} rows; fields: {' '.join(names) or '(none)'}")
+        if tag == "AccountInformation":
+            lines.append(f"  currency: {sorted({r.get('currency', '') for r in rows})}")
+        if tag == "EquitySummaryByReportDateInBase":
+            lines.append(f"  currency: {sorted({r.get('currency', '') for r in rows})}")
+        if tag == "OpenPosition":
+            for key in ("costBasisPrice", "costBasisMoney", "fifoPnlUnrealized", "fxRateToBase", "currency"):
+                filled = sum(1 for r in rows if (r.get(key) or "").strip() not in ("", "0"))
+                lines.append(f"  {key}: filled on {filled} of {len(rows)} rows")
+    return lines
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Headless IBKR position sync via Flex Web Service")
     p.add_argument("--query", default=os.environ.get("IB_FLEX_QUERY_ID", ""),
                    help="Flex Query ID (or env IB_FLEX_QUERY_ID)")
     p.add_argument("--json", action="store_true", help="Print raw parsed JSON")
+    p.add_argument("--fields", action="store_true",
+                   help="Print which fields the report carries, never values, and sync nothing")
     p.add_argument("--sync", action="store_true",
                    help="Write the PortfolioGrab JSON and push it to the Sheet via sync.py grab")
     args = p.parse_args()
@@ -570,6 +593,9 @@ def main() -> int:
         return 2
 
     report = fetch_report(token, args.query)
+    if args.fields:
+        print("\n".join(report_fields(report)))
+        return 0
 
     if args.json:
         # Local debugging only: every account in the report, tagged by `account`.
