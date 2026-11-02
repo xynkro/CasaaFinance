@@ -60,6 +60,8 @@ BRAIN_WORKFLOWS = {
     "wsr-lite.yml":    "wsr-lite",
     "market-scan.yml": "market-scan",
 }
+# The model each workflow pins with --model; anything unlisted is Opus.
+WORKFLOW_MODELS = {"daily-brief": "claude-sonnet-5-5"}
 
 # claude-code-action emits the result JSON pretty-printed across multiple
 # log lines (each with a "<step>\t<runner-time>\t" prefix). We can't
@@ -156,10 +158,9 @@ def scrape_runs(limit: int, logger: logging.Logger) -> list[S.ApiUsageRow]:
                 date_sgt = dt_utc.astimezone(SGT).strftime("%Y-%m-%dT%H%M%S")
             except Exception:
                 date_sgt = now_sgt
-            # Model isn't in the result JSON; infer from claude_args in
-            # the prompt step (we always pass --model). Default to opus
-            # for known brain workflows; market-scan uses opus too.
-            model = "claude-opus-4-7"
+            # Model isn't in the result JSON; it follows the workflow's
+            # --model (we always pass it).
+            model = WORKFLOW_MODELS.get(wf_label, "claude-opus-4-7")
             rows.append(S.ApiUsageRow(
                 date=date_sgt,
                 run_id=run_id,
