@@ -1,6 +1,7 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useId, useState } from "react";
 import type { DashboardData } from "../data";
 import { TAB } from "../App";
+import { DailyIdeasCard } from "../cards/DailyIdeasCard";
 import { DailyBriefCard } from "../cards/DailyBriefCard";
 import { RiskPulseCard } from "../cards/RiskPulseCard";
 import { MoversCard } from "../cards/MoversCard";
@@ -18,7 +19,7 @@ import { PaperStatusCard } from "../cards/PaperStatusCard";
 import { TodaysPlanCard } from "../cards/TodaysPlanCard";
 import { MacroStrip } from "../components/MacroStrip";
 import { StickyTabs, BookOpen, Newspaper } from "../components/StickyTabs";
-import { Activity } from "lucide-react";
+import { Activity, ChevronDown } from "lucide-react";
 import { isWsrLiteFresh } from "../lib/wsrLiteParse";
 
 // Lazy: WsrDetailModal pulls in `marked` (~30 KB). All three modals are
@@ -48,6 +49,17 @@ function loadLastSub(): HomeSubTab {
   return "daily";
 }
 
+const MORE_OPEN_KEY = "casaa_home_more_open";
+
+function loadMoreOpen(): boolean {
+  try {
+    return localStorage.getItem(MORE_OPEN_KEY) === "1";
+  } catch {
+    // ignore — localStorage may be disabled (private mode / quota)
+  }
+  return false;
+}
+
 export function HomePage({
   data,
   loading,
@@ -61,6 +73,8 @@ export function HomePage({
   const [wsrOpen, setWsrOpen] = useState(false);
   const [liteOpen, setLiteOpen] = useState(false);
   const [sub, setSub] = useState<HomeSubTab>(loadLastSub);
+  const [moreOpen, setMoreOpen] = useState<boolean>(loadMoreOpen);
+  const moreId = useId();
 
   const daily   = data?.daily ?? null;
   const wsr     = data?.wsrSummary ?? null;
@@ -70,6 +84,14 @@ export function HomePage({
     const next = key as HomeSubTab;
     setSub(next);
     try { localStorage.setItem(LAST_SUB_KEY, next); } catch {
+      // ignore
+    }
+  };
+
+  const toggleMore = () => {
+    const next = !moreOpen;
+    setMoreOpen(next);
+    try { localStorage.setItem(MORE_OPEN_KEY, next ? "1" : "0"); } catch {
       // ignore
     }
   };
@@ -89,9 +111,18 @@ export function HomePage({
   return (
     <>
       <div className="flex flex-col px-4 pb-4">
+        {/* Today's ideas — the daily ideas DM, in the app. Always first. */}
+        <div className="mb-3 fade-up fade-up-1">
+          <DailyIdeasCard
+            rows={data?.dailyIdeas ?? []}
+            loading={loading && !data}
+            technicalScores={data?.technicalScores ?? []}
+            technicalScoresHistory={data?.technicalScoresHistory}
+          />
+        </div>
+
         {/* TL;DR Today — single-row "what matters now" strip. Renders null
-            on calm days. Lives ABOVE the StickyTabs so it's the first
-            thing visible when Home opens. */}
+            on calm days. Sits right under the ideas card. */}
         <div className="mb-2 fade-up fade-up-1">
           <TldrTodayCard
             decisions={data?.decisions ?? []}
@@ -108,145 +139,170 @@ export function HomePage({
           />
         </div>
 
-        {/* Market Map — portfolio + watchlist heatmap (tiles sized by weight,
-            coloured by day % change from the 5-min TV live feed). Sits above
-            the StickyTabs with TL;DR so "who's selling" is visible the moment
-            Home opens. Renders null until the live_prices tab has rows. */}
-        <div className="mb-2 fade-up fade-up-1">
-          <MarketMapCard
-            livePrices={data?.livePrices ?? new Map()}
-            livePricesUpdatedAt={data?.livePricesUpdatedAt ?? ""}
-            casparPositions={data?.casparPositions ?? []}
-            sarahPositions={data?.sarahPositions ?? []}
-            technicalScores={data?.technicalScores ?? []}
-          />
-        </div>
-
-        {/* Sticky sub-tab selector */}
-        <StickyTabs
-          active={sub}
-          onChange={handleSubChange}
-          tabs={[
-            { key: "daily", label: "Daily",     icon: Newspaper, badge: daily ? 1 : 0 },
-            { key: "lite",  label: "Mid-Week",  icon: Activity,  badge: liteFresh ? 1 : 0 },
-            { key: "wsr",   label: "Weekly",    icon: BookOpen,  badge: wsr ? 1 : 0 },
-          ]}
-        />
-
-        {/* MacroStrip scrolls away with content */}
-        <MacroStrip
-          macro={data?.macro ?? null}
-          regimeSignals={data?.regimeSignalsLatest}
-        />
-
-        {/* Primary card */}
-        <div className="fade-up fade-up-1 mt-4">
-          {sub === "daily" && (
-            <DailyBriefCard
-              row={daily}
-              loading={loading && !data}
-              onOpen={daily ? () => setBriefOpen(true) : undefined}
+        {/* Everything else, behind one fold. Closed by default and not mounted
+            until opened; the choice is remembered (casaa_home_more_open). */}
+        <div className="mt-2">
+          <button
+            type="button"
+            aria-expanded={moreOpen}
+            aria-controls={moreId}
+            onClick={toggleMore}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-2xl text-left active:opacity-70 focusable"
+            style={{ background: "var(--surface)", border: "1px solid var(--border)" }}
+          >
+            <span className="text-[length:var(--t-sm)] font-medium text-slate-300">
+              More: briefs, market, calendars, flows
+            </span>
+            <ChevronDown
+              size={16}
+              aria-hidden="true"
+              className={`text-slate-500 shrink-0 transition-transform ${moreOpen ? "rotate-180" : ""}`}
             />
+          </button>
+          {moreOpen && (
+            <div id={moreId} className="flex flex-col pt-3">
+              {/* Market Map — portfolio + watchlist heatmap (tiles sized by weight,
+                  coloured by day % change from the 5-min TV live feed). Sits above
+                  the StickyTabs so "who's selling" is the first thing in the fold.
+                  Renders null until the live_prices tab has rows. */}
+              <div className="mb-2 fade-up fade-up-1">
+                <MarketMapCard
+                  livePrices={data?.livePrices ?? new Map()}
+                  livePricesUpdatedAt={data?.livePricesUpdatedAt ?? ""}
+                  casparPositions={data?.casparPositions ?? []}
+                  sarahPositions={data?.sarahPositions ?? []}
+                  technicalScores={data?.technicalScores ?? []}
+                />
+              </div>
+
+              {/* Sticky sub-tab selector */}
+              <StickyTabs
+                active={sub}
+                onChange={handleSubChange}
+                tabs={[
+                  { key: "daily", label: "Daily",     icon: Newspaper, badge: daily ? 1 : 0 },
+                  { key: "lite",  label: "Mid-Week",  icon: Activity,  badge: liteFresh ? 1 : 0 },
+                  { key: "wsr",   label: "Weekly",    icon: BookOpen,  badge: wsr ? 1 : 0 },
+                ]}
+              />
+
+              {/* MacroStrip scrolls away with content */}
+              <MacroStrip
+                macro={data?.macro ?? null}
+                regimeSignals={data?.regimeSignalsLatest}
+              />
+
+              {/* Primary card */}
+              <div className="fade-up fade-up-1 mt-4">
+                {sub === "daily" && (
+                  <DailyBriefCard
+                    row={daily}
+                    loading={loading && !data}
+                    onOpen={daily ? () => setBriefOpen(true) : undefined}
+                  />
+                )}
+                {sub === "lite" && (
+                  <WsrLiteCard
+                    wsrLite={wsrLite}
+                    loading={loading && !data}
+                    onOpen={wsrLite ? () => setLiteOpen(true) : undefined}
+                  />
+                )}
+                {sub === "wsr" && (
+                  <WsrSummaryCard
+                    wsr={wsr}
+                    loading={loading && !data}
+                    onOpen={wsr ? () => setWsrOpen(true) : undefined}
+                  />
+                )}
+              </div>
+
+              <div className="fade-up fade-up-2 mt-4">
+                <RiskPulseCard macro={data?.macro ?? null} />
+              </div>
+
+              {/* Paper auto-trader — clearly separated from real money; renders only
+                  once the bot is active. Taps through to Portfolio → Paper. */}
+              <div className="fade-up fade-up-2 mt-3">
+                <PaperStatusCard
+                  snapshot={data?.alpaca ?? null}
+                  positions={data?.alpacaPositions ?? []}
+                  onOpen={jumpPaper}
+                />
+              </div>
+
+              {/* Today's Plan — the unified recommendation list the auto-trader will
+                  execute (core + hedge + protector + opportunities). This is the
+                  "what's the bot doing" surface; recommendation == execution. */}
+              {(data?.dailyPlan?.length ?? 0) > 0 && (
+                <div className="fade-up fade-up-2 mt-3">
+                  <TodaysPlanCard
+                    plan={data?.dailyPlan ?? []}
+                    newsByTicker={data?.newsByTicker}
+                    exposurePosture={data?.exposurePosture ?? null}
+                    gexRegime={data?.gexRegime ?? null}
+                    scanMeta={data?.scanMeta ?? null}
+                  />
+                </div>
+              )}
+
+              {/* Concentration alert — single-ticker over-exposure. Only renders
+                  when at least one position crosses 30% of NLV. Risk parity audit
+                  covers asset-class diversification; this catches the orthogonal
+                  "all my equity_us is just NVDA" risk. */}
+              <div className="fade-up fade-up-2 mt-4">
+                <ConcentrationCard
+                  casparPositions={data?.casparPositions ?? []}
+                  sarahPositions={data?.sarahPositions ?? []}
+                  casparSnapshot={data?.caspar ?? null}
+                  sarahSnapshot={data?.sarah ?? null}
+                />
+              </div>
+
+              {/* Week-ahead earnings + macro events (Phase 6 — Finnhub-driven).
+                  Renders null when both lists are empty so first-deploy doesn't
+                  show a stub card. */}
+              <div className="fade-up fade-up-3 mt-4">
+                <UpcomingCalendarsCard
+                  earnings={data?.earnings ?? []}
+                  events={data?.economicEvents ?? []}
+                />
+              </div>
+
+              <div className="fade-up fade-up-3 mt-4">
+                <MoversCard
+                  casparPositions={data?.casparPositions ?? []}
+                  sarahPositions={data?.sarahPositions ?? []}
+                />
+              </div>
+
+              <div className="fade-up fade-up-4 mt-4">
+                <SectorMixCard
+                  casparPositions={data?.casparPositions ?? []}
+                  sarahPositions={data?.sarahPositions ?? []}
+                  macro={data?.macro ?? null}
+                />
+              </div>
+
+              <div className="fade-up fade-up-4 mt-4">
+                <GovConfluenceCard signals={data?.govConfluence ?? []} />
+              </div>
+
+              <div className="fade-up fade-up-4 mt-4">
+                <CongressTradesCard trades={data?.congressTrades ?? []} />
+              </div>
+
+              {/* Motley Fool Stock Advisor — reference-only Scorecard names. Engine
+                  input, NOT a signal; nothing here is auto-traded. Renders null when
+                  empty (no first-deploy stub) via the length guard. */}
+              {(data?.mfReference?.length ?? 0) > 0 && (
+                <div className="fade-up fade-up-4 mt-4">
+                  <MotleyFoolCard reference={data?.mfReference ?? []} />
+                </div>
+              )}
+            </div>
           )}
-          {sub === "lite" && (
-            <WsrLiteCard
-              wsrLite={wsrLite}
-              loading={loading && !data}
-              onOpen={wsrLite ? () => setLiteOpen(true) : undefined}
-            />
-          )}
-          {sub === "wsr" && (
-            <WsrSummaryCard
-              wsr={wsr}
-              loading={loading && !data}
-              onOpen={wsr ? () => setWsrOpen(true) : undefined}
-            />
-          )}
         </div>
-
-        <div className="fade-up fade-up-2 mt-4">
-          <RiskPulseCard macro={data?.macro ?? null} />
-        </div>
-
-        {/* Paper auto-trader — clearly separated from real money; renders only
-            once the bot is active. Taps through to Portfolio → Paper. */}
-        <div className="fade-up fade-up-2 mt-3">
-          <PaperStatusCard
-            snapshot={data?.alpaca ?? null}
-            positions={data?.alpacaPositions ?? []}
-            onOpen={jumpPaper}
-          />
-        </div>
-
-        {/* Today's Plan — the unified recommendation list the auto-trader will
-            execute (core + hedge + protector + opportunities). This is the
-            "what's the bot doing" surface; recommendation == execution. */}
-        {(data?.dailyPlan?.length ?? 0) > 0 && (
-          <div className="fade-up fade-up-2 mt-3">
-            <TodaysPlanCard
-              plan={data?.dailyPlan ?? []}
-              newsByTicker={data?.newsByTicker}
-              exposurePosture={data?.exposurePosture ?? null}
-              gexRegime={data?.gexRegime ?? null}
-              scanMeta={data?.scanMeta ?? null}
-            />
-          </div>
-        )}
-
-        {/* Concentration alert — single-ticker over-exposure. Only renders
-            when at least one position crosses 30% of NLV. Risk parity audit
-            covers asset-class diversification; this catches the orthogonal
-            "all my equity_us is just NVDA" risk. */}
-        <div className="fade-up fade-up-2 mt-4">
-          <ConcentrationCard
-            casparPositions={data?.casparPositions ?? []}
-            sarahPositions={data?.sarahPositions ?? []}
-            casparSnapshot={data?.caspar ?? null}
-            sarahSnapshot={data?.sarah ?? null}
-          />
-        </div>
-
-        {/* Week-ahead earnings + macro events (Phase 6 — Finnhub-driven).
-            Renders null when both lists are empty so first-deploy doesn't
-            show a stub card. */}
-        <div className="fade-up fade-up-3 mt-4">
-          <UpcomingCalendarsCard
-            earnings={data?.earnings ?? []}
-            events={data?.economicEvents ?? []}
-          />
-        </div>
-
-        <div className="fade-up fade-up-3 mt-4">
-          <MoversCard
-            casparPositions={data?.casparPositions ?? []}
-            sarahPositions={data?.sarahPositions ?? []}
-          />
-        </div>
-
-        <div className="fade-up fade-up-4 mt-4">
-          <SectorMixCard
-            casparPositions={data?.casparPositions ?? []}
-            sarahPositions={data?.sarahPositions ?? []}
-            macro={data?.macro ?? null}
-          />
-        </div>
-
-        <div className="fade-up fade-up-4 mt-4">
-          <GovConfluenceCard signals={data?.govConfluence ?? []} />
-        </div>
-
-        <div className="fade-up fade-up-4 mt-4">
-          <CongressTradesCard trades={data?.congressTrades ?? []} />
-        </div>
-
-        {/* Motley Fool Stock Advisor — reference-only Scorecard names. Engine
-            input, NOT a signal; nothing here is auto-traded. Renders null when
-            empty (no first-deploy stub) via the length guard. */}
-        {(data?.mfReference?.length ?? 0) > 0 && (
-          <div className="fade-up fade-up-4 mt-4">
-            <MotleyFoolCard reference={data?.mfReference ?? []} />
-          </div>
-        )}
       </div>
 
       {briefOpen && daily && (

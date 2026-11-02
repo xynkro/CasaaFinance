@@ -290,15 +290,16 @@ def test_main_all_failed_exit_two(monkeypatch):
     assert mir.main([]) == 2
 
 
-def test_pwa_tabs_is_the_41_tab_contract():
-    assert len(mir.PWA_TABS) == 41
-    assert len(set(mir.PWA_TABS)) == 41            # no dupes
+def test_pwa_tabs_is_the_42_tab_contract():
+    assert len(mir.PWA_TABS) == 42
+    assert len(set(mir.PWA_TABS)) == 42            # no dupes
     # spot-check both ends + a by-name-only tab
     assert mir.PWA_TABS[0] == "daily_brief_latest"
     assert mir.PWA_TABS[-1] == "selection_skill"   # SelectionSkillCard surface
     assert "uoa_alerts" in mir.PWA_TABS
     assert "scan_meta" in mir.PWA_TABS         # freshness heartbeat
     assert "curated_picks" in mir.PWA_TABS
+    assert "daily_ideas" in mir.PWA_TABS       # the Home page's ideas card
 
 
 # ── Per-tab freshness trim (the PWA-payload diet) ─────────────────────────────

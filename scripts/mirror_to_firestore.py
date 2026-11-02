@@ -51,7 +51,7 @@ from typing import Any, Callable, Optional
 log = logging.getLogger("mirror_to_firestore")
 
 
-# --- the exact 41 tabs the PWA fetches (from data.ts `fetchDashboard`) ---
+# --- the exact 42 tabs the PWA fetches (from data.ts `fetchDashboard`) ---
 # Authoritative list lives in docs/plans/2026-06-07-private-read-path-plan.md.
 # Order is informational; mirroring is per-tab and order-independent.
 PWA_TABS: list[str] = [
@@ -95,6 +95,11 @@ PWA_TABS: list[str] = [
     "daily_plan",
     "macro_lean",
     "curated_picks",
+    # The daily ideas DM, one row per card, written by scripts/daily_ideas_dm.py
+    # (replace-today). The PWA Home page's first card reads the latest date. It
+    # names per-account sizes and cash, so serve it through this private mirror
+    # (VITE_DATA_SOURCE=firestore), not the public gviz CSV path.
+    "daily_ideas",
     # Single-row UPSERT tab written weekly by scripts/signal_feedback.py.
     # The PWA Review tab → SelectionSkillCard reads it; no date column → the
     # _filter_recent freshness trim falls through to "no trim" (one row, kept).

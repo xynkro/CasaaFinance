@@ -56,6 +56,7 @@ import type {
   ScanMetaRow,
   SelectionSkillRow,
   CuratedPickRow,
+  DailyIdeaRow,
 } from "./types";
 
 function latest<T extends { date: string }>(rows: T[]): T | null {
@@ -146,6 +147,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       dailyPlanRows,
       macroLeanRows,
       curatedPickRows,
+      dailyIdeaRows,
       scanMetaRows,
       selectionSkillRows,
     ] = await Promise.all([
@@ -171,6 +173,9 @@ export async function fetchDashboard(): Promise<DashboardData> {
       fetchTabByName<DailyPlanRow>("daily_plan").catch(() => [] as DailyPlanRow[]),
       fetchTabByName<MacroLeanRow>("macro_lean").catch(() => [] as MacroLeanRow[]),
       fetchTabByName<CuratedPickRow>("curated_picks").catch(() => [] as CuratedPickRow[]),
+      // The daily ideas DM, one row per card. Catch keeps the dashboard alive
+      // until the first send has created the tab.
+      fetchTabByName<DailyIdeaRow>("daily_ideas").catch(() => [] as DailyIdeaRow[]),
       fetchTabByName<ScanMetaRow>("scan_meta").catch(() => [] as ScanMetaRow[]),
       // Single-row UPSERT tab written by signal_feedback.py (weekly). Catch
       // keeps the dashboard alive when the tab hasn't been written yet (the
@@ -277,6 +282,12 @@ export async function fetchDashboard(): Promise<DashboardData> {
       scanMeta: scanMetaRows[scanMetaRows.length - 1] ?? null,
       // Same shape: one row, overwritten weekly by signal_feedback.py.
       selectionSkill: selectionSkillRows[selectionSkillRows.length - 1] ?? null,
+      // Only rows that carry a `section` count. The gviz CSV endpoint answers a
+      // sheet name it can't find with ANOTHER sheet's rows (no `section`), which
+      // would otherwise pass for ideas and set the "newest date".
+      dailyIdeas: latestGroup(
+        dailyIdeaRows.filter((r) => typeof r.date === "string" && r.date !== "" && (r.section ?? "").trim() !== ""),
+      ),
       ...(() => {
         const cp = latestGroup(curatedPickRows);
         return {
@@ -325,6 +336,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       scanMeta: null,
       selectionSkill: null,
       curatedPicks: [], mfWatchlist: [], mfOverlay: [], mfReference: [],
+      dailyIdeas: [],
       error: String(e),
     };
   }

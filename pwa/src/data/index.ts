@@ -61,6 +61,7 @@ export type {
   ScanMetaRow,
   SelectionSkillRow,
   CuratedPickRow,
+  DailyIdeaRow,
   GexRegimeRow,
   AlpacaSnapshotRow,
   AlpacaPositionRow,

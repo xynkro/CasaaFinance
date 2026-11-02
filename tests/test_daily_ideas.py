@@ -248,7 +248,7 @@ def test_red_trim_record_shows_levels_only():
     ex = di.Exit("sarah", "VVV", trigger=420.0, market=False, qty=2)
     dm = di.build_dm(now_et=datetime(2026, 4, 3, 9, 47), today=days[-1], records={"wsr_trim": rec},
                      wsr=[], uoa=[], gov=None, momentum=[], bars=bars,
-                     accounts=[di.Account("sarah", "SGD", nlv=67_000, cash=1_400)], sgd_per_usd=1.28,
+                     accounts=[di.Account("sarah", "SGD", nlv=50_000, cash=1_500)], sgd_per_usd=1.28,
                      kinds={}, earnings={}, blocked=[], exits=[ex], holdings={("sarah", "VVV"): (10, 350)})
     assert dm.exits == []
     assert "🔴 WSR profit-takes: 12/40 lagged SPY" in dm.text
@@ -328,7 +328,7 @@ def test_red_source_ideas_show_levels_on_one_line_and_get_no_size():
             "EEE": _bars(days, [70.0] * 24 + [69.4], lows=[68.6] * 25)}
     idea = di.Idea("wsr", "EEE", "BUY", trigger=70.0, target=76.0)
     rec = di.Record("wsr", n=183, beat=74, mean_alpha=-0.011, t=-2.1, clusters=23, tier="red")
-    a = di.Account("sarah", "SGD", nlv=67_000, cash=1_400)
+    a = di.Account("sarah", "SGD", nlv=50_000, cash=1_500)
     from datetime import datetime
     dm = di.build_dm(now_et=datetime(2026, 4, 3, 9, 47), today=days[-1], records={"wsr": rec},
                      wsr=[idea], uoa=[], gov=None, momentum=[], bars=bars, accounts=[a],
@@ -341,7 +341,7 @@ def test_red_source_ideas_show_levels_on_one_line_and_get_no_size():
 # ── budget ──────────────────────────────────────────────────────────────────
 
 def test_budget_splits_now_vs_after_deposit_vs_over():
-    a = di.Account("sarah", "SGD", nlv=67_000, cash=1_369, deposit=3_000, deposit_ccy="SGD")
+    a = di.Account("sarah", "SGD", nlv=50_000, cash=1_500, deposit=3_000, deposit_ccy="SGD")
     ideas = []
     for cost in (957.0, 765.0, 1041.0, 900.0):
         i = di.Idea("wsr", "X", "BUY", unit_cost=cost)
@@ -483,3 +483,223 @@ def test_fixture_dm_is_valid_telegram_html(fixture_dm):
     assert out.count("<b>") == out.count("</b>")
     assert out.count("<i>") == out.count("</i>")
     assert "<" not in out.replace("<b>", "").replace("</b>", "").replace("<i>", "").replace("</i>", "")
+
+
+# ── the PWA's copy of the DM (cards → the daily_ideas tab) ──────────────────
+
+@pytest.fixture
+def fixture_built(monkeypatch):
+    """The DM object (not just its text) from an offline run of the fixture."""
+    monkeypatch.delenv("GROWTH_LEG_ENABLED", raising=False)
+    got = {}
+    real = di.build_dm
+
+    def spy(**kw):
+        got["dm"] = real(**kw)
+        return got["dm"]
+
+    monkeypatch.setattr(di, "build_dm", spy)
+    assert dm_script.main(["--fixture", str(FIXTURE)]) == 0
+    return got["dm"]
+
+
+def _plain_lines(dm):
+    return di._plain(dm.text).splitlines()
+
+
+def test_plain_drops_tags_before_unescaping():
+    assert di._plain("<b>Stop: close &lt; $95.90</b> &amp; <i>x</i>") == "Stop: close < $95.90 & x"
+    assert di._plain("a &lt;b&gt; c") == "a <b> c"       # a '<' that was text is not a tag
+
+
+def test_cards_have_one_meta_row_and_match_the_dm_counts(fixture_built):
+    dm = fixture_built
+    cards = dm.cards
+    assert all(list(c) == list(di.CARD_COLUMNS) for c in cards)
+    assert all(isinstance(v, str) for c in cards for v in c.values())
+    by = lambda s: [c for c in cards if c["section"] == s]
+    assert len(by("meta")) == 1 and cards[0]["section"] == "meta"
+    assert len(by("idea")) == len(dm.sized) == 4
+    assert len(by("exit")) == len(dm.exits) == 2
+    assert len(by("watch")) == len(dm.watch) == 3
+    assert {c["date"] for c in cards} == {"2026-11-02"}
+    assert {c["sent_at"] for c in cards} == {"2026-11-02T09:47"}
+    assert [c["num"] for c in by("idea")] == ["1", "2", "3", "4"]
+    assert [c["num"] for c in by("exit")] == ["S1", "S2"]
+    assert [c["ticker"] for c in by("idea")] == [i.ticker for i in dm.sized]
+
+
+def test_card_strings_carry_no_telegram_markup(fixture_built):
+    for c in fixture_built.cards:
+        for k, v in c.items():
+            for bad in ("<b>", "</b>", "<i>", "</i>", "&lt;", "&gt;", "&amp;"):
+                assert bad not in v, (c["section"], c["num"], k, v)
+
+
+def test_underwater_and_hold_list_names_never_become_cards(fixture_built):
+    # UUU is underwater and TTT is on the hold list: their WSR trims are blocked.
+    exits = [c for c in fixture_built.cards if c["section"] == "exit"]
+    assert {c["ticker"] for c in exits} == {"WWW", "VVV"}
+    for c in fixture_built.cards:
+        assert "UUU" not in "|".join(c.values()) and "TTT" not in "|".join(c.values())
+
+
+def test_idea_cards_repeat_the_dm_lines_exactly(fixture_built):
+    dm = fixture_built
+    lines = _plain_lines(dm)
+    ideas = {c["ticker"]: c for c in dm.cards if c["section"] == "idea"}
+
+    aaa = ideas["AAA"]                                    # a stock
+    assert f"{aaa['num']} · AAA · {aaa['kind']} · {aaa['action']} — {aaa['status']}" in lines
+    entry, sep, target = aaa["plan"].partition(" · Target")
+    assert sep and entry == "Entry ≤ $100 (now $100.40)" and entry in lines
+    assert f"{aaa['stop']} · Target{target}" in lines
+    assert aaa["stop"] == "Stop: close < $95.90 (20-day low, −4.1%)"
+    assert aaa["size"] == "Size: Sarah 7 sh ≈ $700 · Caspar 2 sh ≈ $200" and aaa["size"] in lines
+    assert aaa["why"] == "Why (WSR): post-earnings add on a pullback to support." and aaa["why"] in lines
+    assert aaa["notes"] == "⚠ earnings Fri 6 Nov, inside the 20-day hold" and aaa["notes"] in lines
+    assert aaa["record"].startswith("🟡 WSR dip-buys: 9/14 beat SPY after costs") and aaa["record"] in lines
+    assert (aaa["source"], aaa["tier"], aaa["kind"], aaa["action"]) == ("wsr", "yellow", "stock", "BUY")
+
+    ggg = ideas["GGG"]                                    # an option
+    assert (ggg["kind"], ggg["action"], ggg["source"]) == ("option", "BUY CALL", "uoa")
+    assert ggg["plan"] == "Buy 1× 20 Nov $150C ≤ $3.10 (mid $3.00)" and ggg["plan"] in lines
+    assert "max loss $310 per contract" in ggg["stop"] and "breakeven $153.10" in ggg["stop"]
+    assert ggg["stop"] in lines
+    assert ggg["why"].startswith("Why: ") and ggg["why"] in lines      # not "Why (WSR)"
+    assert ggg["size"] in lines and "Caspar none (one contract is" in ggg["size"]
+
+
+def test_exit_cards_name_the_book_and_repeat_the_dm_lines(fixture_built):
+    dm = fixture_built
+    lines = _plain_lines(dm)
+    s1, s2 = [c for c in dm.cards if c["section"] == "exit"]
+    assert f"{s1['num']} · {s1['ticker']} · {s1['account']} · {s1['action']} — {s1['status']}" in lines
+    assert (s1["account"], s1["status"]) == ("Caspar", "WSR says sell now")
+    assert s1["plan"].startswith("Sell 5 of his 20 sh at market") and s1["plan"] in lines
+    assert s1["size"].startswith("Locks ≈ +$60") and s1["size"] in lines
+    assert s1["why"] in lines and s1["notes"] == "⚠ earnings Thu 5 Nov"
+    assert s1["record"] in lines and s1["record"].startswith("🟡 WSR profit-takes:")
+    assert (s2["account"], s2["plan"].startswith("Sell 3 of her 10 sh with a limit at $420")) == ("Sarah", True)
+
+
+def test_meta_and_watch_cards_repeat_the_dm(fixture_built):
+    dm = fixture_built
+    lines = _plain_lines(dm)
+    meta = dm.cards[0]
+    assert meta["tape"] == lines[1] == "SPY 638.39 −1.2% · QQQ 670.49 −0.6% · broad sell-off"
+    assert meta["lead"] == lines[2] and meta["lead"].startswith("All at probation size")
+    budget = meta["budget"].split(" | ")
+    assert len(budget) == 2 and all(f"• {b}" in lines for b in budget)
+    assert meta["dropped"] == "2 trims of underwater holdings (rule) · QQC (stop hit today, −8%)"
+    assert f"Dropped: {meta['dropped']}" in lines
+    assert meta["waiting"] == "PPP 16.7% below $120" and f"• Waiting to trim: {meta['waiting']}" in lines
+    watch = [c["plan"] for c in dm.cards if c["section"] == "watch"]
+    assert any("MMM 12.5% above $80" in w for w in watch)      # once, under watch; not again in waiting
+    assert all(f"• {w}" in lines for w in watch)
+    assert watch[0].startswith("ZZZ: momentum leader")
+
+
+def test_meta_row_is_written_even_when_nothing_is_sized():
+    from datetime import datetime
+    dm = di.build_dm(now_et=datetime(2026, 11, 2, 9, 47), today="2026-11-02", records={}, wsr=[],
+                     uoa=[], gov=None, momentum=[], bars={}, accounts=[], sgd_per_usd=1.28,
+                     kinds={}, earnings={}, blocked=[])
+    assert [c["section"] for c in dm.cards] == ["meta"]
+    meta = dm.cards[0]
+    assert (meta["date"], meta["sent_at"], meta["lead"], meta["budget"]) == ("2026-11-02", "2026-11-02T09:47", "", "")
+
+
+def test_dry_run_stdout_is_the_dm_and_nothing_else(capsys, monkeypatch):
+    monkeypatch.delenv("GROWTH_LEG_ENABLED", raising=False)
+    assert dm_script.main(["--fixture", str(FIXTURE)]) == 0
+    out = capsys.readouterr().out
+    assert out.strip().startswith("📈 <b>Ideas") and "cards" not in out
+    assert out.strip().endswith("QQC (stop hit today, −8%)")
+
+
+class _FakeSheets:
+    """Stands in for src.sheets: records what the card write does."""
+    def __init__(self, fail_on=None):
+        self.calls, self.fail_on = [], fail_on
+
+    def _hit(self, name, *a, **kw):
+        self.calls.append((name, a, kw))
+        if self.fail_on == name:
+            raise RuntimeError("sheet boom")
+
+    def authenticate(self): self._hit("authenticate"); return "client"
+    def ensure_headers(self, *a, **kw): self._hit("ensure_headers", *a, **kw)
+    def append_rows(self, *a, **kw): self._hit("append_rows", *a, **kw); return 1
+    def replace_today_rows(self, *a, **kw): self._hit("replace_today_rows", *a, **kw); return len(a[2])
+
+
+def test_write_cards_replaces_todays_rows_with_the_header_width(monkeypatch):
+    from src import sheets
+    fake = _FakeSheets()
+    for n in ("ensure_headers", "replace_today_rows"):
+        monkeypatch.setattr(sheets, n, getattr(fake, n))
+    cards = [di._card(date="2026-11-02", section="meta", tape="t"),
+             di._card(date="2026-11-02", section="idea", num=1, ticker="AAA")]
+    assert dm_script.write_cards("client", cards, "2026-11-02") == 0
+    assert [c[0] for c in fake.calls] == ["ensure_headers", "replace_today_rows"]
+    _, (client, tab, headers), _ = fake.calls[0]
+    assert (tab, headers) == (dm_script.CARD_TAB, dm_script.CARD_HEADERS) == ("daily_ideas", list(di.CARD_COLUMNS))
+    _, (client, tab, rows), kw = fake.calls[1]
+    assert tab == "daily_ideas" and kw == {"today_prefix": "2026-11-02"}
+    assert all(len(r) == len(dm_script.CARD_HEADERS) for r in rows) and rows[1][3] == "1"
+
+
+def test_a_failed_card_write_returns_1_and_never_raises(monkeypatch):
+    from src import sheets
+    fake = _FakeSheets(fail_on="replace_today_rows")
+    for n in ("ensure_headers", "replace_today_rows"):
+        monkeypatch.setattr(sheets, n, getattr(fake, n))
+    assert dm_script.write_cards("client", [di._card(date="2026-11-02", section="meta")], "2026-11-02") == 1
+
+
+def test_live_send_logs_the_ledger_before_the_cards_and_a_card_failure_costs_neither(monkeypatch):
+    """The DM goes out once and the ideas_log ledger is written even if the cards fail."""
+    from src import sheets, sync, telegram
+    fake = _FakeSheets(fail_on="replace_today_rows")
+    monkeypatch.delenv("GROWTH_LEG_ENABLED", raising=False)
+    monkeypatch.setattr(sync, "load_env", lambda: None)       # never read a real .env in a test
+
+    def no_network(*a, **kw):
+        raise AssertionError("this test must never open a network connection")
+
+    import socket
+    monkeypatch.setattr(socket.socket, "connect", no_network)  # belt and braces: Telegram/Sheets are stubbed
+    sent = []
+    monkeypatch.setattr(telegram, "ping_daily_ideas", lambda text: sent.append(text))
+    for n in ("authenticate", "ensure_headers", "append_rows", "replace_today_rows"):
+        monkeypatch.setattr(sheets, n, getattr(fake, n))
+    bars = dm_script.bars_from_csv(FIXTURE / "prices.csv")
+    monkeypatch.setattr(dm_script, "load_tabs_sheet", lambda: dm_script.load_tabs_dir(FIXTURE))
+    monkeypatch.setattr(dm_script, "fetch_bars", lambda tickers, start: bars)
+    monkeypatch.setattr(dm_script, "fetch_fx", lambda: 1.28)
+    monkeypatch.setattr(dm_script, "fetch_kinds", lambda tickers: {})
+    monkeypatch.setattr(dm_script, "fetch_earnings", lambda tickers: {})
+    monkeypatch.setattr(dm_script, "fetch_option", lambda *a: None)
+    assert dm_script.main(["--force"]) == 1               # the card write failed
+    names = [c[0] for c in fake.calls]
+    assert len(sent) == 1                                  # sent once, never re-sent
+    assert names.index("append_rows") < names.index("replace_today_rows")   # ledger first
+    assert fake.calls[names.index("append_rows")][1][1] == dm_script.LOG_TAB
+
+
+def test_red_trim_levels_reach_the_pwa_as_an_exit_note():
+    """A losing trim record sends levels only. The app must show what the DM shows."""
+    from datetime import datetime
+    days = _days(25)
+    bars = {"SPY": _bars(days, [100.0] * 25), "VVV": _bars(days, [421.0] * 25)}
+    rec = di.Record("wsr_trim", n=40, beat=12, mean_alpha=-0.02, t=-2.4, clusters=15, tier="red")
+    ex = di.Exit("sarah", "VVV", trigger=420.0, market=False, qty=2)
+    dm = di.build_dm(now_et=datetime(2026, 4, 3, 9, 47), today=days[-1], records={"wsr_trim": rec},
+                     wsr=[], uoa=[], gov=None, momentum=[], bars=bars,
+                     accounts=[di.Account("sarah", "SGD", nlv=50_000, cash=1_500)], sgd_per_usd=1.28,
+                     kinds={}, earnings={}, blocked=[], exits=[ex], holdings={("sarah", "VVV"): (10, 350)})
+    assert not [c for c in dm.cards if c["section"] == "exit"]
+    notes = [c for c in dm.cards if c["section"] == "exit_note"]
+    assert [n["plan"] for n in notes] == ["levels only: VVV $420 (Sarah)"]
+    assert notes[0]["record"] in dm.text and notes[0]["record"].startswith("🔴 WSR profit-takes")
