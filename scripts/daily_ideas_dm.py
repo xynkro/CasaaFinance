@@ -7,7 +7,9 @@ on live prices, sizes them for both books, adds the WSR's take-profit trims on
 positions in profit (graded from the seller's side), and sends ONE message to the
 personal DM lane (never the group: it names account cash). Each send is logged
 to the `ideas_log` tab, which is also the once-a-day dedup ledger and the
-record the DM itself will be graded on later.
+record the DM itself will be graded on later. The same strings the DM carries go
+to the `daily_ideas` tab (one row per card) for the PWA's Home page, so the app
+and the DM cannot disagree; the Firestore mirror copies that tab.
 
 SCHEDULE
   .github/workflows/daily-ideas-dm.yml fires at 13:45, 14:45 and 15:15 UTC on
@@ -52,6 +54,10 @@ LOG_TAB = "ideas_log"
 LOG_HEADERS = ["date", "sent_at", "num", "source", "tier", "ticker", "kind", "action",
                "trigger", "limit", "expiry", "strike", "last", "stop", "target", "status",
                "account", "units"]
+
+# The PWA's copy of the DM: one row per card, replaced per day on a resend.
+CARD_TAB = "daily_ideas"
+CARD_HEADERS = list(di.CARD_COLUMNS)
 
 # Account currency and the snapshot columns that hold net liq and cash.
 ACCOUNT_SPECS = {
@@ -299,6 +305,23 @@ def print_dry(dm: di.DM, is_fixture: bool) -> None:
                  len(dm.sized), len(dm.exits), len(dm.watch))
 
 
+def write_cards(client, cards: list[dict], today: str) -> int:
+    """Replace today's rows in the PWA's `daily_ideas` tab (a --force resend
+    swaps that day's rows instead of stacking a second set). Runs after the
+    ledger write, so a failure here costs the PWA its list for the day but never
+    the dedup ledger or causes a re-send. Returns 0, or 1 if the write failed."""
+    from src import sheets as sh
+    try:
+        sh.ensure_headers(client, CARD_TAB, CARD_HEADERS)
+        rows = [[str(c.get(h, "")) for h in CARD_HEADERS] for c in cards]
+        n = sh.replace_today_rows(client, CARD_TAB, rows, today_prefix=today)
+        log.info("wrote %d cards to %s", n, CARD_TAB)
+        return 0
+    except Exception:
+        log.exception("could not write the %s tab (the DM was sent and the ledger written)", CARD_TAB)
+        return 1
+
+
 def run(args) -> int:
     fixture = Path(args.fixture) if args.fixture else None
     meta = json.loads((fixture / "meta.json").read_text()) if fixture else {}
@@ -391,6 +414,7 @@ def run(args) -> int:
                  r.clusters, r.tier, r.open, r.unfilled, r.nodata)
 
     if not live_send:
+        log.info("dry run: %d cards would go to %s", len(dm.cards), CARD_TAB)   # stderr: stdout stays the DM
         print_dry(dm, fixture is not None)
         return 0
 
@@ -406,7 +430,7 @@ def run(args) -> int:
     sh.append_rows(client, LOG_TAB, [[str(r.get(h, "")) for h in LOG_HEADERS] for r in rows])
     log.info("sent ideas DM: %d sized, %d exits, %d watch, %d dropped",
              len(dm.sized), len(dm.exits), len(dm.watch), len(dm.dropped))
-    return 0
+    return write_cards(client, dm.cards, today)
 
 
 def main(argv: list[str] | None = None) -> int:

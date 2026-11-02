@@ -503,6 +503,21 @@ export interface CuratedPickRow {
   source: string; note: string; updated_at: string;
 }
 
+// One card of the daily ideas DM (Sheet tab `daily_ideas`, written by
+// scripts/daily_ideas_dm.py). Every text field is the string the Telegram DM
+// carries with its markup removed, so the PWA shows the DM and computes nothing.
+// `section`: "meta" (one per DM: tape/lead/budget/waiting/dropped), "idea" (a sized
+// buy), "exit" (a take-profit sell), "exit_note" (take-profit levels only, when the
+// trim record is losing), "watch" (a no-size line). `sent_at` is naive
+// ET, "YYYY-MM-DDTHH:MM". `account` is only set on exit rows.
+export interface DailyIdeaRow {
+  date: string; sent_at: string; section: string; num: string; ticker: string;
+  kind: string; action: string; source: string; tier: string; status: string;
+  plan: string; stop: string; size: string; why: string; notes: string; record: string;
+  tape: string; lead: string; budget: string; waiting: string; dropped: string;
+  account: string;
+}
+
 export interface GexRegimeRow {
   date: string;
   symbol: string;                 // SPY | QQQ
@@ -875,5 +890,6 @@ export interface DashboardData {
   mfWatchlist: CuratedPickRow[];         // role=watchlist — research, not a buy
   mfOverlay: CuratedPickRow[];           // role=overlay — CSP-entry targets (suggestion-only)
   mfReference: CuratedPickRow[];         // role=reference — Scorecard, reference only
+  dailyIdeas: DailyIdeaRow[];            // the newest day's daily-ideas DM cards (rows with a section only). Old caches lack it: read `data?.dailyIdeas ?? []`
   error: string | null;
 }
