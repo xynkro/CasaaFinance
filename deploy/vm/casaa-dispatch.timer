@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the CasaaFinance job starter once a minute
+
+[Timer]
+OnCalendar=*-*-* *:*:10
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
