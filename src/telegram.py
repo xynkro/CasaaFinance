@@ -578,7 +578,6 @@ def ping_macro_news(
     url: str = "",
     category: str = "",
     context: str = "",
-    held: list[str] | None = None,
 ) -> dict:
     """
     Edge-triggered hot-news headline ping. Fired when the macro_blackouts
@@ -589,18 +588,17 @@ def ping_macro_news(
     Sent EXACTLY ONCE per news_id (dedup tracked in macro_alerts_state).
     Capped at 3 per cron run so a Finnhub backlog catch-up doesn't flood.
 
-    The "so what" line is CONTEXT, not interpretation — it joins the headline to
-    live state already computed (exposure posture + GEX gate + held tickers), so
-    it costs zero AI tokens and never reads as canned filler. Deep reasoning
-    still lives in the once-a-day Opus brief.
+    This lane posts to the shared group, which has other members, so the "so
+    what" line is market-wide only (the GEX gate). Exposure posture comes from
+    the book and is dropped here; held-name news goes to the DM through
+    ping_macro_news_to_swing.
 
     Args:
         headline: news headline (truncated at 200 chars)
         source: publisher name (e.g. "Reuters", "Bloomberg")
         url: link to the article
         category: Finnhub/RSS category for the inline tag
-        context: live regime string (e.g. "exposure CASH_PRIORITY · GEX NEGATIVE_TREND")
-        held: held tickers the headline mentions (flags portfolio exposure)
+        context: live regime string; only its "GEX ..." part is rendered
     """
     # HTML parse mode + inline-linked source. Two fixes layered to kill
     # the headline-twice visual:
@@ -624,15 +622,10 @@ def ping_macro_news(
         lines.append(f"source: {html.escape(source)}")
     elif url:
         lines.append(html.escape(url))
-    # "So what for my book" — free context join (no AI). Held-ticker exposure
-    # flag first (most actionable), then the live regime.
-    so_what = []
-    if held:
-        so_what.append("⚠️ you hold " + ", ".join(html.escape(t) for t in held[:4]))
-    if context:
-        so_what.append(html.escape(context))
-    if so_what:
-        lines.append("📍 " + " · ".join(so_what))
+    # Free context join (no AI), market-wide parts only.
+    market = " · ".join(p.strip() for p in context.split("·") if p.strip().startswith("GEX"))
+    if market:
+        lines.append("📍 " + html.escape(market))
     return send(
         "\n".join(lines),
         parse_mode="HTML",

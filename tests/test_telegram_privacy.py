@@ -54,6 +54,25 @@ def test_impersonal_topic_stays_in_group(captured):
     assert captured["payload"]["message_thread_id"] == tg.MACRO_NEWS_TOPIC
 
 
+def test_macro_news_in_the_group_carries_no_account_data(captured):
+    tg.ping_macro_news("Meta outlook cut", source="CNBC", url="https://x.test",
+                       context="exposure CASH_PRIORITY · GEX NEGATIVE_TREND")
+    payload = captured["payload"]
+    assert payload["chat_id"] == tg.FINANCE_CHAT_ID
+    assert "exposure" not in payload["text"] and "CASH_PRIORITY" not in payload["text"]
+    assert "GEX NEGATIVE_TREND" in payload["text"]
+
+
+def test_macro_news_drops_the_line_when_context_is_account_only(captured):
+    tg.ping_macro_news("Meta outlook cut", source="CNBC", context="exposure REDUCE_ONLY")
+    assert "📍" not in captured["payload"]["text"]
+
+
+def test_macro_news_cannot_name_held_tickers(captured):
+    with pytest.raises(TypeError):
+        tg.ping_macro_news("Meta outlook cut", held=["META"])
+
+
 def test_explicit_chat_id_is_never_overridden(captured):
     tg.send("ad-hoc", chat_id="555", message_thread_id=tg.OPTIONS_INTEL_TOPIC)
     assert captured["payload"]["chat_id"] == "555"

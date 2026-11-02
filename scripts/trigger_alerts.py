@@ -1951,7 +1951,7 @@ def main() -> int:
     swing_mirrored = 0
     for n in macro_news_plan:
         news_key = f"news:{n['id']}"
-        # Held-ticker match BEFORE the ping so the "so what" can flag exposure.
+        # Held-ticker match drives the DM mirror below, never the group post.
         text_for_match = f"{n.get('headline', '')} {n.get('summary', '')}"
         matched = _matched_tickers(text_for_match)
         try:
@@ -1961,7 +1961,6 @@ def main() -> int:
                 url=n.get("url", ""),
                 category=n.get("category", ""),
                 context=regime_ctx,
-                held=matched,
             )
             macro_pinged += 1
             cat_tag = f" [{n.get('category', '?')}]"
