@@ -3,24 +3,31 @@
 Daily ideas DM — the I/O around src/daily_ideas.py.
 
 Reads the Sheet, grades every idea source vs SPY, re-checks today's candidates
-on live prices, sizes them for both books, adds the WSR's take-profit trims on
-positions in profit (graded from the seller's side), and sends ONE message to the
-personal DM lane (never the group: it names account cash). Each send is logged
-to the `ideas_log` tab, which is also the once-a-day dedup ledger and the
-record the DM itself will be graded on later. The same strings the DM carries go
-to the `daily_ideas` tab (one row per card) for the PWA's Home page, so the app
-and the DM cannot disagree; the Firestore mirror copies that tab.
+on live prices, sizes them for each book, adds the WSR's take-profit trims on
+positions in profit (graded from the seller's side), and sends one message to the
+personal DM lane (never the group: it names account cash). The same strings the
+DM carries go to the `daily_ideas` tab (one row per card) for the PWA's Home page,
+so the app and the DM cannot disagree; the workflow then starts the Firestore
+mirror, whose own schedule runs hours late.
+
+TWO SENDS A DAY
+  preopen  08:00-09:29 ET: the plan, on pre-market prices, with a direction block.
+           Writes the app's rows but not the ledger: it is a preview, not a graded list.
+  open     09:40-11:30 ET: the re-check on live prices. Logged to `ideas_log`, the
+           once-a-day dedup ledger and the record the DM will be graded on later.
+           If a plan went out, the message only says what changed.
 
 SCHEDULE
-  .github/workflows/daily-ideas-dm.yml fires at 13:45, 14:45 and 15:15 UTC on
-  weekdays. Only a run that lands 09:40–11:30 ET on a day SPY has traded sends,
-  so one of the 13:45/14:45 slots is always ~09:45 ET whatever the DST season;
-  the rest no-op on the ideas_log row.
+  deploy/vm/casaa_dispatch.py on the GCP VM starts this at 08:45 and 09:47 ET,
+  because GitHub's cron runs land hours late. The workflow's cron stays as a
+  backstop: a run landing in a window sends if nothing has, and one landing after
+  the window warns that the list never went out, so a dead timer can't stay silent.
 
 USAGE
   python scripts/daily_ideas_dm.py --dry                 # live data, print only
+  python scripts/daily_ideas_dm.py --dry --phase preopen # the plan, whatever the clock says
   python scripts/daily_ideas_dm.py --fixture fixtures/daily_ideas   # offline, print only
-  python scripts/daily_ideas_dm.py                       # send (inside the window)
+  python scripts/daily_ideas_dm.py                       # send (inside a window)
   python scripts/daily_ideas_dm.py --force               # send outside the window / resend
 """
 from __future__ import annotations
@@ -43,12 +50,16 @@ from src.hold_list import hold_key  # noqa: E402
 
 log = logging.getLogger("daily_ideas_dm")
 ET = ZoneInfo("America/New_York")
+PREOPEN_WINDOW = (time(8, 0), time(9, 29))
 WINDOW = (time(9, 40), time(11, 30))
+MARKET_OPEN = time(9, 30)
+SMA_HISTORY_DAYS = 320       # calendar days, enough for a 200-day average
 
 TABS = [
     "decision_queue", "uoa_alerts", "gov_confluence_signals", "screen_candidates",
     "snapshot_caspar", "snapshot_sarah", "positions_caspar", "positions_sarah",
     "hold_list", "monthly_deposits", "earnings_calendar", "ideas_log",
+    "daily_brief_latest", "gex_regime", "macro", "daily_ideas",
 ]
 LOG_TAB = "ideas_log"
 LOG_HEADERS = ["date", "sent_at", "num", "source", "tier", "ticker", "kind", "action",
@@ -164,6 +175,36 @@ def fetch_bars(tickers: list[str], start: str) -> dict[str, di.Bars]:
     still = [t for t in want if t not in out]
     if still:
         log.warning("no prices for %d tickers after retries: %s", len(still), " ".join(still))
+    return out
+
+
+def fetch_premarket(tickers: list[str], today: str) -> dict[str, tuple[float, float, float, float]]:
+    """Today's pre-market trading per ticker: (open, high, low, last). A ticker
+    with no trade today is left out, and on a market holiday all of them are,
+    which is how the pre-open send knows the market is shut. Counts only in the
+    log: these tickers include holdings and CI logs are public."""
+    import yfinance as yf
+    names = sorted(set(tickers))
+    out: dict[str, tuple[float, float, float, float]] = {}
+    try:
+        data = yf.download(names, period="1d", interval="5m", prepost=True, auto_adjust=False,
+                           group_by="ticker", progress=False, threads=len(names) > 10)
+    except Exception as e:
+        log.warning("pre-market download failed: %s", type(e).__name__)
+        return out
+    for tk in names:
+        try:
+            df = (data[tk] if len(names) > 1 else data).dropna(subset=["Open", "High", "Low", "Close"])
+        except KeyError:
+            continue
+        if df.empty:
+            continue
+        stamps = df.index.tz_convert(ET) if df.index.tz is not None else df.index
+        df = df[stamps.strftime("%Y-%m-%d") == today]
+        if not df.empty:
+            out[tk] = (float(df["Open"].iloc[0]), float(df["High"].max()),
+                       float(df["Low"].min()), float(df["Close"].iloc[-1]))
+    log.info("pre-market: quotes for %d of %d tickers", len(out), len(names))
     return out
 
 
@@ -287,6 +328,15 @@ def build_accounts(tabs: dict, today: str, sgd_per_usd: float) -> list[di.Accoun
             tk = (p.get("ticker") or "").strip().upper()
             if tk:
                 acct.weights[tk] = di.fnum(p.get("weight")) or 0.0
+        # Prices alone get refreshed between broker syncs, so a book whose cash
+        # and share counts stand still is running on old holdings.
+        by_day: dict[str, set] = {}
+        for p in tabs.get(f"positions_{name}", []):
+            by_day.setdefault((p.get("date") or "")[:10], set()).add(
+                ((p.get("ticker") or "").strip().upper(), di.fnum(p.get("qty")) or 0.0))
+        acct.stale_since = di.stale_since(
+            [(r["date"][:10], di.fnum(r.get(cash_col)) or 0) for r in snaps],
+            [(d, frozenset(v)) for d, v in sorted(by_day.items()) if d], today)
         accounts.append(acct)
     return accounts
 
@@ -316,10 +366,40 @@ def write_cards(client, cards: list[dict], today: str) -> int:
         rows = [[str(c.get(h, "")) for h in CARD_HEADERS] for c in cards]
         n = sh.replace_today_rows(client, CARD_TAB, rows, today_prefix=today)
         log.info("wrote %d cards to %s", n, CARD_TAB)
+        _flag_sent()
         return 0
     except Exception:
         log.exception("could not write the %s tab (the DM was sent and the ledger written)", CARD_TAB)
         return 1
+
+
+def _flag_sent() -> None:
+    """Tell the workflow fresh rows exist, so it starts the Firestore mirror."""
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out:
+        with open(out, "a") as f:
+            f.write("sent=true\n")
+
+
+def warn_if_missed(tabs: dict, now_et: datetime, today: str) -> int:
+    """A run landing after the window: if SPY traded and no list went out, say
+    so once, because a dead timer would otherwise look exactly like a quiet day."""
+    if any(r.get("date") == today for r in tabs.get(LOG_TAB, [])):
+        return 0
+    spy = fetch_bars(["SPY"], (now_et.date() - timedelta(days=7)).isoformat()).get("SPY")
+    if spy is None or spy.dates[-1] != today:
+        return 0
+    from src import telegram as tg, sheets as sh
+    sgt = now_et.astimezone(di.SGT).strftime("%H:%M")
+    tg.ping_daily_ideas(f"⚠️ <b>No ideas list today.</b> The {di.RECHECK_ET[0]:02d}:{di.RECHECK_ET[1]:02d} ET "
+                        f"re-check never ran and it is now {now_et.strftime('%H:%M')} ET · {sgt} SGT. "
+                        f"Check the casaa-dispatch timer on the VM.")
+    client = sh.authenticate()
+    sh.ensure_headers(client, LOG_TAB, LOG_HEADERS)
+    row = {"date": today, "sent_at": now_et.strftime("%Y-%m-%dT%H:%M"), "num": 0, "source": "missed"}
+    sh.append_rows(client, LOG_TAB, [[str(row.get(h, "")) for h in LOG_HEADERS]])
+    log.info("warned that today's list never went out")
+    return 0
 
 
 def run(args) -> int:
@@ -329,17 +409,30 @@ def run(args) -> int:
               else datetime.now(ET))
     today = now_et.date().isoformat()
     live_send = not (args.dry or fixture)
+    clock = now_et.time()
+    phase = args.phase or ("preopen" if clock < MARKET_OPEN else "open")
 
+    tabs = None
     if live_send and not args.force:
-        if now_et.weekday() >= 5 or not (WINDOW[0] <= now_et.time() <= WINDOW[1]):
-            log.info("outside the send window (%s ET) — nothing to do", now_et.strftime("%a %H:%M"))
+        if now_et.weekday() >= 5:
+            log.info("weekend — nothing to do")
+            return 0
+        if clock > WINDOW[1]:
+            return warn_if_missed(load_tabs_sheet(), now_et, today)
+        if not (PREOPEN_WINDOW[0] <= clock <= PREOPEN_WINDOW[1] or WINDOW[0] <= clock <= WINDOW[1]):
+            log.info("outside the send windows (%s ET) — nothing to do", now_et.strftime("%H:%M"))
             return 0
 
     tabs = load_tabs_dir(fixture) if fixture else load_tabs_sheet()
+    todays_cards = [r for r in tabs.get(CARD_TAB, []) if r.get("date") == today]
 
-    if live_send and not args.force and any(r.get("date") == today for r in tabs.get(LOG_TAB, [])):
-        log.info("ideas DM already sent today — skipping")
-        return 0
+    if live_send and not args.force:
+        if any(r.get("date") == today for r in tabs.get(LOG_TAB, [])):
+            log.info("ideas DM already sent today — skipping")
+            return 0
+        if phase == "preopen" and any(r.get("phase") == "preopen" for r in todays_cards):
+            log.info("pre-open plan already sent today — skipping")
+            return 0
 
     dq = tabs["decision_queue"]
     hist = {
@@ -367,14 +460,22 @@ def run(args) -> int:
         yahoo = meta.get("yahoo_earnings", {})
     else:
         first = min([i.date for v in hist.values() for i in v] + [today])
-        start = (date.fromisoformat(first) - timedelta(days=45)).isoformat()
+        start = min(date.fromisoformat(first) - timedelta(days=45),
+                    date.fromisoformat(today) - timedelta(days=SMA_HISTORY_DAYS)).isoformat()
         log.info("fetching %d tickers since %s", len(tickers), start)
         bars = fetch_bars(sorted(tickers), start)
         sgd_per_usd = fetch_fx()
         kinds = fetch_kinds([i.ticker for i in wsr])
         opts = {}
         yahoo = fetch_earnings(sorted(t for t in {i.ticker for i in wsr + uoa} | {e.ticker for e in exits}
-                                      if kinds.get(t) != "ETF"))
+                                      | {tk for _, tk in holdings} if kinds.get(t) != "ETF"))
+        if phase == "preopen":
+            quotes = fetch_premarket(sorted({"SPY", "QQQ"} | {i.ticker for i in wsr + uoa}
+                                            | {m["ticker"] for m in mom} | {e.ticker for e in exits}), today)
+            if live_send and not args.force and "SPY" not in quotes:
+                log.info("SPY has no pre-market trades for %s — market closed, nothing sent", today)
+                return 0
+            bars = di.with_premarket(bars, quotes, today)
 
     spy = bars.get("SPY")
     if live_send and not args.force and (spy is None or spy.dates[-1] != today):
@@ -405,7 +506,10 @@ def run(args) -> int:
     dm = di.build_dm(now_et=now_et, today=today, records=records, wsr=wsr, uoa=uoa, gov=gov,
                      momentum=mom, bars=bars, accounts=accounts, sgd_per_usd=sgd_per_usd,
                      kinds=kinds, earnings=earnings, blocked=blocked, growth_leg_on=growth_on,
-                     exits=exits, holdings=holdings)
+                     exits=exits, holdings=holdings, phase=phase,
+                     direction=di.direction_lines(tabs.get("daily_brief_latest", []), spy, today),
+                     levels=di.level_lines(bars, tabs.get("gex_regime", []), tabs.get("macro", []), today),
+                     prior_cards=[r for r in todays_cards if r.get("phase") == "preopen"] if phase == "open" else None)
 
     for s, r in records.items():
         log.info("record %-8s n=%-4d beat=%-4d alpha=%+.2f%% t=%s weeks=%d tier=%s "
@@ -422,6 +526,9 @@ def run(args) -> int:
     tg.ping_daily_ideas(dm.text)
     from src import sheets as sh
     client = sh.authenticate()
+    if phase == "preopen":      # a preview: not graded, and it must not block the re-check
+        log.info("sent the pre-open plan: %d sized, %d exits", len(dm.sized), len(dm.exits))
+        return write_cards(client, dm.cards, today)
     sh.ensure_headers(client, LOG_TAB, LOG_HEADERS)
     rows = dm.log_rows or []
     rows.append({"date": today, "sent_at": now_et.strftime("%Y-%m-%dT%H:%M"), "num": 0,
@@ -438,6 +545,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry", action="store_true", help="print the DM instead of sending it")
     ap.add_argument("--fixture", help="offline run from a fixture folder (implies --dry)")
     ap.add_argument("--force", action="store_true", help="ignore the time window and the once-a-day ledger")
+    ap.add_argument("--phase", choices=("preopen", "open"), help="default: by the clock, before or after 09:30 ET")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s", stream=sys.stderr)
     if not args.fixture:

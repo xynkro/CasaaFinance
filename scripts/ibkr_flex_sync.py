@@ -13,6 +13,17 @@ Flow (IBKR Flex Web Service v3):
 Auth: token from env IB_FLEX_TOKEN (CI secret / local export — NEVER committed).
 Query: --query <id> or env IB_FLEX_QUERY_ID.
 
+Sarah's book (SGD base) is optional and INERT until configured. It is built
+fresh from Flex when EITHER
+  (a) the main report also carries her account (accounts linked under one
+      login; the report is split by accountId), OR
+  (b) env IB_FLEX_TOKEN_SARAH + IB_FLEX_QUERY_ID_SARAH are both set (her own
+      login, her own Flex query).
+Otherwise — or if her data is missing/incomplete/unfetchable — she is carried
+forward exactly as before (never clobbered with emptiness) and Caspar's sync
+still completes; the exit code is Caspar's. See
+docs/runbooks/ibkr-flex-both-books.md.
+
 Usage:
   IB_FLEX_TOKEN=... python scripts/ibkr_flex_sync.py --query 1501198          # print positions
   IB_FLEX_TOKEN=... python scripts/ibkr_flex_sync.py --query 1501198 --json   # raw JSON
@@ -22,9 +33,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import xml.etree.ElementTree as ET
+from typing import Callable, Mapping
 
 import requests
 
@@ -84,14 +97,60 @@ def fetch_report(token: str, query_id: str, *, tries: int = 18, wait: float = 8.
     raise RuntimeError(f"Flex report {query_id} not ready after {tries} polls")
 
 
+def _iter_tagged(root: ET.Element, tag: str):
+    """Yield (account_id, element) for every `tag` element in the report.
+
+    A Flex report is FlexQueryResponse > FlexStatements > FlexStatement(accountId)
+    > section > rows. A query covering several accounts is expected to carry one
+    FlexStatement per account, but that is not something we could verify from
+    IBKR's docs, so the account is resolved defensively: the row's own
+    accountId wins, else the enclosing FlexStatement's, else "" (unlabelled —
+    a bare/legacy single-account report). That handles both "one statement per
+    account" and "rows from several accounts mixed in one statement".
+    """
+    stmts = list(root.iter("FlexStatement"))
+    if not stmts:
+        for el in root.iter(tag):
+            yield (el.attrib.get("accountId") or "", el)
+        return
+    for st in stmts:
+        sid = st.attrib.get("accountId") or ""
+        for el in st.iter(tag):
+            yield (el.attrib.get("accountId") or sid, el)
+
+
+def _fx(v) -> float | None:
+    """fxRateToBase as a positive float, or None when absent/blank/garbage."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f > 0 else None
+
+
+def report_account_ids(report_xml: str) -> set[str]:
+    """Every non-empty account id the report names (statements, rows, info)."""
+    root = ET.fromstring(report_xml)
+    ids = {st.attrib.get("accountId") or "" for st in root.iter("FlexStatement")}
+    for tag in ("OpenPosition", "EquitySummaryByReportDateInBase", "AccountInformation"):
+        ids.update(a for a, _ in _iter_tagged(root, tag))
+    ids.discard("")
+    return ids
+
+
 def parse_open_positions(report_xml: str) -> list[dict]:
-    """Extract OpenPosition rows (stocks + options) as plain dicts."""
+    """Extract OpenPosition rows (stocks + options) as plain dicts.
+
+    All values are in the POSITION's own currency (`currency`); `fx_to_base`
+    (Flex `fxRateToBase`) converts one unit of that currency to the account's
+    base currency. Caspar is USD-base so it is 1 for his USD names.
+    """
     root = ET.fromstring(report_xml)
     out = []
-    for el in root.iter("OpenPosition"):
+    for acct, el in _iter_tagged(root, "OpenPosition"):
         a = el.attrib
         out.append({
-            "account": a.get("accountId", ""),
+            "account": acct,
             "asset": a.get("assetCategory", ""),     # STK | OPT | ...
             "symbol": a.get("symbol", ""),
             "qty": float(a.get("position", 0) or 0),
@@ -100,6 +159,10 @@ def parse_open_positions(report_xml: str) -> list[dict]:
             "cost_price": float(a.get("costBasisPrice", 0) or 0),
             "cost_money": float(a.get("costBasisMoney", 0) or 0),
             "upl": float(a.get("fifoPnlUnrealized", 0) or 0),
+            # Native currency + conversion to the account's base currency.
+            "currency": (a.get("currency") or "").upper(),
+            "fx_to_base": _fx(a.get("fxRateToBase")),
+            "level": (a.get("levelOfDetail") or "").upper(),   # SUMMARY | LOT
             # Option detail (blank for stocks)
             "put_call": a.get("putCall", ""),
             "strike": a.get("strike", ""),
@@ -107,26 +170,53 @@ def parse_open_positions(report_xml: str) -> list[dict]:
             "multiplier": a.get("multiplier", ""),
             "underlying": a.get("underlyingSymbol", ""),
         })
-    return out
+    # A query that ticks BOTH Summary and Lot detail returns each position
+    # twice (one SUMMARY row + its LOT rows) — summing them would double the
+    # share count. Where an account has SUMMARY rows, drop its LOT rows.
+    summarised = {r["account"] for r in out if r["level"] == "SUMMARY"}
+    return [r for r in out if not (r["level"] == "LOT" and r["account"] in summarised)]
 
 
-def parse_account(report_xml: str) -> dict:
-    """Best-effort account + equity summary (NLV/cash) from the report."""
+def parse_account(report_xml: str, account_id: str | None = None,
+                  *, unlabelled: bool = True) -> dict:
+    """Best-effort account + equity summary (NLV/cash) for ONE account.
+
+    A multi-account report holds one equity-summary row per account (and per
+    report date); taking "the last row in the document" would hand the second
+    account's NLV to the first. So rows are matched on `account_id`.
+    `account_id=None` means "the first account the report names" (identical to
+    the old behaviour for a single-account report). `unlabelled` also accepts
+    rows that carry no account id at all (bare single-account reports).
+    """
     root = ET.fromstring(report_xml)
-    info = {}
-    ai = root.find(".//AccountInformation")
+    infos = list(_iter_tagged(root, "AccountInformation"))
+    eqs = list(_iter_tagged(root, "EquitySummaryByReportDateInBase"))
+    if account_id is None:
+        account_id = next((a for a, _ in infos + eqs if a), "")
+
+    def wanted(a: str) -> bool:
+        return a == account_id or (unlabelled and a == "")
+
+    info: dict = {}
+    ai = next((el for a, el in infos if wanted(a)), None)
     if ai is not None:
         info["account"] = ai.attrib.get("accountId", "")
         info["currency"] = ai.attrib.get("currency", "")
         info["name"] = ai.attrib.get("name", "")
-    # Latest equity summary row (NLV/cash/stock) if present.
-    eq = list(root.iter("EquitySummaryByReportDateInBase"))
-    if eq:
-        last = eq[-1].attrib
+    # Latest equity summary row (NLV/cash/stock) by reportDate, if present.
+    mine = [el for a, el in eqs if wanted(a)]
+    if mine:
+        last = max(enumerate(mine),
+                   key=lambda t: (t[1].attrib.get("reportDate", ""), t[0]))[1].attrib
         info["nlv"] = float(last.get("total", 0) or 0)
         info["cash"] = float(last.get("cash", 0) or 0)
         info["stock"] = float(last.get("stock", 0) or 0)
+        info["options"] = float(last.get("options", 0) or 0)
         info["report_date"] = last.get("reportDate", "")
+        info["eq_currency"] = (last.get("currency") or "").upper()
+        # Whether the query actually selected total + cash: absence must not
+        # read as a genuine zero balance.
+        info["eq_has_total_cash"] = "total" in last and "cash" in last
     return info
 
 
@@ -134,10 +224,29 @@ def parse_account(report_xml: str) -> dict:
 # Maps Flex rows into the exact JSON shape ibkr_grab.build_grab_json produces,
 # so the existing `sync.py grab --json` pipeline (positions_caspar /
 # snapshot_caspar / options tabs) works unchanged. Caspar comes fresh from
-# Flex; Sarah is CARRIED FORWARD from the latest existing grab file (this Flex
-# query covers U6773281 only — never clobber her data with emptiness).
+# Flex. Sarah is fresh from Flex only when her data is present AND complete
+# (see resolve_sarah); otherwise she is CARRIED FORWARD from the latest
+# existing grab file — never clobber her data with emptiness.
+#
+# UNITS (Sarah, SGD base) — must match what the TWS grab wrote, because the
+# Sheet tabs, yahoo_grab.py and the PWA (lib/sgxFx.ts toAcctCcy) all assume it:
+#   * positions[] / options[]  (avg_cost, last, mkt_val, upl) are in each
+#     position's NATIVE currency (USD for US names, SGD for SGX) — exactly what
+#     ib_insync's portfolio() returned. They are NOT converted: the PWA
+#     multiplies USD rows by USDSGD itself at read time, so pre-converting here
+#     would apply the FX rate twice.
+#   * summary net_liquidation_sgd / total_cash_sgd are SGD (account base).
+#   * summary unrealized_pnl_mixed feeds Sheet column upl_sgd, so it is SGD:
+#     sum(native upl x Flex fxRateToBase). (The TWS grab always wrote 0 here;
+#     yahoo_grab / daily_tracker later overwrite it with the same SGD sum.)
+#   * Flex OpenPosition values are in the position currency; fxRateToBase
+#     (position ccy -> base) is used only for those aggregates and weight_pct.
 
 CASPAR_ACCOUNT = "U6773281"
+SARAH_ACCOUNT = "U16000287"
+SARAH_BASE = "SGD"
+ENV_SARAH_TOKEN = "IB_FLEX_TOKEN_SARAH"
+ENV_SARAH_QUERY = "IB_FLEX_QUERY_ID_SARAH"
 GRABS_DIR = "PortfolioGrabs"
 
 
@@ -170,15 +279,22 @@ def flex_cost_price(p: dict, multiplier: float = 1.0) -> float:
     return abs(money) / (abs(qty) * mult)
 
 
-def _flex_stock_row(p: dict, nlv: float) -> dict:
+def _flex_stock_row(p: dict, nlv: float, to_base: bool = False) -> dict:
+    """Stock row in the position's NATIVE currency.
+
+    `to_base` only affects weight_pct: `nlv` is in the account's base currency,
+    so a native-currency mkt_val is scaled by fx_to_base first. Left False for
+    Caspar (unchanged behaviour); True for Sarah, whose book mixes USD and SGD.
+    """
     mkt_val = p["value"]
     cost_price = flex_cost_price(p)
     upl = p["upl"] or round((p["mark"] - cost_price) * p["qty"], 2)
+    fx = (p.get("fx_to_base") or 1.0) if to_base else 1.0
     return {
         "symbol": p["symbol"], "sec_type": "STK", "exchange": "",
         "qty": p["qty"], "avg_cost": cost_price, "last": p["mark"],
         "mkt_val": mkt_val, "upl": upl,
-        "weight_pct": round(abs(mkt_val) / nlv * 100, 2) if nlv else 0,
+        "weight_pct": round(abs(mkt_val) * fx / nlv * 100, 2) if nlv else 0,
     }
 
 
@@ -215,14 +331,146 @@ def _latest_grab(root: str) -> dict:
         return {}
 
 
-def build_flex_grab(account: dict, positions: list[dict], prev_grab: dict) -> dict:
-    """Assemble the PortfolioGrab JSON: fresh Flex Caspar + carried Sarah."""
+class SarahDataError(ValueError):
+    """Sarah's Flex data is absent/incomplete — carry her forward instead.
+
+    Messages are shown in public CI logs: reasons only, never values.
+    """
+
+
+def build_sarah_block(account: dict, positions: list[dict], prev_summary: dict) -> dict:
+    """Sarah's `accounts.sarah` block from Flex rows already scoped to her.
+
+    Raises SarahDataError unless the data is complete enough to overwrite her
+    Sheet rows safely. See the UNITS note above for what each field means.
+    """
+    if not positions and not account:
+        raise SarahDataError("no rows for her account in the report")
+    nlv = float(account.get("nlv", 0) or 0)
+    if not account.get("eq_has_total_cash") or nlv <= 0:
+        raise SarahDataError("no equity summary with total + cash")
+    base = (account.get("currency") or account.get("eq_currency") or "").upper()
+    if not base:
+        raise SarahDataError("base currency not in report (select currency)")
+    if base != SARAH_BASE:
+        raise SarahDataError(f"base currency is {base}, expected {SARAH_BASE}")
+    stock_sgd = float(account.get("stock", 0) or 0)
+    if not positions and (stock_sgd or float(account.get("options", 0) or 0)):
+        # Equity summary says she holds something but the position section is
+        # missing — writing an empty book would erase her holdings.
+        raise SarahDataError("equity summary shows holdings but no open positions came back")
+
+    stocks, options, upl_sgd = [], [], 0.0
+    for p in positions:
+        if p["asset"] not in ("STK", "OPT"):
+            continue
+        fx = p.get("fx_to_base")
+        if not fx:
+            if (p.get("currency") or "").upper() != base:
+                raise SarahDataError("a position has no fxRateToBase (select it)")
+            fx = 1.0
+        p = {**p, "fx_to_base": fx}
+        row = (_flex_stock_row(p, nlv, to_base=True) if p["asset"] == "STK"
+               else _flex_option_row(p))
+        (stocks if p["asset"] == "STK" else options).append(row)
+        upl_sgd += row["upl"] * fx          # native upl -> SGD for the aggregate only
+
+    return {
+        "account_id": SARAH_ACCOUNT,
+        "base_currency": SARAH_BASE,
+        "summary": {
+            "net_liquidation_sgd": nlv,
+            # Flex EOD statements carry no margin fields — carry the previous
+            # grab's values rather than writing 0s (same as Caspar).
+            "buying_power_sgd": float(prev_summary.get("buying_power_sgd", 0) or 0),
+            "total_cash_sgd": float(account.get("cash", 0) or 0),
+            "unrealized_pnl_mixed": round(upl_sgd, 2),    # SGD despite the legacy key name
+            "realized_pnl": 0.0,
+            "excess_liquidity_sgd": float(prev_summary.get("excess_liquidity_sgd", 0) or 0),
+            "total_market_value_mixed": stock_sgd,         # SGD (equity-summary stock, base ccy)
+        },
+        "positions": stocks,
+        "options": options,
+        "trades": [],
+    }
+
+
+def _sarah_from_report(report_xml: str, prev_summary: dict, *, unlabelled: bool) -> dict:
+    """Her block out of one report. `unlabelled`: rows with no accountId are
+    hers (true for her own login's report, false when split from the main one,
+    where unlabelled rows belong to Caspar)."""
+    wanted = lambda a: a == SARAH_ACCOUNT or (unlabelled and a == "")   # noqa: E731
+    rows = [p for p in parse_open_positions(report_xml) if wanted(p["account"])]
+    account = parse_account(report_xml, SARAH_ACCOUNT, unlabelled=unlabelled)
+    return build_sarah_block(account, rows, prev_summary)
+
+
+def _safe_err(e: BaseException, *secrets: str) -> str:
+    """One-line, secret-free description of a failure for public CI logs.
+
+    requests' exceptions embed the full URL — including the `t=<token>` query
+    parameter — so for those only the class name is kept.
+    """
+    name = type(e).__name__
+    if isinstance(e, requests.RequestException):
+        return name
+    msg = " ".join(str(e).split())
+    for s in secrets:
+        if s:
+            msg = msg.replace(s, "***")
+    msg = re.sub(r"([?&]t=)[^&\s]+", r"\1***", msg)
+    return f"{name}: {msg[:160]}"
+
+
+def resolve_sarah(main_report: str, prev_grab: dict, env: Mapping[str, str],
+                  fetch: Callable[[str, str], str] | None = None) -> tuple[dict | None, str]:
+    """Decide how Sarah's book is produced. Never raises.
+
+    Returns (fresh_block, status_line). A None block means "carry forward" and
+    the caller keeps today's behaviour. The status line is printed as-is, so it
+    carries reasons only — no balances, share counts, tokens or query ids.
+    """
+    fetch = fetch or fetch_report
+    prev = ((prev_grab.get("accounts") or {}).get("sarah") or {}).get("summary") or {}
+    token = (env.get(ENV_SARAH_TOKEN) or "").strip()
+    qid = (env.get(ENV_SARAH_QUERY) or "").strip()
+    reasons: list[str] = []
+
+    # (a) Accounts linked under one login: she is already in the main report.
+    try:
+        if SARAH_ACCOUNT in report_account_ids(main_report):
+            return (_sarah_from_report(main_report, prev, unlabelled=False),
+                    "sarah: fresh from Flex (split from the main report by accountId)")
+    except Exception as e:                                  # noqa: BLE001
+        reasons.append(f"main report has her account but it is unusable ({_safe_err(e)})")
+
+    # (b) Her own login: second token + query.
+    if token and qid:
+        try:
+            return (_sarah_from_report(fetch(token, qid), prev, unlabelled=True),
+                    "sarah: fresh from Flex (second report)")
+        except Exception as e:                              # noqa: BLE001
+            reasons.append(f"second report unusable ({_safe_err(e, token, qid)})")
+    elif token or qid:
+        reasons.append(f"{ENV_SARAH_QUERY if token else ENV_SARAH_TOKEN} is not set")
+
+    if not reasons:
+        return None, "sarah: carried forward (no Sarah credentials set, her account not in the main report)"
+    return None, "sarah: carried forward — " + "; ".join(reasons)
+
+
+def build_flex_grab(account: dict, positions: list[dict], prev_grab: dict,
+                    sarah: dict | None = None) -> dict:
+    """Assemble the PortfolioGrab JSON: fresh Flex Caspar + Sarah.
+
+    `sarah` is a complete block from build_sarah_block, or None to carry her
+    forward verbatim from `prev_grab` (the original behaviour).
+    """
     from datetime import datetime
     nlv = float(account.get("nlv", 0) or 0)
-    # Caspar's rows ONLY — if the Flex query is later widened to include
-    # Sarah's account (U16000287), her rows must not leak into his book.
-    # (Her account then needs its own mapping; until that lands she stays
-    # carried-forward below.)
+    # Caspar's rows ONLY — when the Flex report also carries Sarah's account
+    # (U16000287), her rows must not leak into his book; they go through
+    # build_sarah_block instead.
     mine = [p for p in positions
             if (p.get("account") or CASPAR_ACCOUNT) == CASPAR_ACCOUNT]
     stocks = [_flex_stock_row(p, nlv) for p in mine if p["asset"] == "STK"]
@@ -256,13 +504,50 @@ def build_flex_grab(account: dict, positions: list[dict], prev_grab: dict) -> di
                 "options": options,
                 "trades": [],
             },
-            # Sarah: this Flex query covers U6773281 only — carry her account
-            # verbatim from the latest grab (same role as ibkr_grab --merge).
-            "sarah": ((prev_grab.get("accounts") or {}).get("sarah")
-                      or {"account_id": "U16000287", "base_currency": "SGD",
-                          "summary": {}, "positions": [], "options": [], "trades": []}),
+            # Sarah: fresh from Flex when resolve_sarah produced a complete
+            # block; otherwise carried verbatim from the latest grab (same role
+            # as ibkr_grab --merge). With no prior grab (CI) the carried block
+            # is empty, which sync.py's per-account gate skips — her existing
+            # Sheet rows are left untouched, never overwritten with emptiness.
+            "sarah": (sarah if sarah is not None
+                      else ((prev_grab.get("accounts") or {}).get("sarah")
+                            or {"account_id": SARAH_ACCOUNT, "base_currency": SARAH_BASE,
+                                "summary": {}, "positions": [], "options": [], "trades": []})),
         },
     }
+
+
+def run_sync(report: str, root: str, env: Mapping[str, str], *,
+             fetch: Callable[[str, str], str] | None = None,
+             runner: Callable | None = None) -> int:
+    """Build + write the grab JSON and push it through `sync.py grab`.
+
+    Sarah is resolved AFTER Caspar's report is already in hand and can never
+    raise out of here, so a problem on her side cannot fail his sync. The
+    return value is sync.py's exit code, i.e. Caspar's (and Sarah's, when
+    fresh) write result.
+    """
+    import subprocess
+    runner = runner or subprocess.run
+    positions = parse_open_positions(report)
+    account = parse_account(report, CASPAR_ACCOUNT)
+    out_dir = os.path.join(root, GRABS_DIR)
+    prev = _latest_grab(out_dir)
+    try:
+        sarah, sarah_status = resolve_sarah(report, prev, env, fetch)
+    except Exception as e:                                  # noqa: BLE001 — belt and braces
+        sarah, sarah_status = None, f"sarah: carried forward — unexpected error ({_safe_err(e)})"
+    grab = build_flex_grab(account, positions, prev, sarah)
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{grab['grab_date'].replace('-', '')}_PortfolioGrab.json")
+    with open(out_path, "w") as f:
+        json.dump(grab, f, indent=2)
+    print(f"Saved {out_path} "
+          f"({len(grab['accounts']['caspar']['positions'])} stocks, "
+          f"{len(grab['accounts']['caspar']['options'])} option legs)")
+    print(sarah_status)
+    r = runner([sys.executable, "src/sync.py", "grab", "--json", out_path], cwd=root)
+    return r.returncode
 
 
 def main() -> int:
@@ -283,29 +568,24 @@ def main() -> int:
         return 2
 
     report = fetch_report(token, args.query)
-    positions = parse_open_positions(report)
-    account = parse_account(report)
 
     if args.json:
-        print(json.dumps({"account": account, "positions": positions}, indent=2))
+        # Local debugging only: every account in the report, tagged by `account`.
+        print(json.dumps({"account": parse_account(report, CASPAR_ACCOUNT),
+                          "positions": parse_open_positions(report)}, indent=2))
         return 0
 
     if args.sync:
-        import subprocess
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        grab = build_flex_grab(account, positions, _latest_grab(os.path.join(root, GRABS_DIR)))
-        out_dir = os.path.join(root, GRABS_DIR)
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = os.path.join(out_dir, f"{grab['grab_date'].replace('-', '')}_PortfolioGrab.json")
-        with open(out_path, "w") as f:
-            json.dump(grab, f, indent=2)
-        print(f"Saved {out_path} "
-              f"({len(grab['accounts']['caspar']['positions'])} stocks, "
-              f"{len(grab['accounts']['caspar']['options'])} option legs; "
-              f"sarah carried forward)")
-        r = subprocess.run([sys.executable, "src/sync.py", "grab", "--json", out_path], cwd=root)
-        return r.returncode
+        return run_sync(report, root, os.environ)
 
+    positions = parse_open_positions(report)
+    account = parse_account(report, CASPAR_ACCOUNT)
+
+    # Interactive print is Caspar's book only (a report that also carries
+    # Sarah's account must not show her rows as his).
+    positions = [p_ for p_ in positions
+                 if (p_.get("account") or CASPAR_ACCOUNT) == CASPAR_ACCOUNT]
     stk = [p_ for p_ in positions if p_["asset"] == "STK"]
     opt = [p_ for p_ in positions if p_["asset"] == "OPT"]
     acct = account.get("account") or (positions[0]["account"] if positions else "?")

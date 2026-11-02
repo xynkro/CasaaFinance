@@ -15,10 +15,12 @@ Design agreed with Caspar on 2026-10-31, from a mock built on live Sheet data:
   - Budget = cash on hand + the month's deposit. The DM says which ideas fit
     now and which wait for the deposit. Deposit amounts live in the Sheet
     (`monthly_deposits` tab), never in this public repo.
-  - Both books in one DM, every size labelled by account. It names account
-    cash, so it only ever goes to the personal DM lane, which fails closed.
-  - Sent ~15 min after the US open, after re-checking every idea on live
-    prices, so an idea whose stop broke this morning never reaches the DM.
+  - Both books in one DM, each with its own section. It names account cash,
+    so it only ever goes to the personal DM lane, which fails closed.
+  - Two sends (Caspar, 2026-11-02): a pre-open plan with a direction block,
+    then a re-check ~15 min after the US open on live prices, so an idea whose
+    stop broke this morning is dropped. The re-check says only what changed,
+    and only it goes in the graded ledger.
   - Take-profit exits (Caspar, 2026-11-01: "If it goes up, we sell and take
     profits"): the WSR's TRIM rows on positions that are in profit, at the
     WSR's own share count. Graded by the same rule from the other side — did
@@ -38,6 +40,7 @@ import statistics as st
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
+from zoneinfo import ZoneInfo
 
 HOLD_DAYS = 20          # trading days each graded idea is held
 COST_PER_SIDE = 0.001   # slippage and commission allowance per trade: 10 bps
@@ -53,6 +56,12 @@ WSR_MAX_AGE_DAYS = 8         # a WSR row older than one weekly cycle is stale
 TRIM_GAP_DAYS = 14           # a trim re-stated daily is one idea until it lapses 2 weeks
 MAX_EXITS = 5                # take-profit exits per DM
 TELEGRAM_LIMIT = 4096
+SGT = ZoneInfo("Asia/Singapore")
+RECHECK_ET = (9, 47)         # the post-open re-check, ET wall clock
+STALE_BOOK_DAYS = 10         # cash and share counts this still = prices-only data
+EARNINGS_AHEAD_DAYS = 7      # a book's section lists reports due this soon
+GEX_MAX_AGE_DAYS = 5         # older dealer levels are not shown
+MIN_BRIEF_CALLS = 10         # the brief's record is shown from this many calls
 
 # Index ETFs are excluded from the options-flow record: graded against SPY,
 # a SPY call is SPY, so they would pull the record toward zero by construction.
@@ -775,7 +784,7 @@ def check_live(idea: Idea, b: Bars | None, today: str) -> str | None:
     if idea.stop is not None:                       # the source's own stop
         idea.stop_basis = "source stop"
         if idea.last < idea.stop:
-            return f"stop hit today, {pct(idea.chg_1d, 0)}"
+            return stop_note(b, today, idea.chg_1d)
     if idea.is_option:
         if idea.stop is None:
             idea.stop, idea.stop_basis = twenty_day_low(b, today), "20-day low"
@@ -900,6 +909,7 @@ class Account:
     deposit_ccy: str = "SGD"
     deposit_landed: bool = False
     weights: dict = field(default_factory=dict)   # ticker → share of NLV
+    stale_since: str = ""      # when set, only prices have moved since this date
 
     @property
     def label(self) -> str:
@@ -984,6 +994,166 @@ def allocate(numbered: list[tuple[int, Idea]], a: Account, sgd_per_usd: float) -
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Direction block and stale-book check (shared by both phases)
+# ─────────────────────────────────────────────────────────────────────────
+
+def with_premarket(bars: dict[str, Bars], quotes: dict[str, tuple[float, float, float, float]],
+                   today: str) -> dict[str, Bars]:
+    """Add today's pre-market trading to each ticker as a partial bar, from
+    ticker → (open, high, low, last). grade() never reads today's bar, so the
+    records can't move, and a thinly traded name with no quote keeps its last
+    close and says which session that close is from."""
+    out = dict(bars)
+    for tk, (o, h, l, c) in quotes.items():
+        b = bars.get(tk)
+        if b is None or not b.dates or b.dates[-1] >= today or not b.c[-1]:
+            continue
+        out[tk] = Bars(b.dates + [today], b.o + [o], b.h + [h], b.l + [l], b.c + [c],
+                       b.adj + [b.adj[-1] * c / b.c[-1]])
+    return out
+
+
+def session_word(b: Bars, today: str) -> str:
+    """'today' when the numbers include today's trading, else the last session's weekday."""
+    ti, n = _today_bar(b, today)
+    if ti is not None or not n:
+        return "today"
+    return day(b.dates[n - 1]).strftime("%a")
+
+
+def stop_note(b: Bars, today: str, chg: float) -> str:
+    """Why a name under its stop was dropped. A stock can bounce and still sit
+    under a stop that broke in an earlier session."""
+    when = session_word(b, today)
+    if chg > 0:
+        return f"still below its stop, {pct(chg, 0)} {when}"
+    return f"stop hit {when}, {pct(chg, 0)}"
+
+
+def session_change(b: Bars, today: str) -> tuple[str, float]:
+    """(weekday, change) of the last completed session."""
+    _, n = _today_bar(b, today)
+    if n < 2:
+        return "", 0.0
+    return day(b.dates[n - 1]).strftime("%a"), b.c[n - 1] / b.c[n - 2] - 1
+
+
+def sma(b: Bars, today: str, n: int) -> float | None:
+    """Average of the last n completed closes."""
+    _, k = _today_bar(b, today)
+    return st.mean(b.c[k - n:k]) if k >= n else None
+
+
+def direction_record(brief_rows: list[dict], spy: Bars, today: str) -> tuple[int, int]:
+    """How often the morning brief's bullish/bearish call got SPY's session
+    right: (hits, calls). The brief is written before that day's US session and
+    stamped on the same calendar date. Neutral calls and non-trading days don't count."""
+    calls = {}
+    for r in sorted(brief_rows, key=lambda r: str(r.get("date", ""))):
+        d = str(r.get("date", ""))[:10]
+        if d and d < today:
+            calls[d] = (r.get("sentiment") or "").strip().lower()
+    hits = n = 0
+    for d, s in calls.items():
+        i = spy.idx(d)
+        if s not in ("bullish", "bearish") or not i:
+            continue
+        n += 1
+        hits += (s == "bullish") == (spy.c[i] > spy.c[i - 1])
+    return hits, n
+
+
+def direction_lines(brief_rows: list[dict], spy: Bars | None, today: str) -> list[str]:
+    """The morning brief's read, with its own record beside it. Direction before
+    the open has not been shown to be predictable, so it reads as a posture."""
+    rows = [r for r in brief_rows if str(r.get("date", ""))[:10]]
+    if not rows:
+        return []
+    r = max(rows, key=lambda r: str(r["date"]))
+    if (day(today) - day(r["date"])).days > 1:
+        return [f"No fresh brief: the last is from {day(r['date']).strftime('%-d %b')}."]
+    read = (r.get("sentiment") or "no read").strip().lower()
+    verdict = " ".join(str(r.get("verdict") or "").split())
+    lines = [f"Morning brief: {read}." + (f" {verdict}" if verdict else "")]
+    if spy is not None:
+        hits, n = direction_record(brief_rows, spy, today)
+        if n >= MIN_BRIEF_CALLS:
+            lines.append(f"Its bullish/bearish call on SPY's day: {hits}/{n} right. A posture, not a forecast.")
+    return lines
+
+
+def level_lines(bars: dict[str, Bars], gex_rows: list[dict], macro_rows: list[dict], today: str) -> list[str]:
+    """SPY and QQQ reference levels, then the volatility and yield readings."""
+    lines = []
+    short_gamma = False
+    for sym in ("SPY", "QQQ"):
+        b = bars.get(sym)
+        if b is None:
+            continue
+        parts = [f"{n}d {px(round(v))}" for n in (50, 200) if (v := sma(b, today, n))]
+        rows = [r for r in gex_rows if (r.get("symbol") or "").upper() == sym
+                and str(r.get("date", ""))[:10] <= today]
+        if rows:
+            g = max(rows, key=lambda r: str(r["date"]))
+            if (day(today) - day(g["date"])).days <= GEX_MAX_AGE_DAYS:
+                put_wall, call_wall = fnum(g.get("put_wall")), fnum(g.get("call_wall"))
+                if put_wall and call_wall:
+                    parts.append(f"dealer walls {px(put_wall)} / {px(call_wall)} ({day(g['date']).strftime('%-d %b')})")
+                short_gamma = short_gamma or str(g.get("regime") or "").upper().startswith("NEGATIVE")
+        if parts:
+            lines.append(f"{sym}: " + " · ".join(parts))
+    tail = []
+    rows = [r for r in macro_rows if str(r.get("date", ""))[:10]]
+    if rows:
+        m = max(rows, key=lambda r: str(r["date"]))
+        vix, ten = fnum(m.get("vix")), fnum(m.get("us_10y"))
+        if vix:
+            tail.append(f"VIX {vix:.1f}")
+        if ten:
+            tail.append(f"10Y {ten:.2f}%")
+    if short_gamma:
+        tail.append("dealers short gamma, so moves can run further")
+    if tail:
+        lines.append(" · ".join(tail))
+    return lines
+
+
+def stale_since(cash: list[tuple[str, float]], holdings: list[tuple[str, frozenset]],
+                today: str, days: int = STALE_BOOK_DAYS) -> str:
+    """The date a book's cash and share counts last changed, if that is at least
+    `days` ago, else ''. A live feed moves cash by cents most days, so both
+    standing still for that long means only the prices are being refreshed.
+    Each series is (date, value), oldest first."""
+    def last_change(series):
+        if not series:
+            return ""
+        since, latest = series[-1]
+        for d, v in reversed(series):
+            if v != latest:
+                break
+            since = d
+        return since
+    since = max(last_change(cash), last_change(holdings))
+    return since if since and (day(today) - day(since)).days >= days else ""
+
+
+def book_earnings(account: str, holdings: dict | None, earnings: dict[str, Earnings], today: str,
+                  days: int = EARNINGS_AHEAD_DAYS) -> list[str]:
+    """Reports due inside `days` for what this book holds, soonest first."""
+    t = day(today)
+    out = []
+    for (acct, tk), (qty, _) in (holdings or {}).items():
+        e = earnings.get(tk)
+        if acct != account or qty <= 0 or e is None:
+            continue
+        due = [d for d in e.upcoming if 0 <= (day(d) - t).days <= days]
+        if due:
+            when = "today" if due[0] == today else day(due[0]).strftime("%a %-d %b")
+            out.append((due[0], f"{tk} {when}{e.caveat}"))
+    return [txt for _, txt in sorted(out)]
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Build + render
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -996,16 +1166,21 @@ class DM:
     log_rows: list[dict]
     exits: list[Exit] = field(default_factory=list)
     cards: list[dict] = field(default_factory=list)   # the PWA's copy of this DM, see CARD_COLUMNS
+    changes: list[str] = field(default_factory=list)  # what moved since the pre-open plan
 
 
 # The `daily_ideas` Sheet tab: one row per card the PWA shows. Every string is
 # the one the DM text carries, with the Telegram markup removed, so the PWA can
-# never disagree with the DM. `account` is only set on exit cards (a sell has to
-# say whose book it is).
+# never disagree with the DM. Sections: `meta` (one, first), then per book a
+# `book` row (cash, summary, warning, budget, earnings) followed by its `idea`,
+# `exit_note`, `exit` and `watch` rows with `account` set, then `watch` rows with
+# no account, which are for both books. The app's idea card keeps the full text
+# where the DM's second-book copy points at the first.
 CARD_COLUMNS = (
     "date", "sent_at", "section", "num", "ticker", "kind", "action", "source", "tier",
     "status", "plan", "stop", "size", "why", "notes", "record",
     "tape", "lead", "budget", "waiting", "dropped", "account",
+    "phase", "direction", "levels", "recheck", "warning",
 )
 _TAG = re.compile(r"</?[a-z][^>]*>")
 
@@ -1046,23 +1221,59 @@ def _join_nums(nums: list[int]) -> str:
     return " + ".join(f"#{n}" for n in nums)
 
 
-def _size_line(idea: Idea, accounts: list[Account], sgd_per_usd: float) -> str:
-    """Accounts the source wrote the idea for come first."""
-    order = sorted(accounts, key=lambda a: (a.name not in idea.accounts, a.name))
-    parts = []
-    for a in order:
-        units, one, reason = idea.sizes.get(a.name, (0, False, ""))
-        if units <= 0:
-            parts.append(f"{a.label} none" + (f" ({reason})" if reason else ""))
-            continue
-        unit = ("contract" if units == 1 else "contracts") if idea.is_option else "sh"
-        part = f"{a.label} {units} {unit} ≈ {usd(units * idea.unit_cost)}"
-        nlv = to_usd(a.nlv, a.ccy, sgd_per_usd)
-        if one and nlv:
-            what = "contract" if idea.is_option else "share"
-            part += f" (one {what} is {pct(idea.unit_cost / nlv, 1, sign=False)})"
-        parts.append(part)
-    return "Size: " + " · ".join(parts)
+def _sgt_clock(now_et) -> str:
+    """The same instant on a Singapore clock, when now_et knows its timezone."""
+    return now_et.astimezone(SGT).strftime("%H:%M") if now_et.tzinfo else ""
+
+
+def _cash_headline(a: Account) -> str:
+    pre = "S$" if a.ccy == "SGD" else "$"
+    cash = f"{short_money(a.cash, pre)} cash"
+    if not a.deposit:
+        return cash
+    if a.deposit_landed:
+        return f"{cash} · this month's deposit is in"
+    dep = "S$" if a.deposit_ccy == "SGD" else "$"
+    return f"{cash} · {short_money(a.deposit, dep)} deposit not in yet"
+
+
+def _book_size_line(idea: Idea, a: Account, bud: Budget, num: int, sgd_per_usd: float) -> str:
+    """One book's size for one idea, and whether its budget covers it."""
+    units, one, _ = idea.sizes[a.name]
+    unit = ("contract" if units == 1 else "contracts") if idea.is_option else "sh"
+    line = f"Size: {units} {unit} ≈ {usd(units * idea.unit_cost)}"
+    nlv = to_usd(a.nlv, a.ccy, sgd_per_usd)
+    if one and nlv:
+        what = "contract" if idea.is_option else "share"
+        line += f" (one {what} is {pct(idea.unit_cost / nlv, 1, sign=False)})"
+    if num in bud.now:
+        return f"{line} · fits cash now"
+    if num in bud.later:
+        return f"{line} · once the deposit lands"
+    return f"{line} · doesn't fit this month"
+
+
+def plan_changes(prior: list[dict], cards: list[dict]) -> list[str]:
+    """What moved between the pre-open plan and the re-check: actions that
+    appeared or went, and ones that crossed their level either way."""
+    def actions(rows):
+        out = {}
+        for c in rows:
+            if c.get("section") in ("idea", "exit"):
+                st_ = c.get("status") or ""
+                out[(c.get("account") or "", c.get("ticker") or "", c.get("action") or "")] = (
+                    "above trigger" in st_ or "below the trim level" in st_)
+        return out
+    old, new = actions(prior), actions(cards)
+    changes = []
+    for k, waiting in new.items():
+        who = f"{k[0]} {k[1]} {k[2]}".strip()
+        if k not in old:
+            changes.append(f"new: {who}")
+        elif old[k] != waiting:
+            changes.append(f"{who} {'now waiting for its level' if waiting else 'reached its level'}")
+    changes += [f"gone: {k[0]} {k[1]} {k[2]}".replace("  ", " ") for k in old if k not in new]
+    return changes
 
 
 def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
@@ -1070,14 +1281,25 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
              bars: dict[str, Bars], accounts: list[Account], sgd_per_usd: float,
              kinds: dict[str, str], earnings: dict[str, Earnings],
              blocked: list[tuple[str, str]], growth_leg_on: bool = False,
-             exits: list[Exit] = (), holdings: dict[tuple[str, str], tuple[float, float]] | None = None) -> DM:
+             exits: list[Exit] = (), holdings: dict[tuple[str, str], tuple[float, float]] | None = None,
+             phase: str = "open", direction: list[str] = (), levels: list[str] = (),
+             prior_cards: list[dict] | None = None) -> DM:
     """Re-check every candidate live, size the survivors, and render the DM.
-    `holdings` is (account, ticker) → (shares held, average cost), for exits."""
+    `holdings` is (account, ticker) → (shares held, average cost), for exits.
+    `phase` is "preopen" (bars carry pre-market as today) or "open". `prior_cards`
+    is today's pre-open plan, if one went out, so the re-check can say what moved."""
     dropped: list[str] = []
     watch: list[str] = []
     waiting: list[str] = []
     sized: list[Idea] = []
     red: dict[str, list[Idea]] = {}    # ideas from 🔴 sources: shown, never sized
+    book_watch: dict[str, list[str]] = {a.name: [] for a in accounts}
+    book_wait: dict[str, list[str]] = {a.name: [] for a in accounts}
+    book_trim_wait: dict[str, list[str]] = defaultdict(list)
+
+    def books_for(idea: Idea) -> list[str]:
+        """The books the source wrote it for; none named means both."""
+        return [a.name for a in accounts if a.name in idea.accounts]
 
     def nlv_usd(a: Account) -> float:
         return to_usd(a.nlv, a.ccy, sgd_per_usd)
@@ -1091,17 +1313,23 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
         if not idea.is_option:
             idea.kind = kinds.get(idea.ticker, "stock")
         if idea.trigger and idea.last > idea.trigger * (1 + NEAR_TRIGGER):
-            waiting.append(f"{idea.ticker} {idea.status.replace(' above trigger', '')} above {px(idea.trigger)}")
+            txt = f"{idea.ticker} {idea.status.replace(' above trigger', '')} above {px(idea.trigger)}"
+            for name in books_for(idea):
+                book_wait[name].append(txt)
+            if not books_for(idea):
+                waiting.append(txt)
             continue
         if rec.tier == "red":
             red.setdefault(idea.source, []).append(idea)
             continue
         size_idea(idea, rec.tier, accounts, sgd_per_usd)
+        lvl = f"buy-dip {px(idea.trigger)}" if idea.trigger else idea.action.lower()
+        for a in accounts:     # a book that can't take it says why, in its own section
+            units, _, reason = idea.sizes[a.name]
+            if units <= 0 and reason:
+                book_watch[a.name].append(f"• {esc(idea.ticker)}: {esc(lvl)}, no size ({esc(reason)}) "
+                                          f"{TIER_EMOJI[rec.tier]}")
         if not any(u > 0 for u, _, _ in idea.sizes.values()):
-            reasons = [f"{a.label}: {idea.sizes[a.name][2]}" for a in accounts if idea.sizes[a.name][2]]
-            lvl = f"buy-dip {px(idea.trigger)}" if idea.trigger else idea.action.lower()
-            watch.append(f"• {esc(idea.ticker)}: {esc(lvl)}, no size ({esc('; '.join(reasons))}) "
-                         f"{TIER_EMOJI[rec.tier]}")
             continue
         note = earnings_note(idea.ticker, earnings, today)
         if note:
@@ -1110,12 +1338,15 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
 
     # A 🔴 source still shows its levels — one line per source, record first.
     for src, ideas in red.items():
-        levels = []
+        by_book: dict[str, list[str]] = defaultdict(list)
         for i in sorted(ideas, key=_rank):
             where = i.status.replace(" trigger", "") if i.status else ""
             lvl = f"{i.ticker} {px(i.trigger)}" if i.trigger else f"{i.ticker} {i.action.lower()}"
-            levels.append(f"{lvl} ({where})" if where else lvl)
-        watch.append(f"• {esc(record_line(records[src]))} — levels only: {esc(' · '.join(levels))}")
+            for name in books_for(i) or list(book_watch):
+                by_book[name].append(f"{lvl} ({where})" if where else lvl)
+        watch.append(f"• {esc(record_line(records[src]))} — levels only, listed under each book")
+        for name, txts in by_book.items():
+            book_watch[name].append(f"• {esc(SOURCE_LABEL.get(src, src))} levels, no size: {esc(' · '.join(txts))}")
 
     sized.sort(key=_rank)
     for idea in sized[MAX_SIZED:]:
@@ -1134,12 +1365,13 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
         if b is None:
             continue
         last, c1, _ = move_stats(b, today)
+        when = session_word(b, today)
         if m["stop"] and last < m["stop"]:
-            dropped.append(f"{m['ticker']} (stop hit today, {pct(c1, 0)})")
+            dropped.append(f"{m['ticker']} ({stop_note(b, today, c1)})")
             continue
         if not shown:
             extra = "" if growth_leg_on else "paper leg off"
-            watch.append(f"• {esc(m['ticker'])}: momentum leader, {pct(c1)} today to {px(last)}, "
+            watch.append(f"• {esc(m['ticker'])}: momentum leader, {pct(c1)} {when} to {px(last)}, "
                          f"stop {px(m['stop'])} {esc(record_line(mrec, extra))}")
             shown = True
 
@@ -1160,7 +1392,6 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
     # level, list the rest as waiting.
     trec = records.get("wsr_trim") or Record("wsr_trim")
     sells: list[Exit] = []
-    trim_wait: list[str] = []
     for ex in exits:
         held, cost = (holdings or {}).get((ex.account, ex.ticker), (0.0, 0.0))
         why = check_exit(ex, bars.get(ex.ticker), today, held, cost)
@@ -1169,8 +1400,8 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
                 dropped.append(f"{ex.ticker} trim ({why})")
             continue
         if not ex.actionable and ex.last < ex.trigger * (1 - NEAR_TRIGGER):
-            trim_wait.append(f"{ex.ticker} {ex.status.replace(' below the trim level', '')} "
-                             f"below {px(ex.trigger)}")
+            book_trim_wait[ex.account].append(f"{ex.ticker} {ex.status.replace(' below the trim level', '')} "
+                                              f"below {px(ex.trigger)}")
             continue
         note = exit_earnings_note(ex.ticker, earnings, today)
         if note:
@@ -1178,33 +1409,50 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
         sells.append(ex)
     sells.sort(key=lambda e: (not e.actionable, -e.gain))
     for ex in sells[MAX_EXITS:]:
-        trim_wait.append(f"{ex.ticker} (over the {MAX_EXITS}-exit cap)")
+        book_trim_wait[ex.account].append(f"{ex.ticker} (over the {MAX_EXITS}-exit cap)")
     sells = sells[:MAX_EXITS]
     act_sells = sells if trec.tier != "red" else []
 
-    if blocked:
-        dropped.insert(0, f"{len(blocked)} trim{'s' if len(blocked) != 1 else ''} of underwater "
-                          f"holdings (rule)")
-
     # ── Render ──────────────────────────────────────────────────────────
-    lines: list[str] = []
     spy_b, qqq_b = bars.get("SPY"), bars.get("QQQ")
-    head = f"📈 <b>Ideas · {now_et.strftime('%a %-d %b · %H:%M')} ET</b>"
-    lines.append(head)
+    clock = now_et.strftime("%H:%M")
+    sgt = _sgt_clock(now_et)
+    stamp = f"{now_et.strftime('%a %-d %b')} · {clock} ET" + (f" · {sgt} SGT" if sgt else "")
+    preopen = phase == "preopen"
+    head = f"🌅 <b>Pre-open plan · {stamp}</b>" if preopen else f"📈 <b>Ideas · {stamp}</b>"
+    lines: list[str] = [head]
+
     tape = []
+    s1 = q1 = 0.0
     if spy_b is not None:
         s_last, s1, _ = move_stats(spy_b, today)
         tape.append(f"SPY {s_last:,.2f} {pct(s1)}")
     if qqq_b is not None:
         q_last, q1, _ = move_stats(qqq_b, today)
         tape.append(f"QQQ {q_last:,.2f} {pct(q1)}")
-        if spy_b is not None:
-            t = _tape(s1, q1)
-            if t:
-                tape.append(t)
+    # Before the open, "today" is thin pre-market trading, so the last full
+    # session gets its own line and the sell-off/rally label goes on that.
+    direction_txts: list[str] = []
+    if preopen:
+        if spy_b is not None and qqq_b is not None:
+            label, s_prev = session_change(spy_b, today)
+            _, q_prev = session_change(qqq_b, today)
+            prev = f"{label}: SPY {pct(s_prev)} · QQQ {pct(q_prev)}"
+            t = _tape(s_prev, q_prev)
+            direction_txts.append(prev + (f" · {t}" if t else ""))
+            if tape:
+                tape[-1] += f" pre-market, vs {label} close"
+    elif spy_b is not None and qqq_b is not None:
+        t = _tape(s1, q1)
+        if t:
+            tape.append(t)
     tape_txt = " · ".join(tape)
     if tape:
         lines.append(tape_txt)
+    direction_txts += list(direction)
+    lines.extend(esc(d) for d in direction_txts)
+    level_txts = list(levels)
+    lines.extend(esc(x) for x in level_txts)
 
     tiers_used = sorted({records.get(i.source, Record(i.source)).tier for i in sized},
                         key=lambda t: -SIZE_PCT[t])
@@ -1220,86 +1468,121 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
             lead = "🟢 sources at 5% of the account, 🟡 at 2%. "
         lead_txt = f"<i>{esc(lead + '. '.join(sizes))}.</i>"
         lines.append(lead_txt)
+    else:
+        lines.append("<i>No buy cleared the live check with a size today.</i>")
     lines.append("")
 
     sent_at = now_et.strftime("%Y-%m-%dT%H:%M")
-    log_rows = []
-    idea_cards: list[dict] = []
-    for num, idea in enumerate(sized, 1):
+
+    def card(**cols) -> dict:
+        return _card(date=today, sent_at=sent_at, phase=phase, **cols)
+
+    log_rows: list[dict] = []
+    book_cards: list[dict] = []
+    numbered = list(enumerate(sized, 1))
+    exit_nums = {id(e): k for k, e in enumerate(act_sells, 1)}
+    printed: dict[int, str] = {}    # idea number → the book whose section carries it in full
+    month = now_et.strftime("%b")
+
+    for num, idea in numbered:
         rec = records.get(idea.source) or Record(idea.source)
-        kind = "option" if idea.is_option else idea.kind
-        status = f" — {esc(idea.status)}" if idea.status else ""
-        lines.append(f"<b>{num} · {esc(idea.ticker)} · {kind} · {esc(idea.action)}</b>{status}")
-        who = f"{esc(idea.ticker)} close" if idea.is_option else "close"
-        ref = idea.last if idea.is_option else idea.unit_cost   # distance from the entry
-        stop_txt = (f"Stop: {who} &lt; {px(idea.stop)} ({esc(idea.stop_basis)}, {pct(idea.stop / ref - 1)})"
-                    if idea.stop else "Stop: none (no 20-day history)")
-        if idea.is_option:
-            exp = day(idea.expiry).strftime("%-d %b")
-            mid = f" (mid {prem(idea.mid)})" if idea.mid else ""
-            plan_txt = f"Buy 1× {exp} ${idea.strike:g}C ≤ {prem(idea.limit)}{mid}"
-            lines.append(plan_txt)
-            be = idea.strike + idea.limit
-            stop_line = (f"{stop_txt} · max loss {usd(idea.unit_cost)} per contract · "
-                         f"breakeven {px(be)} ({pct(be / idea.last - 1)})")
-            lines.append(stop_line)
-        else:
-            plan_txt = f"Entry ≤ {px(idea.trigger)} (now {px(idea.last)})"
-            lines.append(plan_txt)
-            tgt = f" · Target {px(idea.target)} ({pct(idea.target / idea.unit_cost - 1, 0)})" \
-                if idea.target and idea.target > idea.unit_cost else ""
-            lines.append(stop_txt + tgt)
-            stop_line = stop_txt
-            plan_txt += tgt
-        size_txt = esc(_size_line(idea, accounts, sgd_per_usd))
-        lines.append(size_txt)
-        why = idea.why
-        if idea.source == "uoa" and idea.chg_20d <= -0.05:
-            why += f", with {idea.ticker} {pct(idea.chg_20d, 0)} in 20 days"
-        prefix = "Why (WSR): " if idea.source == "wsr" else "Why: "
-        why_txt = ""
-        if why:
-            why_txt = prefix + esc(why.rstrip(".") + ".")
-            lines.append(why_txt)
-        note_txts = [esc(n) for n in idea.notes]
-        lines.extend(note_txts)
-        rec_txt = esc(record_line(rec))
-        lines.append(rec_txt)
-        lines.append("")
-        idea_cards.append(_card(
-            date=today, sent_at=sent_at, section="idea", num=num, ticker=idea.ticker, kind=kind,
-            action=idea.action, source=idea.source, tier=rec.tier, status=idea.status,
-            plan=_plain(plan_txt), stop=_plain(stop_line), size=_plain(size_txt),
-            why=_plain(why_txt), notes=" | ".join(_plain(n) for n in note_txts),
-            record=_plain(rec_txt)))
         log_rows.append({
             "date": today, "sent_at": sent_at, "num": num,
-            "source": idea.source, "tier": rec.tier, "ticker": idea.ticker, "kind": kind,
+            "source": idea.source, "tier": rec.tier, "ticker": idea.ticker,
+            "kind": "option" if idea.is_option else idea.kind,
             "action": idea.action, "trigger": idea.trigger or "", "limit": idea.limit or "",
             "expiry": idea.expiry, "strike": idea.strike or "", "last": round(idea.last, 4),
             "stop": round(idea.stop, 4) if idea.stop else "", "target": idea.target or "",
             "status": idea.status,
         })
 
-    if not sized:
-        lines.append("<i>No idea cleared the live check with a size today.</i>")
-        lines.append("")
+    for a in accounts:
+        bud = allocate(numbered, a, sgd_per_usd)
+        mine = [(n, i) for n, i in numbered if i.sizes.get(a.name, (0, False, ""))[0] > 0]
+        my_sells = [e for e in act_sells if e.account == a.name]
+        my_levels = [e for e in sells if e.account == a.name] if trec.tier == "red" else []
 
-    exit_cards: list[dict] = []
-    if sells or trim_wait:
-        lines.append("<b>Take profits</b>")
-        lines.append(f"<i>{esc(record_line(trec))}</i>")
-        if trec.tier == "red" and sells:   # trims have cost money: levels only
-            levels = [f"{e.ticker} " + ("sell now" if e.market else px(e.trigger))
-                      + f" ({ACCOUNT_LABEL.get(e.account, e.account)})" for e in sells]
-            levels_txt = "levels only: " + esc(" · ".join(levels))
+        counts = []
+        if mine:
+            counts.append(f"{len(mine)} buy{'s' if len(mine) != 1 else ''}")
+        if my_sells:
+            counts.append(f"{len(my_sells)} sell{'s' if len(my_sells) != 1 else ''}")
+        status_txt = " · ".join(counts) or "No action"
+        cash_txt = _cash_headline(a)
+        warn_txt = (f"⚠ Cash and share counts unchanged since {day(a.stale_since).strftime('%-d %b')}: "
+                    f"check against IBKR before acting.") if a.stale_since else ""
+        lines.append(f"<b>👤 {esc(a.label)}</b> — {esc(status_txt)}")
+        lines.append(esc(cash_txt))
+        if warn_txt:
+            lines.append(f"<b>{esc(warn_txt)}</b>")
+        book_row_at = len(book_cards)
+        book_cards.append({})      # filled once the rest of the section is known
+
+        for num, idea in mine:
+            rec = records.get(idea.source) or Record(idea.source)
+            kind = "option" if idea.is_option else idea.kind
+            status = f" — {esc(idea.status)}" if idea.status else ""
+            lines.append(f"<b>{num} · {esc(idea.ticker)} · {kind} · {esc(idea.action)}</b>{status}")
+            who = f"{esc(idea.ticker)} close" if idea.is_option else "close"
+            ref = idea.last if idea.is_option else idea.unit_cost   # distance from the entry
+            stop_txt = (f"Stop: {who} &lt; {px(idea.stop)} ({esc(idea.stop_basis)}, {pct(idea.stop / ref - 1)})"
+                        if idea.stop else "Stop: none (no 20-day history)")
+            if idea.is_option:
+                exp = day(idea.expiry).strftime("%-d %b")
+                mid = f" (mid {prem(idea.mid)})" if idea.mid else ""
+                plan_txt = f"Buy 1× {exp} ${idea.strike:g}C ≤ {prem(idea.limit)}{mid}"
+                be = idea.strike + idea.limit
+                stop_line = (f"{stop_txt} · max loss {usd(idea.unit_cost)} per contract · "
+                             f"breakeven {px(be)} ({pct(be / idea.last - 1)})")
+                lines.extend([plan_txt, stop_line])
+            else:
+                plan_txt = f"Entry ≤ {px(idea.trigger)} (now {px(idea.last)})"
+                tgt = f" · Target {px(idea.target)} ({pct(idea.target / idea.unit_cost - 1, 0)})" \
+                    if idea.target and idea.target > idea.unit_cost else ""
+                lines.extend([plan_txt, stop_txt + tgt])
+                stop_line = stop_txt
+                plan_txt += tgt
+            size_txt = esc(_book_size_line(idea, a, bud, num, sgd_per_usd))
+            lines.append(size_txt)
+            why = idea.why
+            if idea.source == "uoa" and idea.chg_20d <= -0.05:
+                why += f", with {idea.ticker} {pct(idea.chg_20d, 0)} in 20 days"
+            prefix = "Why (WSR): " if idea.source == "wsr" else "Why: "
+            why_txt = prefix + esc(why.rstrip(".") + ".") if why else ""
+            note_txts = [esc(n) for n in idea.notes]
+            rec_txt = esc(record_line(rec))
+            # The second book's copy points at the first, to fit one message;
+            # the app has the room, so its card always carries the full text.
+            if num in printed:
+                lines.append(f"Why and record: as #{num} under {esc(printed[num])}.")
+            else:
+                printed[num] = a.label
+                if why_txt:
+                    lines.append(why_txt)
+                lines.extend(note_txts)
+                lines.append(rec_txt)
+            lines.append("")
+            book_cards.append(card(
+                section="idea", num=num, ticker=idea.ticker, kind=kind, action=idea.action,
+                source=idea.source, tier=rec.tier, status=idea.status, plan=_plain(plan_txt),
+                stop=_plain(stop_line), size=_plain(size_txt), why=_plain(why_txt),
+                notes=" | ".join(_plain(n) for n in note_txts), record=_plain(rec_txt),
+                account=a.label))
+
+        wait_trims = book_trim_wait.get(a.name, [])
+        if my_sells or my_levels or wait_trims:
+            lines.append("<b>Take profits</b>")
+            lines.append(f"<i>{esc(record_line(trec))}</i>")
+        if my_levels:       # trims have cost money: levels only
+            levels_txt = "levels only: " + esc(" · ".join(
+                f"{e.ticker} " + ("sell now" if e.market else px(e.trigger)) for e in my_levels))
             lines.append("• " + levels_txt)
-            exit_cards.append(_card(date=today, sent_at=sent_at, section="exit_note",
-                                    source="wsr_trim", tier=trec.tier, plan=_plain(levels_txt),
-                                    record=_plain(esc(record_line(trec)))))
-        for k, ex in enumerate(act_sells, 1):
-            who = ACCOUNT_LABEL.get(ex.account, ex.account.title())
-            lines.append(f"<b>S{k} · {esc(ex.ticker)} · {who} · SELL</b> — {esc(ex.status)}")
+            book_cards.append(card(section="exit_note", source="wsr_trim", tier=trec.tier,
+                                   plan=_plain(levels_txt), record=_plain(esc(record_line(trec))),
+                                   account=a.label))
+        for ex in my_sells:
+            k = exit_nums[id(ex)]
+            lines.append(f"<b>S{k} · {esc(ex.ticker)} · SELL</b> — {esc(ex.status)}")
             held = f"{ex.held:g}"
             whose = _POSSESSIVE.get(ex.account, "the")
             sell_txt = locks_txt = ""
@@ -1323,16 +1606,12 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
             note_txts = [esc(n) for n in ex.notes]
             lines.extend(note_txts)
             lines.append("")
-            exit_cards.append(_card(
-                date=today, sent_at=sent_at, section="exit", num=f"S{k}", ticker=ex.ticker,
-                kind="stock", action="SELL", source="wsr_trim", tier=trec.tier, status=ex.status,
-                plan=_plain(sell_txt), size=_plain(locks_txt), why=_plain(why_txt),
+            book_cards.append(card(
+                section="exit", num=f"S{k}", ticker=ex.ticker, kind="stock", action="SELL",
+                source="wsr_trim", tier=trec.tier, status=ex.status, plan=_plain(sell_txt),
+                size=_plain(locks_txt), why=_plain(why_txt),
                 notes=" | ".join(_plain(n) for n in note_txts),
-                record=_plain(esc(record_line(trec))), account=who))
-        if trim_wait:
-            lines.append("• Waiting to trim: " + esc(" · ".join(trim_wait)))
-            lines.append("")
-        for k, ex in enumerate(act_sells, 1):
+                record=_plain(esc(record_line(trec))), account=a.label))
             log_rows.append({
                 "date": today, "sent_at": sent_at, "num": f"S{k}",
                 "source": "wsr_trim", "tier": trec.tier, "ticker": ex.ticker, "kind": "stock",
@@ -1340,64 +1619,90 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
                 "status": ex.status, "account": ex.account, "units": ex.units,
             })
 
+        budget_txt = ""
+        parts = []
+        if bud.now:
+            parts.append(f"{_join_nums(bud.now)} now")
+        if bud.later:
+            parts.append(f"{_join_nums(bud.later)} once the deposit lands")
+        if bud.over:
+            parts.append(f"{_join_nums(bud.over)} {'doesn' if len(bud.over) == 1 else 'don'}'t fit this month")
+        if parts:
+            total = f" ({short_money(bud.cost_total)} total)" if bud.cost_total else ""
+            budget_txt = f"{month} budget: {', '.join(parts)}{total}"
+        frees = [(exit_nums[id(e)], e) for e in my_sells if e.units]
+        if frees:
+            verb = "frees" if len(frees) == 1 else "free"
+            freed = (f"{' + '.join(f'S{k}' for k, _ in frees)} {verb} ≈ "
+                     f"{short_money(sum(e.proceeds for _, e in frees))}")
+            budget_txt = f"{budget_txt} · {freed}" if budget_txt else freed
+        if budget_txt:
+            lines.append(esc(budget_txt))
+
+        earn_txts = book_earnings(a.name, holdings, earnings, today)
+        earn_txt = "Earnings: " + " · ".join(earn_txts) if earn_txts else ""
+        if earn_txt:
+            lines.append(esc(earn_txt))
+        wait_txt = " · ".join(wait_trims)
+        if wait_txt:
+            lines.append("• Waiting to trim: " + esc(wait_txt))
+        if book_wait[a.name]:
+            lines.append("• Waiting: " + esc(" · ".join(book_wait[a.name])))
+        for w in book_watch[a.name]:
+            lines.append(w)
+        n_blocked = sum(1 for acct, _ in blocked if acct == a.name)
+        held_txt = (f"{n_blocked} trim{'s' if n_blocked != 1 else ''} of underwater holdings "
+                    f"skipped (rule)") if n_blocked else ""
+        if held_txt:
+            lines.append(esc(held_txt))
+        lines.append("")
+
+        all_wait = " · ".join(wait_trims + book_wait[a.name])
+        book_cards[book_row_at] = card(
+            section="book", account=a.label, plan=cash_txt, status=status_txt, warning=warn_txt,
+            budget=budget_txt, notes=earn_txt, waiting=all_wait, dropped=held_txt)
+        book_cards.extend(card(section="watch", num=f"{a.label[0]}{k}", plan=_plain(w).removeprefix("• "),
+                               account=a.label)
+                          for k, w in enumerate(book_watch[a.name], 1))
+
     if watch:
-        lines.append("<b>Watch — no size</b>")
+        lines.append("<b>Both books — watch, no size</b>")
         lines.extend(watch)
         lines.append("")
 
-    budget_lines: list[str] = []
-    if sized:
-        numbered = list(enumerate(sized, 1))
-        month = now_et.strftime("%b")
-        lines.append(f"{month} budget (cash + deposit):")
-        for a in accounts:
-            bud = allocate(numbered, a, sgd_per_usd)
-            pre = "S$" if a.ccy == "SGD" else "$"
-            cash_txt = short_money(a.cash, pre)
-            if a.deposit and not a.deposit_landed:
-                dep_pre = "S$" if a.deposit_ccy == "SGD" else "$"
-                head = (f"{cash_txt} + {short_money(a.deposit, dep_pre)} ≈ "
-                        f"{short_money(bud.cash_usd + bud.deposit_usd)}")
-            elif a.deposit:
-                head = f"{short_money(bud.cash_usd)} cash (this month's deposit is in)"
-            else:
-                head = f"{short_money(bud.cash_usd)} cash (no deposit on file)"
-            parts = []
-            if bud.now:
-                parts.append(f"{_join_nums(bud.now)} now")
-            if bud.later:
-                parts.append(f"{_join_nums(bud.later)} once the deposit lands")
-            if bud.over:
-                verb = "doesn't" if len(bud.over) == 1 else "don't"
-                parts.append(f"{_join_nums(bud.over)} {verb} fit this month")
-            if not parts:
-                parts.append("nothing sized for this book")
-            tot = f" ({short_money(bud.cost_total)} total)" if bud.cost_total else ""
-            mine = [(k, e) for k, e in enumerate(act_sells, 1) if e.account == a.name and e.units]
-            if mine:
-                verb = "frees" if len(mine) == 1 else "free"
-                tot += (f" · {' + '.join(f'S{k}' for k, _ in mine)} {verb} ≈ "
-                        f"{short_money(sum(e.proceeds for _, e in mine))}")
-            budget_line = f"• {a.label} {esc(head)} → {', '.join(parts)}{tot}"
-            lines.append(budget_line)
-            budget_lines.append(_plain(budget_line).removeprefix("• "))
-
+    recheck_txt = ""
+    if preopen:
+        check = now_et.replace(hour=RECHECK_ET[0], minute=RECHECK_ET[1])
+        check_sgt = _sgt_clock(check)
+        recheck_txt = (f"Re-check {check.strftime('%H:%M')} ET" + (f" · {check_sgt} SGT" if check_sgt else "")
+                       + " on live prices")
+        lines.append(f"<i>{esc(recheck_txt)}.</i>")
     if dropped:
         lines.append("Dropped: " + esc(" · ".join(dropped)))
+
+    # The PWA's copy: one meta row, then each book's rows, then the shared watch.
+    cards = [card(section="meta", tape=_plain(tape_txt), lead=_plain(lead_txt),
+                  direction=" | ".join(direction_txts), levels=" | ".join(level_txts),
+                  recheck=recheck_txt, dropped=" · ".join(dropped))]
+    cards += book_cards
+    cards += [card(section="watch", num=f"W{k}", plan=_plain(w).removeprefix("• "))
+              for k, w in enumerate(watch, 1)]
+
+    # The re-check after a pre-open plan only says what moved: on a quiet day
+    # the same list twice is noise. The app still gets the full fresh list.
+    changes: list[str] = []
+    if prior_cards:
+        changes = plan_changes(prior_cards, cards)
+        was = (prior_cards[0].get("sent_at") or "")[11:16]
+        since = f"the {was} ET plan" if was else "the pre-open plan"
+        if not changes:
+            lines = [f"✅ <b>Re-check · {stamp}</b>", tape_txt, f"Plan unchanged since {since}."]
+        else:
+            lines.insert(1, f"<b>Changed since {esc(since)}:</b> {esc(' · '.join(changes))}")
 
     text = "\n".join(lines).strip()
     if len(text) > TELEGRAM_LIMIT:   # cut at a line break so no HTML tag is split
         text = text[:TELEGRAM_LIMIT - 12].rsplit("\n", 1)[0] + "\n…(trimmed)"
 
-    # The PWA's copy: one meta row, then the same items the text shows, in order.
-    # Ideas still waiting are already a `watch` line; `waiting` is the trims' list.
-    waiting_txt = " · ".join(trim_wait)
-    cards = [_card(date=today, sent_at=sent_at, section="meta", tape=_plain(tape_txt),
-                   lead=_plain(lead_txt), budget=" | ".join(budget_lines),
-                   waiting=waiting_txt, dropped=" · ".join(dropped))]
-    cards += idea_cards + exit_cards
-    cards += [_card(date=today, sent_at=sent_at, section="watch", num=f"W{k}",
-                    plan=_plain(w).removeprefix("• "))
-              for k, w in enumerate(watch, 1)]
     return DM(text=text, sized=sized, watch=watch, dropped=dropped, log_rows=log_rows,
-              exits=act_sells, cards=cards)
+              exits=act_sells, cards=cards, changes=changes)
