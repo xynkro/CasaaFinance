@@ -86,3 +86,9 @@ def test_state_from_another_day_or_a_corrupt_file_counts_as_nothing_fired(tmp_pa
 def test_no_job_runs_on_a_workflow_that_does_not_exist():
     for wf, _, _, _ in cd.JOBS:
         assert (ROOT / ".github/workflows" / wf).exists(), wf
+
+
+def test_the_options_scan_starts_while_quotes_are_live():
+    (_, days, clocks, _), = [j for j in cd.JOBS if j[0] == "daily-options-scan.yml"]
+    assert days == cd.WEEKDAYS and all("09:30" < c < "16:00" for c in clocks)
+

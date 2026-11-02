@@ -139,7 +139,13 @@ def build_grab_json(caspar_data: dict, sarah_data: dict) -> dict:
     cs = caspar_data["summary_raw"]
     ss = sarah_data["summary_raw"]
 
-    caspar_net_liq = caspar_data["net_liq"]
+    # TWS reports Caspar's totals in his base currency, SGD. The summary below
+    # is written in USD to match the Sheet's net_liq_usd/cash/upl columns.
+    from src.yahoo_grab import fetch_usdsgd
+    usdsgd = fetch_usdsgd()
+    def _usd(tag: str) -> float:
+        return float(cs.get(tag, 0)) / usdsgd
+    caspar_net_liq = caspar_data["net_liq"] / usdsgd
     sarah_net_liq = sarah_data["net_liq"]
 
     grab = {
@@ -151,14 +157,15 @@ def build_grab_json(caspar_data: dict, sarah_data: dict) -> dict:
         "accounts": {
             "caspar": {
                 "account_id": CASPAR_ACCOUNT,
-                "base_currency": "USD",
+                "base_currency": "SGD",
+                "summary_currency": "USD",
                 "summary": {
                     "net_liquidation": caspar_net_liq,
-                    "buying_power": float(cs.get("BuyingPower", 0)),
-                    "total_cash": float(cs.get("TotalCashValue", 0)),
-                    "unrealized_pnl": float(cs.get("UnrealizedPnL", 0)),
-                    "realized_pnl": float(cs.get("RealizedPnL", 0)),
-                    "excess_liquidity": float(cs.get("ExcessLiquidity", 0)),
+                    "buying_power": _usd("BuyingPower"),
+                    "total_cash": _usd("TotalCashValue"),
+                    "unrealized_pnl": _usd("UnrealizedPnL"),
+                    "realized_pnl": _usd("RealizedPnL"),
+                    "excess_liquidity": _usd("ExcessLiquidity"),
                     "total_market_value": float(cs.get("GrossPositionValue", cs.get("StockMarketValue", 0))),
                 },
                 "positions": caspar_data["stocks"],

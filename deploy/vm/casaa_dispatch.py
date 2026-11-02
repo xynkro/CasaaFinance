@@ -57,6 +57,7 @@ JOBS = [
     ("macro-grab.yml", WEEKDAYS, ["08:15"], {}),
     ("gex-regime.yml", WEEKDAYS, ["08:20"], {}),
     ("daily-ideas-dm.yml", WEEKDAYS, ["08:45", "09:47"], {"dry": "false", "force": "false"}),
+    ("daily-options-scan.yml", WEEKDAYS, ["10:15"], {}),    # needs live quotes: 0 candidates off-hours
     ("build-daily-plan.yml", WEEKDAYS, ["10:03"], {}),
     ("alpaca-paper-execute.yml", WEEKDAYS, ["10:33"], {"execute": "true"}),
     ("unusual-options-scan.yml", WEEKDAYS, ["10:36"], {}),

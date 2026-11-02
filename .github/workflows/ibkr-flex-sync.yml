@@ -30,7 +30,12 @@ name: IBKR Flex Sync — Headless Positions
 on:
   schedule:
     - cron: "8 9 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      fields:
+        description: "Print which fields the report carries (names and counts, no values) and sync nothing"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -61,6 +66,10 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Flex sync (retry through IBKR's transient 1001s)
         run: |
+          if [ "${{ inputs.fields }}" = "true" ]; then
+            python scripts/ibkr_flex_sync.py --fields
+            exit $?
+          fi
           for attempt in 1 2 3; do
             echo "=== attempt $attempt ==="
             if python scripts/ibkr_flex_sync.py --sync; then
