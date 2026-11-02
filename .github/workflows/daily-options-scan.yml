@@ -2,7 +2,8 @@ name: Daily Options Scan — Unified Watchlist + Discovery
 
 on:
   schedule:
-    # 02:35 UTC = 10:35 SGT (US market ~3h into session, fresh chains)
+    # Needs live quotes: off-hours chains give 0 candidates. deploy/vm/casaa_dispatch.py
+    # starts this at 10:15 ET; this is the backstop, 10:15 ET in winter, 11:15 ET in summer.
     - cron: "15 15 * * 1-5"
   workflow_dispatch:
     inputs:
