@@ -288,8 +288,8 @@ def _upl_history(position_rows: list[dict]) -> tuple[list[str], dict[str, dict[s
     snaps: dict[str, dict[str, float]] = defaultdict(dict)
     for p in position_rows:
         d, tk = (p.get("date") or "")[:10], (p.get("ticker") or "").strip().upper()
-        if d and tk:
-            snaps[d][tk] = fnum(p.get("upl")) or 0.0
+        if d and tk:     # cost 0 = no cost basis from IBKR: the P&L is unknown, not a gain
+            snaps[d][tk] = (fnum(p.get("upl")) or 0.0) if fnum(p.get("avg_cost")) != 0 else 0.0
     return sorted(snaps), snaps
 
 
@@ -910,6 +910,7 @@ class Account:
     deposit_landed: bool = False
     weights: dict = field(default_factory=dict)   # ticker → share of NLV
     stale_since: str = ""      # when set, only prices have moved since this date
+    no_cost_basis: bool = False  # most positions came with no cost, so P&L is unknown
 
     @property
     def label(self) -> str:
@@ -1509,8 +1510,14 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
             counts.append(f"{len(my_sells)} sell{'s' if len(my_sells) != 1 else ''}")
         status_txt = " · ".join(counts) or "No action"
         cash_txt = _cash_headline(a)
-        warn_txt = (f"⚠ Cash and share counts unchanged since {day(a.stale_since).strftime('%-d %b')}: "
-                    f"check against IBKR before acting.") if a.stale_since else ""
+        warnings = []
+        if a.stale_since:
+            warnings.append(f"⚠ Cash and share counts unchanged since {day(a.stale_since).strftime('%-d %b')}: "
+                            f"check against IBKR before acting.")
+        if a.no_cost_basis:
+            warnings.append("⚠ IBKR isn't sending cost basis for this book, so its profit and loss "
+                            "are wrong and take-profit lines are off.")
+        warn_txt = " ".join(warnings)
         lines.append(f"<b>👤 {esc(a.label)}</b> — {esc(status_txt)}")
         lines.append(esc(cash_txt))
         if warn_txt:

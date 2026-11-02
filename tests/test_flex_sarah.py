@@ -464,3 +464,11 @@ class TestParsers:
         by = {r["symbol"]: r for r in rows}
         assert by["AAA"]["currency"] == "USD" and by["AAA"]["fx_to_base"] == USDSGD
         assert by["BBB"]["currency"] == "SGD" and by["BBB"]["fx_to_base"] == 1.0
+
+
+def test_a_position_with_no_cost_basis_books_no_profit():
+    from scripts.ibkr_flex_sync import _flex_stock_row
+    row = _flex_stock_row({"symbol": "XXX", "qty": 10.0, "mark": 50.0, "value": 500.0,
+                           "cost_price": 0.0, "cost_money": 0.0, "upl": 0.0}, 1000.0)
+    assert (row["avg_cost"], row["upl"]) == (0.0, 0.0)
+

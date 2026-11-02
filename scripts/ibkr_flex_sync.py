@@ -288,7 +288,9 @@ def _flex_stock_row(p: dict, nlv: float, to_base: bool = False) -> dict:
     """
     mkt_val = p["value"]
     cost_price = flex_cost_price(p)
-    upl = p["upl"] or round((p["mark"] - cost_price) * p["qty"], 2)
+    # No cost basis at all: P&L is unknown. Marking against a cost of 0 would book
+    # the whole market value as profit and make a loser look like a winner.
+    upl = p["upl"] or (round((p["mark"] - cost_price) * p["qty"], 2) if cost_price else 0.0)
     fx = (p.get("fx_to_base") or 1.0) if to_base else 1.0
     return {
         "symbol": p["symbol"], "sec_type": "STK", "exchange": "",
