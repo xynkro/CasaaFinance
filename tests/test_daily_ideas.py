@@ -67,7 +67,7 @@ def test_buy_dip_fills_at_trigger_and_is_graded_vs_spy():
     b = _bars(days, closes, lows=lows, opens=[100, 99, 98, 96] + [110.0] * 36)
     rec = di.grade("wsr", [di.PastIdea("wsr", "X", days[0], 95.0)], {"SPY": spy, "X": b}, "2026-12-31")
     assert rec.n == 1 and rec.beat == 1
-    assert rec.mean_alpha == pytest.approx(110 / 95 - 1)
+    assert rec.mean_alpha == pytest.approx(110 / 95 - 1 - 2 * di.COST_PER_SIDE)
 
 
 def test_dividends_count_in_the_graded_return():
@@ -79,7 +79,25 @@ def test_dividends_count_in_the_graded_return():
     b.adj = [49.0] * 10 + [50.0] * 20
     rec = di.grade("wsr", [di.PastIdea("wsr", "III", days[0], None)], {"SPY": spy, "III": b}, "2026-12-31")
     assert rec.n == 1
-    assert rec.mean_alpha == pytest.approx(50 / 49 - 1)
+    assert rec.mean_alpha == pytest.approx(50 / 49 - 1 - 2 * di.COST_PER_SIDE)
+
+
+def test_a_buy_that_only_matches_spy_loses_its_costs():
+    days = _days(30)
+    flat = _bars(days, [100.0] * 30)
+    rec = di.grade("uoa", [di.PastIdea("uoa", "X", days[0], None)], {"SPY": flat, "X": flat}, "2026-12-31")
+    assert rec.n == 1 and rec.beat == 0
+    assert rec.mean_alpha == pytest.approx(-2 * di.COST_PER_SIDE)
+    assert "0/1 beat SPY after costs" in di.record_line(di.assign_tier(rec))
+
+
+def test_a_trim_pays_its_cost_once():
+    days = _days(30)
+    flat = _bars(days, [100.0] * 30)
+    idea = di.PastIdea("wsr_trim", "X", days[0], None, side="sell")
+    rec = di.grade("wsr_trim", [idea], {"SPY": flat, "X": flat}, "2026-12-31")
+    assert rec.n == 1 and rec.beat == 0
+    assert rec.mean_alpha == pytest.approx(-di.COST_PER_SIDE)
 
 
 def test_unfilled_dip_is_not_counted_as_a_trade():
@@ -169,8 +187,8 @@ def test_trim_fills_when_the_high_reaches_the_level_and_is_graded_from_the_selle
     idea = di.PastIdea("wsr_trim", "X", days[0], 105.0, side="sell")
     rec = di.grade("wsr_trim", [idea], {"SPY": spy, "X": b}, "2026-12-31")
     assert rec.n == 1 and rec.beat == 1
-    assert rec.mean_alpha == pytest.approx(-(95 / 105 - 1))
-    assert "1/1 lagged SPY after the trim · trimming +" in di.record_line(di.assign_tier(rec))
+    assert rec.mean_alpha == pytest.approx(-(95 / 105 - 1) - di.COST_PER_SIDE)
+    assert "1/1 lagged SPY after the trim and costs · trimming +" in di.record_line(di.assign_tier(rec))
 
 
 def _pos(date, ticker, upl, qty=10, cost=100):

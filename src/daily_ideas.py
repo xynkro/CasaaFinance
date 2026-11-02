@@ -39,6 +39,7 @@ from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 
 HOLD_DAYS = 20          # trading days each graded idea is held
+COST_PER_SIDE = 0.001   # slippage and commission allowance per trade: 10 bps
 FILL_WINDOW = 10        # trading days a buy-dip trigger has to fill
 SIZE_PCT = {"green": 0.05, "yellow": 0.02, "red": 0.0}
 TIER_EMOJI = {"green": "🟢", "yellow": "🟡", "red": "🔴"}
@@ -325,8 +326,9 @@ def grade(source: str, ideas: list[PastIdea], bars: dict[str, Bars], today: str)
     max(trigger, open), or next open if the level is already below the close.
     Only completed holds count. Today's partial bar is never used.
 
-    A buy's edge is its return minus SPY's. A trim's edge is SPY's minus the
-    stock's: selling was right when the stock went on to lag SPY.
+    A buy's edge is its return minus SPY's, less COST_PER_SIDE in and out. A
+    trim's edge is SPY's minus the stock's, less COST_PER_SIDE on the sale:
+    selling was right when the stock went on to lag SPY by more than it cost.
     """
     rec = Record(source)
     spy = bars.get("SPY")
@@ -388,7 +390,8 @@ def grade(source: str, ideas: list[PastIdea], bars: dict[str, Bars], today: str)
         r_idea = b.total_return(fi, fill_px, xi)
         r_spy = spy.total_return(si, spy.o[si], sx)
         y, w, _ = day(fill_day).isocalendar()
-        alphas.append((f"{y}-W{w:02d}", r_spy - r_idea if sell else r_idea - r_spy))
+        alphas.append((f"{y}-W{w:02d}", r_spy - r_idea - COST_PER_SIDE if sell
+                       else r_idea - r_spy - 2 * COST_PER_SIDE))
 
     rec.n = len(alphas)
     if not alphas:
@@ -430,10 +433,10 @@ def record_line(rec: Record, extra: str = "") -> str:
     if rec.n == 0:
         body = "no graded ideas yet"
     elif rec.source in SELL_SOURCES:
-        body = (f"{rec.beat}/{rec.n} lagged SPY after the trim · "
+        body = (f"{rec.beat}/{rec.n} lagged SPY after the trim and costs · "
                 f"trimming {pct(rec.mean_alpha)} vs keeping, per 20d")
     else:
-        body = f"{rec.beat}/{rec.n} beat SPY · {pct(rec.mean_alpha)} vs SPY per 20d"
+        body = f"{rec.beat}/{rec.n} beat SPY after costs · {pct(rec.mean_alpha)} vs SPY per 20d"
     tail = []
     if rec.near_cut:
         tail.append("near cut")
