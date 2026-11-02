@@ -288,7 +288,10 @@ def read_positions(tabs: dict) -> tuple[dict, dict, set]:
         for p in _latest_date_rows(tabs.get(f"positions_{name}", [])):
             tk = (p.get("ticker") or "").strip().upper()
             if tk:
-                upl[(name, tk)] = di.fnum(p.get("upl")) or 0.0
+                # Cost 0 means IBKR sent no cost basis, and the P&L is then just the
+                # market value. Unknown must never read as "in profit": a loser would
+                # pass the never-sell-a-loser rule.
+                upl[(name, tk)] = (di.fnum(p.get("upl")) or 0.0) if di.fnum(p.get("avg_cost")) != 0 else 0.0
                 holdings[(name, tk)] = (di.fnum(p.get("qty")) or 0.0, di.fnum(p.get("avg_cost")) or 0.0)
     holds = set()
     for r in tabs.get("hold_list", []):
@@ -324,10 +327,12 @@ def build_accounts(tabs: dict, today: str, sgd_per_usd: float) -> list[di.Accoun
         dep_usd = di.to_usd(dep_amt, dep_ccy, sgd_per_usd)
         dep_in_ccy = dep_usd if ccy == "USD" else dep_usd * sgd_per_usd
         acct.deposit_landed = di.deposit_landed(series, dep_in_ccy)
-        for p in _latest_date_rows(tabs.get(f"positions_{name}", [])):
+        latest = _latest_date_rows(tabs.get(f"positions_{name}", []))
+        for p in latest:
             tk = (p.get("ticker") or "").strip().upper()
             if tk:
                 acct.weights[tk] = di.fnum(p.get("weight")) or 0.0
+        acct.no_cost_basis = sum(di.fnum(p.get("avg_cost")) == 0 for p in latest) * 2 > len(latest)
         # Prices alone get refreshed between broker syncs, so a book whose cash
         # and share counts stand still is running on old holdings.
         by_day: dict[str, set] = {}

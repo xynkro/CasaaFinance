@@ -940,3 +940,26 @@ def _et(stamp: str):
     from datetime import datetime
     from zoneinfo import ZoneInfo
     return datetime.fromisoformat(stamp).replace(tzinfo=ZoneInfo("America/New_York"))
+
+
+def test_no_cost_basis_is_unknown_never_a_profit():
+    """Rows with cost 0 carry P&L = market value. A loser must not pass as a winner."""
+    tabs = {"positions_caspar": [{"date": "2026-11-02", "ticker": "LOSS", "qty": "10", "avg_cost": "0", "upl": "500"},
+                                 {"date": "2026-11-02", "ticker": "WIN", "qty": "10", "avg_cost": "40", "upl": "100"}]}
+    upl, holdings, _ = dm_script.read_positions(tabs)
+    assert upl[("caspar", "LOSS")] == 0.0 and upl[("caspar", "WIN")] == 100.0
+    dq = [{"date": "2026-11-01T01", "account": "caspar", "ticker": t, "strategy": "TRIM", "status": "pending",
+           "source": "wsr_full", "entry": "50", "qty": "1", "thesis_1liner": "x"} for t in ("LOSS", "WIN")]
+    assert [e.ticker for e in di.live_wsr_trims(dq, "2026-11-02", upl, set())] == ["WIN"]
+    assert di._upl_history(tabs["positions_caspar"])[1]["2026-11-02"] == {"LOSS": 0.0, "WIN": 100.0}
+
+
+def test_a_book_with_no_cost_basis_says_so():
+    from datetime import datetime
+    a = di.Account("caspar", "USD", nlv=10_000, cash=100, no_cost_basis=True)
+    dm = di.build_dm(now_et=datetime(2026, 11, 2, 8, 45), today="2026-11-02", records={}, wsr=[], uoa=[], gov=None,
+                     momentum=[], bars={}, accounts=[a], sgd_per_usd=1.28, kinds={}, earnings={}, blocked=[],
+                     phase="preopen")
+    assert "take-profit lines are off" in dm.text
+    assert "take-profit lines are off" in [c for c in dm.cards if c["section"] == "book"][0]["warning"]
+
