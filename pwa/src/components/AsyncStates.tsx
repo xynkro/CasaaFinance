@@ -131,7 +131,7 @@ export function ErrorState({
 
 /* ─── Full-screen shell ────────────────────────────────────────────────────
    Shared centred container for the two full-page gates (NotAuthorized,
-   SignInScreen). Mirrors PinGate's layout (bg-layer + centred glass card). */
+   SignInScreen): bg-layer + centred glass card. */
 function FullScreenShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-screen flex flex-col items-center justify-center px-6 relative overflow-hidden">

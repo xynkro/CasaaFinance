@@ -15,11 +15,6 @@ Why scanner endpoint, not tradingview-ta library?
   not rate-limit anywhere near as hard. We hit it with batches of ~20
   tickers/timeframe = 4 calls per cron, well under any cap.
 
-  We still depend on `tradingview-ta` (in requirements.txt) for its
-  `Compute.Recommend` thresholds — single source of truth for
-  STRONG_BUY/BUY/NEUTRAL/SELL/STRONG_SELL mapping. If TV ever changes
-  the score thresholds, upgrading the library propagates the change.
-
 Counts (buy/sell/neutral): the scanner endpoint exposes the THREE
 consensus scores (Recommend.All, Recommend.MA, Recommend.Other) but
 NOT each indicator's individual classification — that requires the

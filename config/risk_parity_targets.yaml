@@ -12,9 +12,7 @@
 #       ORDINARY dips + funds rebalancing. Bonds are tilted to INTERMEDIATE
 #       (IEF) over LONG (TLT): bond_long is now SMALL because TLT is a leveraged
 #       rate bet, not protection. Gold covers the inflation case bonds miss.
-#     • HEDGE (convex)      — vol_long ~= 5-7% as a passive long-vol ballast,
-#       COMPLEMENTED by the active, regime-gated put-spread hedge in
-#       scripts/tail_hedge_run.py (the real tail insurance).
+#     • HEDGE (convex)      — vol_long ~= 5-7% as a passive long-vol ballast.
 #
 # Each account sums to 100. Asset classes must match the 8 canonical labels in
 # src/watchlist.CANONICAL_ASSET_CLASSES. Read by scripts/risk_parity_audit.py.

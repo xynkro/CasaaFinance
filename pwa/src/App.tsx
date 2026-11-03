@@ -3,8 +3,6 @@ import { fetchDashboard, type DashboardData } from "./data";
 import { readDashboardCache, writeDashboardCache } from "./lib/dashboardCache";
 import { evaluateTrigger } from "./data/normalize";
 import type { TechnicalScoreRow } from "./data";
-import { PinGate } from "./PinGate";
-import { usePinAuth } from "./lib/usePinAuth";
 import { useSettings } from "./settings";
 import { LoadingState, ErrorState, NotAuthorized } from "./components/AsyncStates";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -33,10 +31,8 @@ export const TAB = {
   INSIDER: 4, DECISIONS: 5, REVIEW: 6, SETTINGS: 7,
 } as const;
 
-// Private read path: when VITE_DATA_SOURCE==='firestore', the dashboard sits
-// behind Google sign-in instead of the localStorage PIN. The gate component
-// is lazy-loaded so the Firebase SDK is only pulled in on the private path.
-const USE_FIRESTORE = import.meta.env.VITE_DATA_SOURCE === "firestore";
+// The dashboard sits behind Google sign-in. The gate component is lazy-loaded
+// so the first paint doesn't wait on the Firebase SDK.
 const FirebaseGate = lazy(() => import("./FirebaseGate"));
 
 /** Detect a Firestore permission denial — the signal that a signed-in user
@@ -47,9 +43,9 @@ function isPermissionError(msg: string | null | undefined): boolean {
 }
 
 /** Auth context handed down from the Firestore gate (null in PIN/gviz mode). */
-type AuthCtx = { email: string | null; signOut: () => void } | null;
+type AuthCtx = { email: string | null; signOut: () => void };
 
-function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
+function Dashboard({ authCtx }: { authCtx: AuthCtx }) {
   const { settings, update: updateSettings } = useSettings();
   // STALE-WHILE-REVALIDATE: hydrate from the last good dashboard so a reopen
   // paints INSTANTLY from cache, then refreshes in the background. Without this
@@ -105,22 +101,14 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
     scrollRef.current?.scrollTo({ top: 0, behavior: "instant" as ScrollBehavior });
   }, [tab]);
 
-  const handleLogout = () => {
-    // Firestore mode: sign out of Firebase (auth-state change re-renders the
-    // gate to the sign-in screen). PIN/gviz mode: clear the PIN session.
-    if (authCtx) {
-      authCtx.signOut();
-      return;
-    }
-    localStorage.removeItem("casaa_pin_ok");
-    window.location.reload();
-  };
+  // Auth-state change re-renders the gate to the sign-in screen.
+  const handleLogout = () => authCtx.signOut();
 
   // A hard failure with no usable data yet (the in-component fetchDashboard
   // catch surfaces errors via data.error while returning empty collections).
   const loadFailed = !loading && data?.error != null;
   // Firestore + permission denial == signed in but not on the allowlist.
-  const notAuthorized = USE_FIRESTORE && loadFailed && isPermissionError(data?.error);
+  const notAuthorized = loadFailed && isPermissionError(data?.error);
 
   // Badge counts WHAT NEEDS ACTION, not the backlog. The old pending+watching
   // count produced a permanent 6-8 (watching is explicitly do-nothing) that
@@ -272,8 +260,7 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
             onUpdate={updateSettings}
             onLogout={handleLogout}
             apiUsage={data?.apiUsage ?? []}
-            authMode={authCtx ? "firestore" : "pin"}
-            userEmail={authCtx?.email ?? null}
+            userEmail={authCtx.email}
           />
         );
       default:
@@ -283,7 +270,7 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
 
   // Signed in but not allowlisted (Firestore rules denied the read).
   if (notAuthorized) {
-    return <NotAuthorized email={authCtx?.email} onSignOut={authCtx?.signOut} />;
+    return <NotAuthorized email={authCtx.email} onSignOut={authCtx.signOut} />;
   }
 
   // First load failed with no usable data — full-screen error + retry. Once
@@ -410,13 +397,6 @@ function Dashboard({ authCtx }: { authCtx?: AuthCtx }) {
   );
 }
 
-/** PIN-gated app (gviz / dev path) — unchanged from before the private read path. */
-function PinGatedApp() {
-  const { authed, grant } = usePinAuth();
-  if (!authed) return <PinGate onSuccess={grant} />;
-  return <Dashboard />;
-}
-
 /** Shown when the lazy FirebaseGate chunk can't load even after an auto-reload
  *  (genuinely-missing chunk / offline). Without this, the Suspense fallback
  *  below would spin forever — the "stuck loading, no data" report. */
@@ -469,5 +449,5 @@ function FirestoreGatedApp() {
 }
 
 export default function App() {
-  return USE_FIRESTORE ? <FirestoreGatedApp /> : <PinGatedApp />;
+  return <FirestoreGatedApp />;
 }

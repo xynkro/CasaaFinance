@@ -4,8 +4,7 @@
  * The original monolithic ``src/data.ts`` was split into focused modules:
  *   - data/types.ts      — every *Row interface + derived types (DashboardData,
  *                          TvConsensus, TriggerEvaluation, ParsedOcc, summaries…)
- *   - data/transport.ts  — csvUrl / csvUrlByName / fetchTab / fetchTabByName
- *                          (+ SHEET_ID, GIDS, the Firestore branch)
+ *   - data/transport.ts  — fetchTab / fetchTabByName (Firestore reads)
  *   - data/normalize.ts  — numeric / numericOrNull / coercions / derivations
  *                          (evaluateTrigger, parseOcc, summarize*, lookup*…)
  *   - data/dashboard.ts  — fetchDashboard

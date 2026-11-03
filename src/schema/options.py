@@ -411,8 +411,8 @@ class IvSurfaceScanRow:
 # The premium-inclusive P&L fix (settles at the strike, nets the credit) changed
 # what outcome_pnl_pct MEANS. Rows written before the fix carry the old raw/
 # capped stock-return proxy and an empty/absent pnl_model; rows written after are
-# stamped PNL_MODEL_PREMIUM. Downstream consumers (option_scanner.realized_kelly_inputs,
-# the Phase-2 weight regression) filter to PNL_MODEL_PREMIUM so the two semantics
+# stamped PNL_MODEL_PREMIUM. Downstream consumers (the Phase-2 weight regression)
+# filter to PNL_MODEL_PREMIUM so the two semantics
 # are never blended. signal_feedback appends (no UPSERT), so the historical rows
 # are versioned in place rather than destructively backfilled.
 PNL_MODEL_PREMIUM = "premium_v2"      # premium-inclusive, settles at the strike

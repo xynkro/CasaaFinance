@@ -1,9 +1,8 @@
 /**
- * Firebase auth gate (firestore mode only).
+ * Firebase auth gate.
  *
- * App.tsx loads this lazily (React.lazy) when VITE_DATA_SOURCE==='firestore',
- * so the Firebase SDK and config-init in lib/firebase.ts are only pulled in
- * on the private path. The default gviz path never imports this file.
+ * App.tsx loads this lazily (React.lazy), so the Firebase SDK and config-init in
+ * lib/firebase.ts aren't part of the first-paint bundle.
  *
  * Gate states:
  *   - resolving auth   → LoadingState

@@ -12,10 +12,8 @@
  * allowlist), NOT by keeping the config secret. We still read it from
  * import.meta.env so no real project values are committed to the repo.
  *
- * This module is only imported when VITE_DATA_SOURCE==='firestore' (both
- * App.tsx and data.ts gate the import on the flag), so initialising the
- * Firebase app at import time is safe — the default gviz path never loads
- * this file and therefore stays completely Firebase-free.
+ * This module is loaded by dynamic import, so the Firebase SDK stays out of the
+ * first-paint bundle.
  */
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import {
@@ -99,7 +97,7 @@ export function onUser(cb: (user: User | null) => void): () => void {
  * the base doc, then (if chunks > 0) read each numbered chunk in order and
  * concatenate every `rows` array, yielding the full row-object array exactly
  * as the existing parsers expect. A missing base doc returns [] (the same
- * empty-tab behaviour the gviz path tolerates via its per-tab catches).
+ * empty-tab behaviour callers tolerate via their per-tab catches).
  */
 /**
  * Coerce every cell of a mirrored row back to a STRING.

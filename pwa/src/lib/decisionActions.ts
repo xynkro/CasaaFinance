@@ -4,7 +4,7 @@
  * The brain emits decision rows weekly (WSR Full) and re-emits mid-week
  * (WSR Lite). Until this module landed, there was no way to record
  * what the user actually DID in response — filled? killed? deferred?
- * The PWA has read-only access to Sheets (gviz CSV), so we journal
+ * The PWA has read-only access to the data tabs, so we journal
  * actions in localStorage and join client-side at render time.
  *
  * v1 scope:
@@ -95,7 +95,7 @@ function persist(actions: Map<string, DecisionAction>): void {
 /**
  * Decision write-back to Firestore (the feedback loop).
  *
- * When VITE_DATA_SOURCE==='firestore', mirror the recorded action to the
+ * Mirror the recorded action to the
  * client-writable `decisions/{key}` doc so the backend's signal_feedback can
  * grade what the user ACTUALLY did. localStorage stays the source of truth /
  * offline cache; this is an additive write.
@@ -105,17 +105,12 @@ function persist(actions: Map<string, DecisionAction>): void {
  * missing/throwing firebase config) must NEVER break the UI — the localStorage
  * write in setAction has already succeeded by the time this runs.
  *
- * firebase.ts is loaded via dynamic import ONLY in firestore mode (same gating
- * as data.ts) so the gviz default never pulls in or initialises the Firebase SDK
- * — and never hits firebase.ts's loud throw when the web config is absent.
- *
  * Doc shape: { key, status, ticker, strategy, account, strike?, ts, user?, note? }.
  * `status` maps the localStorage action vocabulary (filled|killed|deferred) 1:1.
  * `ts` is the action's recordedAt (client clock); firebase.ts additionally
  * stamps an authoritative server `updatedAt` and the signed-in `user` email.
  */
 function writeDecisionToFirestore(action: DecisionAction): void {
-  if (import.meta.env.VITE_DATA_SOURCE !== "firestore") return;
   void (async () => {
     try {
       const { writeDecision } = await import("./firebase");
