@@ -1,10 +1,13 @@
 """
-Cash-secured puts a book's cash can actually cover.
+Short puts each book can carry on margin.
 
-The options scan lists puts by yield across the whole market, most of them far
-bigger than either book's cash. This turns its rows into a short list per book:
-what fits the cash now, what fits once the month's deposit lands, and what the
-smallest line needs when nothing does. No I/O: the scan and the DM do that.
+Both books sell puts on margin (Caspar, 3 Nov 2026), so cash isn't the limit. What
+limits a line is what happens if it's assigned: the stock stays, because neither of
+them sells losers, and it sits on a margin loan, which IBKR force-sells on a deficit.
+So a line must fit three limits: the name's share of the book if assigned, every open
+and listed put together if assigned, and the margin it ties up (the book's confirmed
+profile in position_sizing). This turns the scan's rows into a short list per book.
+No I/O: the scan and the DM do that.
 
 RANKING. Tested on graded lines, one row per contract, Apr-Sep 2026, split at
 1 Jul so each rule faced two separate periods:
@@ -23,6 +26,9 @@ import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from src.position_sizing import estimate_bpr_per_contract
+
+MAX_NAME_IF_ASSIGNED = 0.30  # one name's share of a book if assigned, shares already held included
 MAX_QUOTE_AGE_DAYS = 4       # keeps Friday's scan on Monday morning
 MIN_DTE = 21                 # closer than this, the exit rule would already close it
 FILL_SHARE = 0.25            # assume a sell fills a quarter of the way up from the bid
@@ -33,7 +39,6 @@ MIN_CUSHION = 0.02           # strike must still sit this far under the stock
 CUSHION_TIER = 0.09          # the graded split, see the module docstring
 NEXT_REPORT_AFTER_DAYS = 75  # next quarter's report comes at least this long after the last
 MAX_PER_BOOK = 3             # lines shown per book
-MAX_RUNG = 3                 # lines named on the "once the deposit lands" line
 
 _FLOW = re.compile(r"[🟥🟧] ADVERSE FLOW[^|]*")
 
@@ -88,8 +93,13 @@ class PutLine:
         return self.fill * 100
 
     @property
-    def collateral(self) -> float:
+    def if_assigned(self) -> float:
         return self.strike * 100
+
+    @property
+    def margin(self) -> float:
+        """Reg-T estimate per contract. TWS's order preview has the real figure."""
+        return estimate_bpr_per_contract("CSP", self.strike, self.underlying, self.fill, None, True)
 
     @property
     def breakeven(self) -> float:
@@ -192,37 +202,34 @@ def rank(line: PutLine) -> tuple:
 
 @dataclass
 class BookPuts:
-    fits: list[PutLine] = field(default_factory=list)      # cash covers it now, best first
-    rung: list[PutLine] = field(default_factory=list)      # needs the month's deposit too
+    fits: list[PutLine] = field(default_factory=list)      # within the book's limits, best first
     cheapest: PutLine | None = None                        # smallest line, when nothing fits
-    free_cash: float | None = None                         # USD, net of cash securing open puts
 
 
-def for_book(lines: list[PutLine], cash_usd: float, deposit_usd: float, nlv_usd: float,
-             weights: dict[str, float], cap: float) -> BookPuts:
-    """Sort checked lines into what this book's cash covers: one line per ticker,
-    and none that would take a name past the book's concentration cap if assigned.
-    A ticker with a line that fits now stays off the deposit rung."""
-    ok = [ln for ln in sorted(lines, key=rank)
-          if not (nlv_usd > 0 and weights.get(ln.ticker, 0.0) + ln.collateral / nlv_usd > cap)]
-    fits, rung, seen = [], [], set()
-    for ln in ok:
-        if ln.collateral <= cash_usd and ln.ticker not in seen:
-            seen.add(ln.ticker)
-            fits.append(ln)
-    for ln in ok:
-        if cash_usd < ln.collateral <= cash_usd + deposit_usd and ln.ticker not in seen:
-            seen.add(ln.ticker)
-            rung.append(ln)
-    out = BookPuts(fits=fits[:MAX_PER_BOOK], rung=rung[:MAX_RUNG], free_cash=cash_usd)
-    if not fits and ok:
-        out.cheapest = min(ok, key=lambda ln: (ln.collateral, rank(ln)))
+def for_book(lines: list[PutLine], nlv_usd: float, weights: dict[str, float], book_cap: float,
+             margin_cap_usd: float, open_puts_usd: float = 0.0) -> BookPuts:
+    """The lines within this book's limits, one per ticker. `book_cap` is the share of
+    the book all its short puts may reach if assigned, `open_puts_usd` what's open."""
+    if nlv_usd <= 0:
+        return BookPuts()
+    room = book_cap * nlv_usd - open_puts_usd
+    fits, seen = [], set()
+    for ln in sorted(lines, key=rank):
+        if ln.ticker in seen or ln.if_assigned > room or ln.margin > margin_cap_usd:
+            continue
+        if weights.get(ln.ticker, 0.0) + ln.if_assigned / nlv_usd > MAX_NAME_IF_ASSIGNED:
+            continue
+        seen.add(ln.ticker)
+        fits.append(ln)
+    out = BookPuts(fits=fits[:MAX_PER_BOOK])
+    if not fits and lines:
+        out.cheapest = min(lines, key=lambda ln: (ln.if_assigned, rank(ln)))
     return out
 
 
-def cash_securing_puts(option_rows: list[dict]) -> dict[str, float]:
-    """USD already securing open short puts, per account, from the `options` tab's
-    latest date. That cash can't secure a second put."""
+def open_put_notional(option_rows: list[dict]) -> dict[str, float]:
+    """USD each account's open short puts would cost if assigned, from the `options`
+    tab's latest date."""
     last = max((str(r.get("date") or "")[:10] for r in option_rows), default="")
     out: dict[str, float] = {}
     for r in option_rows:
@@ -287,5 +294,5 @@ def record_text(graded: list[dict], lines: list[PutLine]) -> str:
     what = "puts on stocks under $25" if cheap else "put lines"
     avg = f"{rec.avg:+.1f}".replace("-", "−")
     worst = f"{rec.worst:+.0f}".replace("-", "−")
-    return (f"Graded {what}: {rec.n}, {rec.kept:.0%} kept money, average {avg}% of the cash put up, "
+    return (f"Graded {what}: {rec.n}, {rec.kept:.0%} kept money, average {avg}% of the strike, "
             f"{rec.lost5:.0%} lost over 5%, worst {worst}%. Modelled at the mid, before costs.")

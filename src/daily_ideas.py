@@ -53,8 +53,8 @@ STALE_AFTER_REPORT_DAYS = 30    # a Sheet date this soon after a confirmed repor
 ONE_UNIT_MAX_OVER = 1.5      # one share/contract allowed up to 1.5× the size
 CONCENTRATION_CAP = 0.30     # never size a name past 30% of a book (alert band)
 MAX_SIZED = 5                # sized ideas per DM
-PUT_MANAGE = ("Manage: buy back at 50% of the credit, or with 21 days left. "
-              "Assigned means owning 100 shares at the breakeven.")
+PUT_MANAGE = ("Manage: buy back at 50% of the credit, or with 21 days left. Assigned means owning "
+              "100 shares at the breakeven, on margin. TWS's order preview shows the real requirement.")
 NEAR_TRIGGER = 0.03          # dip-buys within 3% above trigger get sized
 WSR_MAX_AGE_DAYS = 8         # a WSR row older than one weekly cycle is stale
 TRIM_GAP_DAYS = 14           # a trim re-stated daily is one idea until it lapses 2 weeks
@@ -1273,17 +1273,13 @@ def _put_when(ln: PutLine) -> str:
     return f"quotes {t.strftime('%a %-d %b %H:%M')} ET · {t.astimezone(SGT).strftime('%H:%M')} SGT"
 
 
-def _put_cash_note(fits: list[PutLine], free_cash: float, buys_cost: float) -> str:
-    """Each line is tested against the whole cash, so say when they can't all happen."""
-    held = sum(ln.collateral for ln in fits)
-    if not fits or held + buys_cost <= free_cash:
+def _put_total_note(fits: list[PutLine], nlv_usd: float) -> str:
+    """What the whole list would tie up, since the lines can run together on margin."""
+    if len(fits) < 2 or nlv_usd <= 0:
         return ""
-    parts = []
-    if len(fits) > 1 and held > free_cash:
-        parts.append("Pick one: the cash can't hold these at once.")
-    if buys_cost > 0:
-        parts.append(f"The buys above draw on the same cash ({usd(buys_cost)}).")
-    return " ".join(parts)
+    margin, assigned = sum(ln.margin for ln in fits), sum(ln.if_assigned for ln in fits)
+    return (f"All {len(fits)} together: margin ≈ {usd(margin)} · if assigned {usd(assigned)}, "
+            f"{pct(assigned / nlv_usd, 0, sign=False)} of the book.")
 
 
 def _put_note_lines(ln: PutLine, weight: float) -> list[str]:
@@ -1689,26 +1685,24 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
 
         if my_puts:
             nlv = nlv_usd(a)
-            cash_usd = to_usd(a.cash, a.ccy, sgd_per_usd) if my_puts.free_cash is None else my_puts.free_cash
             rec_txt = (put_records or {}).get(a.name, "")
-            put_msg.append(f"<b>👤 {esc(a.label)}</b> — {esc(cash_txt)}")
+            put_msg.append(f"<b>👤 {esc(a.label)}</b>")
             if a.stale_since:
-                put_msg.append(f"<b>⚠ Cash unchanged since {day(a.stale_since).strftime('%-d %b')}: "
-                               f"check it against IBKR first.</b>")
+                put_msg.append(f"<b>⚠ Holdings unchanged since {day(a.stale_since).strftime('%-d %b')}: "
+                               f"check against IBKR first.</b>")
             for k, ln in enumerate(my_puts.fits, 1):
                 exp = day(ln.expiry).strftime("%-d %b")
                 quote = f"bid {ln.bid:.2f} · ask {ln.ask:.2f}" if ln.quoted else f"last trade {prem(ln.premium)}"
                 plan_txt = f"Sell 1× {exp} ${ln.strike:g} put, limit ≥ {prem(ln.fill)} ({quote})"
-                share = f" ({pct(ln.collateral / nlv, 1, sign=False)} of the book)" if nlv else ""
-                detail_txt = (f"Collect ≈ {usd(ln.credit)} · puts up {usd(ln.collateral)}{share} · "
+                share = f", {pct(ln.if_assigned / nlv, 0, sign=False)} of the book" if nlv else ""
+                detail_txt = (f"Collect ≈ {usd(ln.credit)} · margin ≈ {usd(ln.margin)} · "
+                              f"if assigned {usd(ln.if_assigned)}{share} · "
                               f"breakeven {px(ln.breakeven)}, {pct(ln.cushion, 0, sign=False)} under {px(ln.underlying)}")
                 odds = [f"{pct(ln.ann_yield, 0, sign=False)}/yr",
                         f"about {pct(abs(ln.delta), 0, sign=False)} odds of assignment"]
                 if ln.earnings == "clear":
                     odds.append(f"earnings clear, last {day(ln.last_report).strftime('%-d %b')}"
                                 if ln.last_report else "earnings clear")
-                if int(cash_usd // ln.collateral) > 1:
-                    odds.append(f"cash covers {int(cash_usd // ln.collateral)}")
                 odds_txt = " · ".join(odds)
                 notes = _put_note_lines(ln, a.weights.get(ln.ticker, 0.0))
                 put_msg.append(f"<b>P{k} · {esc(ln.ticker)}</b> · {esc(plan_txt)}")
@@ -1721,23 +1715,19 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
                     source="put_scan", plan=plan_txt, stop=detail_txt, size=odds_txt,
                     notes=" | ".join(notes), record=rec_txt, account=a.label))
             note_txts = []
-            cash_note = _put_cash_note(my_puts.fits, cash_usd, bud.cost_now)
-            if cash_note:
-                note_txts.append(cash_note)
+            total_note = _put_total_note(my_puts.fits, nlv)
+            if total_note:
+                note_txts.append(total_note)
             if my_puts.fits:
                 note_txts.append(PUT_MANAGE)
+                if rec_txt:
+                    note_txts.append(rec_txt)
             elif my_puts.cheapest:
                 c = my_puts.cheapest
-                note_txts.append(f"None fit this cash. Smallest on the list: {c.ticker} ${c.strike:g} "
-                                 f"needs {usd(c.collateral)}.")
+                note_txts.append(f"None within this book's limits. Smallest on the list: {c.ticker} ${c.strike:g}, "
+                                 f"{usd(c.if_assigned)} if assigned.")
             else:
                 note_txts.append("None on the list today.")
-            if my_puts.rung:
-                dep = "S$" if a.deposit_ccy == "SGD" else "$"
-                names = " · ".join(f"{ln.ticker} ${ln.strike:g}" for ln in my_puts.rung)
-                note_txts.append(f"With the {short_money(a.deposit, dep)} deposit: {names}.")
-            if rec_txt and (my_puts.fits or my_puts.rung):
-                note_txts.append(rec_txt)
             for n in note_txts:
                 put_msg.append(f"<i>{esc(n)}</i>")
                 book_cards.append(card(section="put_note", plan=n, account=a.label))
@@ -1837,7 +1827,7 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
         if put_quotes:
             oldest = min(put_quotes, key=lambda ln: (ln.scan_ts or 0, ln.scanned_at))
             when = "live quotes" if all(ln.live for ln in put_quotes) else _put_when(oldest)
-        title = f"🪙 <b>Puts this cash covers · {stamp}</b>"
+        title = f"🪙 <b>Puts · {stamp}</b>"
         puts_text = "\n".join([title] + ([esc(when[0].upper() + when[1:])] if when else []) + put_msg).strip()
         if len(puts_text) > TELEGRAM_LIMIT:
             puts_text = puts_text[:TELEGRAM_LIMIT - 12].rsplit("\n", 1)[0] + "\n…(trimmed)"

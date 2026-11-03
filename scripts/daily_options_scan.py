@@ -10,7 +10,7 @@ Two-universe pipeline:
 
 Both universes funnel into ONE scan_results sheet and ONE Telegram push.
 
-A third pass, cash-fit puts, starts from what each book's cash can secure rather
+A third pass, book-fit puts, starts from what each book can carry on margin rather
 than from the market. Its rows go to their own tab, for the morning plan
 (src/put_lines.py) and for grading. They stay out of scan_results because the paper
 executor's plan and the app's Harvest page read that tab.
@@ -23,7 +23,7 @@ Triggered daily by .github/workflows/daily-options-scan.yml at 10:35 SGT
 Usage:
   python scripts/daily_options_scan.py            # full live scan
   python scripts/daily_options_scan.py --dry      # print, no sheet write
-  python scripts/daily_options_scan.py --puts-only # just the cash-fit put pass
+  python scripts/daily_options_scan.py --puts-only # just the book-fit put pass
 """
 from __future__ import annotations
 
@@ -44,6 +44,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.bsm import norm_cdf  # noqa: E402
 from src.logging_util import setup_logging  # noqa: E402
+from src.put_lines import MAX_NAME_IF_ASSIGNED  # noqa: E402
 
 # Same thresholds as trading_rules.py CSP_RULES / CC_RULES
 CSP_DTE_RANGE   = (15, 50)
@@ -2102,11 +2103,11 @@ def scan_ticker(
 # ── Position sizing (Tranche 1b) ───────────────────────────────────────────
 
 def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
-    """Read latest NLV and cash per account from snapshot tabs → per-account sizing state.
+    """Read latest NLV per account from snapshot tabs → per-account sizing state.
 
-    Returns {account: {nlv, cash, deposit (all USD), is_margin, profile}} for FUNDED
-    accounts only. `deposit` is the month's planned deposit, landed or not.
-    Caspar = USD margin / aggressive; Sarah = SGD cash / balanced (NLV → USD).
+    Returns {account: {nlv (USD), is_margin, profile}} for FUNDED accounts only.
+    Both books are margin (Caspar, 3 Nov 2026). Caspar = USD / aggressive; Sarah =
+    SGD / balanced (NLV → USD).
     Excess-liquidity isn't in the snapshot sheet yet, so the margin liquidity
     floor is NOT enforced here (it's enforced in the account-aware daily_tracker
     path); per-name + correlated-group + regime caps use NLV alone.
@@ -2135,15 +2136,6 @@ def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
         except (TypeError, ValueError):
             return 0.0
 
-    deposits: dict[str, float] = {}
-    try:
-        for r in _tab_dicts(ss, "monthly_deposits"):
-            amt = _f(r, "amount")
-            ccy = str(r.get("ccy") or "SGD").strip().upper()
-            deposits[str(r.get("account") or "").strip().lower()] = amt / usd_sgd if ccy == "SGD" else amt
-    except Exception as e:
-        logger.debug(f"  sizing: monthly_deposits read failed: {e}")
-
     # Caspar — USD margin account, aggressive profile.
     try:
         last = _latest("snapshot_caspar")
@@ -2152,21 +2144,19 @@ def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
             states["caspar"] = {
                 "nlv": nlv, "is_margin": True, "profile": "aggressive",
                 "excess_liq": _f(last, "excess_liq") or None,
-                "cash": _f(last, "cash"), "deposit": deposits.get("caspar", 0.0),
             }
     except Exception as e:
         logger.debug(f"  sizing: snapshot_caspar read failed: {e}")
 
-    # Sarah — SGD cash account, balanced profile (NLV + excess-liq → USD).
+    # Sarah — SGD margin account, balanced profile (NLV + excess-liq → USD).
     try:
         last = _latest("snapshot_sarah")
         nlv_sgd = _f(last, "net_liq_sgd")
         if nlv_sgd > 0:
             xl = _f(last, "excess_liq_sgd")
             states["sarah"] = {
-                "nlv": nlv_sgd / usd_sgd, "is_margin": False, "profile": "balanced",
+                "nlv": nlv_sgd / usd_sgd, "is_margin": True, "profile": "balanced",
                 "excess_liq": (xl / usd_sgd) if xl else None,
-                "cash": _f(last, "cash_sgd") / usd_sgd, "deposit": deposits.get("sarah", 0.0),
             }
     except Exception as e:
         logger.debug(f"  sizing: snapshot_sarah read failed: {e}")
@@ -2358,11 +2348,6 @@ def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
                 bpr_override=override, vix=float(vix), spx_above_200dma=spx_ok,
             )
             n = sr.recommended_contracts
-            # A cash account can only post the cash it has. The NLV limits alone
-            # said 1 contract of a $16 put for a book holding about $11 of strike.
-            if strat.upper() == "CSP" and not st["is_margin"] and "cash" in st \
-                    and float(c.get("strike", 0)) > 0:
-                n = min(n, int(st["cash"] // (float(c["strike"]) * 100)))
             if halve:
                 parts.append(f"{acct[0].upper()}:{n}x→{n // 2}x")
             else:
@@ -2377,37 +2362,32 @@ def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
     return note
 
 
-# ── Puts a book's cash can cover ───────────────────────────────────────────
-# The main scan picks the 0.25Δ strike on names over $10, whatever they cost, so
-# on a small book almost nothing it lists can be cash-secured. This pass starts
-# from the cash: for each book's limit, on today's cash and with the month's
-# deposit, it finds the put closest to the target delta that the cash covers.
-# src/put_lines.py turns these rows into each book's list. They get their own tab:
-# build_daily_plan takes the day's top CSP from scan_results for the paper executor,
-# and these are per-book lines, not market-wide picks. signal_feedback grades both.
-CASH_FIT_TAB = "cash_fit_puts"
-CASH_FIT_BUDGET_S = 480          # the pass runs last, and stops here rather than risk the job's timeout
-CASH_FIT_TOP = 120               # most-traded names to try, per cash level
-CASH_FIT_MIN_PRICE = 5.0
-CASH_FIT_MIN_PREMIUM = 0.20      # $20 a contract: below this, costs eat it
-CASH_FIT_MIN_AVG_VOLUME = 1_000_000
-CASH_FIT_MIN_MCAP = 500_000_000
-CASH_FIT_MAX_OTM = 0.30
-CASH_FIT_MAX_EXPIRIES = 3
-CASH_FIT_MAX_TRADE_AGE_DAYS = 5  # off-hours, an older last trade says nothing about today's price
-CASH_FIT_DTE_RANGE = (21, 50)    # under 21 days is where the exit rule already closes a put
+# ── Puts a book can carry ──────────────────────────────────────────────────
+# The main scan picks the 0.25Δ strike on names over $10, whatever they cost, so on a
+# small book much of what it lists would be too big a name if assigned. This pass
+# starts from the book: for each book's strike limit it finds the put closest to the
+# target delta. src/put_lines.py turns these rows into each book's list. They get
+# their own tab: build_daily_plan takes the day's top CSP from scan_results for the
+# paper executor, and these are per-book lines, not market-wide picks. signal_feedback
+# grades both.
+BOOK_FIT_TAB = "book_fit_puts"
+BOOK_FIT_BUDGET_S = 480          # the pass runs last, and stops here rather than risk the job's timeout
+BOOK_FIT_TOP = 120               # most-traded names to try, per book's limit
+BOOK_FIT_MIN_PRICE = 5.0
+BOOK_FIT_MIN_PREMIUM = 0.20      # $20 a contract: below this, costs eat it
+BOOK_FIT_MIN_AVG_VOLUME = 1_000_000
+BOOK_FIT_MIN_MCAP = 500_000_000
+BOOK_FIT_MAX_OTM = 0.30
+BOOK_FIT_MAX_EXPIRIES = 3
+BOOK_FIT_MAX_TRADE_AGE_DAYS = 5  # off-hours, an older last trade says nothing about today's price
+BOOK_FIT_DTE_RANGE = (21, 50)    # under 21 days is where the exit rule already closes a put
 
 
-def cash_fit_caps(states: dict[str, dict]) -> list[float]:
-    """The highest strike each book can secure: on cash alone, and with the deposit."""
-    floor = CASH_FIT_MIN_PRICE * (1 - CASH_FIT_MAX_OTM)
-    caps = set()
-    for st in states.values():
-        cash = st.get("cash") or 0.0
-        for total in (cash, cash + (st.get("deposit") or 0.0)):
-            if total / 100 >= floor:
-                caps.add(round(total / 100, 2))
-    return sorted(caps)
+def book_fit_caps(states: dict[str, dict]) -> list[float]:
+    """The highest strike each book can hold: one name's limit if assigned."""
+    floor = BOOK_FIT_MIN_PRICE * (1 - BOOK_FIT_MAX_OTM)
+    caps = {round(st["nlv"] * MAX_NAME_IF_ASSIGNED / 100, 2) for st in states.values() if st.get("nlv")}
+    return sorted(c for c in caps if c >= floor)
 
 
 def _us_market_open(now: datetime | None = None) -> bool:
@@ -2437,21 +2417,21 @@ def _usable_quotes(df, market_open: bool, now: datetime | None = None):
     live = (bid > 0) & (ask > 0) & (df["openInterest"].fillna(0) >= MIN_OI)
     if market_open or "lastTradeDate" not in df:
         return df[live]
-    cutoff = pd.Timestamp(now or datetime.now(timezone.utc)) - pd.Timedelta(days=CASH_FIT_MAX_TRADE_AGE_DAYS)
+    cutoff = pd.Timestamp(now or datetime.now(timezone.utc)) - pd.Timedelta(days=BOOK_FIT_MAX_TRADE_AGE_DAYS)
     recent = pd.to_datetime(df["lastTradeDate"], utc=True, errors="coerce") >= cutoff
     return df[live | ((bid <= 0) & (ask <= 0) & recent)]
 
 
-def pick_cash_fit_put(puts, ticker: str, expiry: str, price: float, dte: int, cap: float,
+def pick_book_fit_put(puts, ticker: str, expiry: str, price: float, dte: int, cap: float,
                       market_open: bool = True):
     """The put closest to the target delta among the strikes `cap` covers, or None."""
     df = _usable_quotes(_standard_contracts(puts, ticker, expiry), market_open).copy()
     if df.empty:
         return None
     df["mid"] = df.apply(_option_mid, axis=1)
-    df = df[(df["mid"] >= CASH_FIT_MIN_PREMIUM) & (df["strike"] <= cap)
+    df = df[(df["mid"] >= BOOK_FIT_MIN_PREMIUM) & (df["strike"] <= cap)
             & (df["strike"] <= price * (1 - CSP_OTM_RANGE[0]))
-            & (df["strike"] >= price * (1 - CASH_FIT_MAX_OTM))].copy()
+            & (df["strike"] >= price * (1 - BOOK_FIT_MAX_OTM))].copy()
     if df.empty:
         return None
     df["abs_delta"] = df.apply(lambda row: abs(_compute_greeks(row, price, dte, "P")[0]), axis=1)
@@ -2463,7 +2443,7 @@ def pick_cash_fit_put(puts, ticker: str, expiry: str, price: float, dte: int, ca
     return df.iloc[(df["abs_delta"] - CSP_DELTA_TARGET).abs().argsort().iloc[0]]
 
 
-def cash_fit_expiries(expiries: tuple[str, ...], today: date | None = None) -> list[str]:
+def book_fit_expiries(expiries: tuple[str, ...], today: date | None = None) -> list[str]:
     """Expiries to try, monthlies first: open interest gathers on the third Friday,
     and on a cheap stock a weekly at the same distance often has almost none."""
     today = today or date.today()
@@ -2474,13 +2454,13 @@ def cash_fit_expiries(expiries: tuple[str, ...], today: date | None = None) -> l
         except ValueError:
             continue
         dte = (d - today).days
-        if CASH_FIT_DTE_RANGE[0] <= dte <= CASH_FIT_DTE_RANGE[1]:
+        if BOOK_FIT_DTE_RANGE[0] <= dte <= BOOK_FIT_DTE_RANGE[1]:
             third_friday = d.weekday() == 4 and 15 <= d.day <= 21
             ranked.append((not third_friday, abs(dte - TARGET_DTE), e))
-    return [e for _, _, e in sorted(ranked)[:CASH_FIT_MAX_EXPIRIES]]
+    return [e for _, _, e in sorted(ranked)[:BOOK_FIT_MAX_EXPIRIES]]
 
 
-def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger,
+def scan_book_fit(ticker: str, caps: list[float], logger: logging.Logger,
                   market_open: bool = True) -> list[dict[str, Any]]:
     """One candidate per strike this ticker offers across the books' limits."""
     import yfinance as yf
@@ -2496,15 +2476,15 @@ def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger,
         price = float(yt.fast_info.last_price or 0)
         expiries = yt.options
     except Exception as e:
-        logger.debug(f"  {ticker}: cash-fit price fail — {e}")
+        logger.debug(f"  {ticker}: book-fit price fail — {e}")
         return []
-    if price < CASH_FIT_MIN_PRICE or price * (1 - CASH_FIT_MAX_OTM) > caps[-1]:
+    if price < BOOK_FIT_MIN_PRICE or price * (1 - BOOK_FIT_MAX_OTM) > caps[-1]:
         return []
     # Only names that produced a line pay for the earnings and fundamentals lookups.
     away: int | None = None
     rows: dict[tuple[str, float], tuple[Any, int]] = {}
     open_caps = list(caps)
-    for expiry in cash_fit_expiries(expiries):
+    for expiry in book_fit_expiries(expiries):
         dte = (datetime.strptime(expiry, "%Y-%m-%d").date() - date.today()).days
         if away is not None and 0 <= away <= dte:
             continue
@@ -2512,7 +2492,7 @@ def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger,
             puts = yt.option_chain(expiry).puts
         except Exception:
             continue
-        found = [(cap, pick_cash_fit_put(puts, ticker, expiry, price, dte, cap, market_open)) for cap in open_caps]
+        found = [(cap, pick_book_fit_put(puts, ticker, expiry, price, dte, cap, market_open)) for cap in open_caps]
         if any(r is not None for _, r in found) and away is None:
             away = fetch_earnings_dates([ticker]).get(ticker, {}).get("earnings_days_away", -1)
             if 0 <= away <= dte:
@@ -2528,7 +2508,7 @@ def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger,
 
     info = yt.info or {}
     is_etf = info.get("quoteType") == "ETF"
-    if not is_etf and ((info.get("marketCap") or 0) < CASH_FIT_MIN_MCAP or (info.get("totalRevenue") or 0) <= 0):
+    if not is_etf and ((info.get("marketCap") or 0) < BOOK_FIT_MIN_MCAP or (info.get("totalRevenue") or 0) <= 0):
         return []
     eps = info.get("trailingEps")
 
@@ -2541,7 +2521,7 @@ def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger,
         pass
     # Numbers only: signal_feedback parses every value here as a float.
     # scan_ts: the row's date column mixes the host's date with Singapore's clock.
-    snapshot.update({"cash_fit": 1.0, "is_etf": 1.0 if is_etf else 0.0, "scan_ts": round(time.time())})
+    snapshot.update({"book_fit": 1.0, "is_etf": 1.0 if is_etf else 0.0, "scan_ts": round(time.time())})
     if isinstance(eps, (int, float)):
         snapshot["eps"] = round(float(eps), 2)
 
@@ -2561,29 +2541,29 @@ def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger,
             "spread_pct": round((ask - bid) / mid * 100, 2) if bid > 0 and ask > 0 and mid > 0 else 0.0,
             "underlying_last": round(price, 2), "technical_score": round(csp_score, 1),
             "composite_score": max(0, min(100, int((csp_score + 100) / 2))),
-            "catalyst_flag": False, "notes": "cash-fit", "signals_json": json.dumps(snapshot),
+            "catalyst_flag": False, "notes": "book-fit", "signals_json": json.dumps(snapshot),
         })
     return out
 
 
-def run_cash_fit(logger: logging.Logger, states: dict[str, dict], watchlist: set[str],
+def run_book_fit(logger: logging.Logger, states: dict[str, dict], watchlist: set[str],
                  macro: dict) -> list[dict[str, Any]]:
-    """Logs counts only: a price limit here would give away a book's cash, and CI
+    """Logs counts only: a price limit here would give away a book's size, and CI
     logs on this repo are public. Most-traded names go first, so if the time budget
     runs out it's the thinnest ones that miss out."""
-    caps = cash_fit_caps(states)
+    caps = book_fit_caps(states)
     if not caps or macro.get("halted"):
-        logger.info("  Cash-fit puts: 0 lines")
+        logger.info("  Book-fit puts: 0 lines")
         return []
-    # One list per cash level, or the biggest limit's pricier names crowd out the
-    # cheap ones the smallest limit needs.
+    # One list per book's limit, or the bigger book's pricier names crowd out the
+    # cheaper ones the smaller book needs.
     names: list[str] = []
     try:
         for cap in caps:
-            names += [q["symbol"] for q in _yahoo_screen(CASH_FIT_MIN_PRICE, cap / (1 - CASH_FIT_MAX_OTM),
-                                                         CASH_FIT_MIN_AVG_VOLUME, CASH_FIT_MIN_MCAP, CASH_FIT_TOP)]
+            names += [q["symbol"] for q in _yahoo_screen(BOOK_FIT_MIN_PRICE, cap / (1 - BOOK_FIT_MAX_OTM),
+                                                         BOOK_FIT_MIN_AVG_VOLUME, BOOK_FIT_MIN_MCAP, BOOK_FIT_TOP)]
     except Exception as e:
-        logger.warning(f"  Cash-fit puts: Yahoo screener failed ({type(e).__name__}) — using the fallback list")
+        logger.warning(f"  Book-fit puts: Yahoo screener failed ({type(e).__name__}) — using the fallback list")
         names = list(FALLBACK_HIGH_IV_UNIVERSE)
     names = list(dict.fromkeys(names + sorted(watchlist)))
     market_open = _us_market_open()
@@ -2591,15 +2571,15 @@ def run_cash_fit(logger: logging.Logger, states: dict[str, dict], watchlist: set
     out: list[dict[str, Any]] = []
     tried = 0
     for ticker in names:
-        if time.monotonic() - start > CASH_FIT_BUDGET_S:
-            logger.warning(f"  Cash-fit puts: time budget hit after {tried} of {len(names)} names")
+        if time.monotonic() - start > BOOK_FIT_BUDGET_S:
+            logger.warning(f"  Book-fit puts: time budget hit after {tried} of {len(names)} names")
             break
         tried += 1
         try:
-            out.extend(scan_cash_fit(ticker, caps, logger, market_open))
+            out.extend(scan_book_fit(ticker, caps, logger, market_open))
         except Exception as e:
-            logger.debug(f"  {ticker}: cash-fit error — {type(e).__name__}")
-    logger.info(f"  Cash-fit puts: {len(out)} lines from {tried} names")
+            logger.debug(f"  {ticker}: book-fit error — {type(e).__name__}")
+    logger.info(f"  Book-fit puts: {len(out)} lines from {tried} names")
     return out
 
 
@@ -2631,31 +2611,31 @@ def _with_size(c: dict, states: dict[str, dict], macro: dict) -> str:
     return f"{notes} | {size}" if notes and size else (size or notes)
 
 
-def write_cash_fit(client, candidates: list[dict], states: dict[str, dict], macro: dict,
+def write_book_fit(client, candidates: list[dict], states: dict[str, dict], macro: dict,
                    logger: logging.Logger) -> None:
     from src import sheets as sh
     from src import schema as S
     if not candidates:
         return
     today_iso = date.today().isoformat()
-    sh.ensure_headers(client, CASH_FIT_TAB, S.ScanResultRow.HEADERS)
-    sh.append_rows(client, CASH_FIT_TAB,
+    sh.ensure_headers(client, BOOK_FIT_TAB, S.ScanResultRow.HEADERS)
+    sh.append_rows(client, BOOK_FIT_TAB,
                    [_scan_row(S, c, _with_size(c, states, macro), today_iso) for c in candidates])
-    logger.info(f"✓ Wrote {len(candidates)} cash-fit puts to {CASH_FIT_TAB}")
+    logger.info(f"✓ Wrote {len(candidates)} book-fit puts to {BOOK_FIT_TAB}")
 
 
-def cash_fit_step(client, ss, states: dict[str, dict], watchlist: set[str], macro: dict,
+def book_fit_step(client, ss, states: dict[str, dict], watchlist: set[str], macro: dict,
                   logger: logging.Logger) -> None:
-    """Find, tag and write the cash-fit puts. Runs after the main scan's writes and
+    """Find, tag and write the book-fit puts. Runs after the main scan's writes and
     never raises, so this pass can't cost the main scan anything. Exception types
     only: messages can carry a request's values, and CI logs are public."""
     try:
-        cands = run_cash_fit(logger, states, watchlist, macro)
+        cands = run_book_fit(logger, states, watchlist, macro)
         _tag_adverse_flow(ss, cands, logger)
         _apply_macro_warnings(cands, macro)
-        write_cash_fit(client, cands, states, macro, logger)
+        write_book_fit(client, cands, states, macro, logger)
     except Exception as e:
-        logger.warning(f"  ⚠ Cash-fit puts SKIPPED: {type(e).__name__}")
+        logger.warning(f"  ⚠ Book-fit puts SKIPPED: {type(e).__name__}")
 
 
 def main() -> int:
@@ -2663,7 +2643,7 @@ def main() -> int:
     ap.add_argument("--dry", action="store_true", help="Print, no sheet write")
     ap.add_argument("--top", type=int, default=HARVEST_UNIVERSE_TOP, help="Discovery universe cap")
     ap.add_argument("--puts-only", action="store_true",
-                    help="Only the cash-fit put pass: quick, and works off-hours on last trades")
+                    help="Only the book-fit put pass: quick, and works off-hours on last trades")
     args = ap.parse_args()
 
     logger = setup_logging("daily-scan")
@@ -2685,17 +2665,17 @@ def main() -> int:
 
     if args.puts_only:
         states = _read_account_states(ss, logger)
-        cands = run_cash_fit(logger, states, set(gather_watchlist(logger)), macro)
+        cands = run_book_fit(logger, states, set(gather_watchlist(logger)), macro)
         _tag_adverse_flow(ss, cands, logger)
         _apply_macro_warnings(cands, macro)
         if args.dry:
-            if not os.environ.get("GITHUB_ACTIONS"):    # a price list near a book's cash stays off public logs
+            if not os.environ.get("GITHUB_ACTIONS"):    # a price list sized to a book stays off public logs
                 for c in sorted(cands, key=ranking_key, reverse=True):
                     print(f"{c['ticker']:6} ${c['strike']:<6g} {c['expiry']} {c['dte']}d mid={c['premium']} "
                           f"bid={c['bid']} ask={c['ask']} d={c['delta']} y={c['annual_yield_pct']:.0f}% "
                           f"px={c['underlying_last']} eps={json.loads(c['signals_json']).get('eps')}")
             return 0
-        write_cash_fit(client, cands, states, macro, logger)
+        write_book_fit(client, cands, states, macro, logger)
         return 0
 
     # ── Universe Assembly ─────────────────────────────────────────────
@@ -2981,7 +2961,7 @@ def main() -> int:
 
     if not all_candidates:
         logger.warning("No candidates met threshold — sheet not updated")
-        cash_fit_step(client, ss, account_states, watchlist_set, macro, logger)
+        book_fit_step(client, ss, account_states, watchlist_set, macro, logger)
         return 0
 
     today_iso = date.today().isoformat()
@@ -3076,7 +3056,7 @@ def main() -> int:
     except Exception as e:
         logger.warning(f"Telegram Options Intel ping failed: {e}")
 
-    cash_fit_step(client, ss, account_states, watchlist_set, macro, logger)
+    book_fit_step(client, ss, account_states, watchlist_set, macro, logger)
 
     logger.info("═══ unified options scan done ═══")
     return 0

@@ -161,7 +161,7 @@ function ExitRow({
   );
 }
 
-/** Cash-secured puts this book's cash covers, then the lines that say what doesn't fit. */
+/** Short puts this book can carry on margin, then the lines about the list as a whole. */
 function PutLines({
   puts, putNotes, onTap, className = "mt-3",
 }: { puts: DailyIdeaRow[]; putNotes: DailyIdeaRow[]; onTap: (t: string) => void; className?: string }) {
@@ -169,7 +169,7 @@ function PutLines({
   return (
     <div className={className}>
       <SectionLabel color={PUT_COLOR} icon={<CircleDollarSign size={11} aria-hidden="true" />}>
-        Puts this cash covers
+        Puts for this book
       </SectionLabel>
       <div className="mt-2 space-y-2">
         {puts.map((r, i) => (
