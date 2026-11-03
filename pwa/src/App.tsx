@@ -182,6 +182,7 @@ function Dashboard({ authCtx }: { authCtx: AuthCtx }) {
             wheelNextLeg={data?.wheelNextLeg ?? []}
             exitPlans={data?.exitPlans ?? []}
             optionsDefense={data?.optionsDefense ?? []}
+            optionsDefenseLastRun={data?.optionsDefenseLastRun}
             casparPositions={data?.casparPositions ?? []}
             sarahPositions={data?.sarahPositions ?? []}
             harvestScan={data?.harvestScan ?? []}

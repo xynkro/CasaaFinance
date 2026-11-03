@@ -128,7 +128,7 @@ export function WheelContinuationCard({ rows }: { rows: WheelNextLegRow[] }) {
       <Card>
         <div className="flex items-center gap-2 text-slate-500">
           <Repeat size={16} />
-          <span className="text-[length:var(--t-sm)]">No open options to continue</span>
+          <span className="text-[length:var(--t-sm)]">No roll suggestions: the job that writes them isn't running</span>
         </div>
       </Card>
     );
