@@ -17,7 +17,7 @@ TWO SENDS A DAY
            once-a-day dedup ledger and the record the DM will be graded on later.
            If a plan went out, the message only says what changed.
 
-A second message follows with the cash-secured puts each book's cash covers, from
+A second message follows with the short puts each book can carry on margin, from
 the latest options scan (src/put_lines.py). The re-check re-quotes them live and
 only sends that message again if a line came or went.
 
@@ -52,6 +52,7 @@ sys.path.insert(0, str(ROOT))
 from src import daily_ideas as di  # noqa: E402
 from src import put_lines as pl  # noqa: E402
 from src.hold_list import hold_key  # noqa: E402
+from src.position_sizing import PROFILES  # noqa: E402
 
 log = logging.getLogger("daily_ideas_dm")
 ET = ZoneInfo("America/New_York")
@@ -60,13 +61,16 @@ WINDOW = (time(9, 40), time(11, 30))
 MARKET_OPEN = time(9, 30)
 SMA_HISTORY_DAYS = 320       # calendar days, enough for a 200-day average
 PUT_LOOKUPS = 15             # put lines to price-check per book, best first
+# Put limits per book: its confirmed sizing profile for margin, and the share of the
+# book all its short puts may reach if assigned (Caspar's call to change, 3 Nov 2026).
+PUT_LIMITS = {"caspar": ("aggressive", 1.00), "sarah": ("balanced", 0.50)}
 
 TABS = [
     "decision_queue", "uoa_alerts", "gov_confluence_signals", "screen_candidates",
     "snapshot_caspar", "snapshot_sarah", "positions_caspar", "positions_sarah",
     "hold_list", "monthly_deposits", "earnings_calendar", "ideas_log",
     "daily_brief_latest", "gex_regime", "macro", "daily_ideas",
-    "scan_results", "cash_fit_puts", "options", "signal_outcomes",
+    "scan_results", "book_fit_puts", "options", "signal_outcomes",
 ]
 LOG_TAB = "ideas_log"
 LOG_HEADERS = ["date", "sent_at", "num", "source", "tier", "ticker", "kind", "action",
@@ -363,20 +367,27 @@ def build_puts(tabs: dict, accounts: list[di.Account], sgd_per_usd: float, today
                ) -> tuple[dict[str, pl.BookPuts], dict[str, str]]:
     """Each book's put list from the latest scan, brought up to date: the stock's
     price, earnings before expiry and, after the open, a live quote. `meta` is the
-    fixture's data; without one this goes to Yahoo. Logs counts only: these lines
-    sit just under a book's cash, and CI logs are public."""
-    lines = pl.parse_scan_rows(tabs.get("scan_results", []) + tabs.get("cash_fit_puts", []), today)
+    fixture's data; without one this goes to Yahoo. Logs counts only: these lines are
+    sized to a book, and CI logs are public."""
+    lines = pl.parse_scan_rows(tabs.get("scan_results", []) + tabs.get("book_fit_puts", []), today)
     if not lines or not accounts:
         return {}, {}
-    tied_up = pl.cash_securing_puts(tabs.get("options", []))
-    money = {a.name: (max(0.0, di.to_usd(a.cash, a.ccy, sgd_per_usd) - tied_up.get(a.name, 0.0)),
-                      0.0 if a.deposit_landed else di.to_usd(a.deposit, a.deposit_ccy, sgd_per_usd))
-             for a in accounts}
-    top = max(c + d for c, d in money.values())
+    open_puts = pl.open_put_notional(tabs.get("options", []))
+    nlvs = {a.name: di.to_usd(a.nlv, a.ccy, sgd_per_usd) for a in accounts}
+
+    def limits(a: di.Account) -> tuple[float, float]:
+        profile, book_cap = PUT_LIMITS.get(a.name, ("balanced", 0.50))
+        return book_cap, PROFILES[profile]["per_name_pct"] * nlvs[a.name]
+
+    def within(ln: pl.PutLine, a: di.Account) -> bool:
+        book_cap, margin_cap = limits(a)
+        return (ln.if_assigned <= book_cap * nlvs[a.name] - open_puts.get(a.name, 0.0)
+                and ln.if_assigned <= pl.MAX_NAME_IF_ASSIGNED * nlvs[a.name] and ln.margin <= margin_cap)
+
     # A budget per book, so the bigger book's lines can't use up the smaller one's.
     near: list[pl.PutLine] = []
-    for c, d in money.values():
-        mine = sorted((ln for ln in lines if ln.collateral <= c + d), key=pl.rank)[:PUT_LOOKUPS]
+    for a in accounts:
+        mine = sorted((ln for ln in lines if within(ln, a)), key=pl.rank)[:PUT_LOOKUPS]
         near.extend(ln for ln in mine if ln not in near)
     tickers = sorted({ln.ticker for ln in near})
 
@@ -412,16 +423,18 @@ def build_puts(tabs: dict, accounts: list[di.Account], sgd_per_usd: float, today
             dropped += 1
             continue
         kept.append(ln)
-    log.info("put lines: %d near a book's cash, %d kept, %d dropped", len(near), len(kept), dropped)
+    log.info("put lines: %d within a book's limits, %d kept, %d dropped", len(near), len(kept), dropped)
 
-    pool = kept + [ln for ln in lines if ln.collateral > top]
     graded = pl.graded_contracts(tabs.get("signal_outcomes", []))
     books, records = {}, {}
     for a in accounts:
-        cash, dep = money[a.name]
-        bp = pl.for_book(pool, cash, dep, di.to_usd(a.nlv, a.ccy, sgd_per_usd), a.weights, di.CONCENTRATION_CAP)
+        book_cap, margin_cap = limits(a)
+        # Checked lines can fit; any line can be named as the smallest when none do.
+        bp = pl.for_book(kept, nlvs[a.name], a.weights, book_cap, margin_cap, open_puts.get(a.name, 0.0))
+        if not bp.fits and lines:
+            bp.cheapest = min(lines, key=lambda ln: (ln.if_assigned, pl.rank(ln)))
         books[a.name] = bp
-        records[a.name] = pl.record_text(graded, bp.fits or bp.rung)
+        records[a.name] = pl.record_text(graded, bp.fits)
     return books, records
 
 
