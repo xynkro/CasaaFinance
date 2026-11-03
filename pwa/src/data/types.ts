@@ -853,6 +853,7 @@ export interface DashboardData {
   wheelNextLeg: WheelNextLegRow[];
   exitPlans: ExitPlanRow[];
   optionsDefense: OptionsDefenseRow[];
+  optionsDefenseLastRun: string;
   wsrSummary: WsrSummaryRow | null;
   wsrLite: WsrSummaryRow | null;       // latest WSR Lite (Wed/Fri), source = "wsr_lite"
   decisions: DecisionRow[];            // latest day's decisions (active queue)

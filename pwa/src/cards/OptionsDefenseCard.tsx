@@ -1,4 +1,5 @@
 import type { OptionsDefenseRow } from "../data";
+import { daysAgo, shortDateLong } from "../lib/dates";
 import { Card } from "./Card";
 import { Shield, AlertOctagon, AlertTriangle, AlertCircle, Info } from "lucide-react";
 import { useState } from "react";
@@ -101,8 +102,25 @@ function AlertItem({ alert }: { alert: OptionsDefenseRow }) {
   );
 }
 
-export function OptionsDefenseCard({ alerts }: { alerts: OptionsDefenseRow[] }) {
+export function OptionsDefenseCard({ alerts, lastRun }: { alerts: OptionsDefenseRow[]; lastRun?: string }) {
   const [showAll, setShowAll] = useState(false);
+
+  // No rows can mean the check isn't running, which must not read as all clear.
+  if (!alerts.length && (!lastRun || daysAgo(lastRun) > 3)) {
+    return (
+      <Card>
+        <div className="flex items-center gap-2">
+          <Shield size={14} className="text-amber-400" />
+          <h2 className="text-[length:var(--t-sm)] font-medium text-slate-400">Daily Defense</h2>
+        </div>
+        <p className="mt-3 text-amber-400 text-[length:var(--t-sm)] font-medium">Not running</p>
+        <p className="text-[length:var(--t-xs)] text-slate-400 mt-1 leading-relaxed">
+          {lastRun ? `Last run ${shortDateLong(lastRun.slice(0, 10))}. ` : ""}
+          Nothing is checking your short strikes here.
+        </p>
+      </Card>
+    );
+  }
 
   if (!alerts.length) {
     return (

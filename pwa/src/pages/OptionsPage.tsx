@@ -83,6 +83,7 @@ export function OptionsPage({
   wheelNextLeg,
   exitPlans,
   optionsDefense,
+  optionsDefenseLastRun,
   casparPositions,
   sarahPositions,
   harvestScan,
@@ -100,6 +101,7 @@ export function OptionsPage({
   wheelNextLeg: WheelNextLegRow[];
   exitPlans: ExitPlanRow[];
   optionsDefense: OptionsDefenseRow[];
+  optionsDefenseLastRun?: string;
   casparPositions: PositionRow[];
   sarahPositions: PositionRow[];
   harvestScan: HarvestScanRow[];
@@ -176,7 +178,7 @@ export function OptionsPage({
 
       {sub === "defense" && (
         <div className="fade-up fade-up-1 mt-3">
-          <OptionsDefenseCard alerts={optionsDefense} />
+          <OptionsDefenseCard alerts={optionsDefense} lastRun={optionsDefenseLastRun} />
         </div>
       )}
 

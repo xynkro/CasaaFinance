@@ -10,6 +10,7 @@
  * importers keep resolving unchanged.
  */
 import { fetchTab, fetchTabByName, prefetchDashboard } from "./transport";
+import { daysAgo } from "../lib/dates";
 import {
   normalizeSnapshot,
   indexLivePrices,
@@ -73,6 +74,13 @@ function latestGroup<T extends { date: string }>(rows: T[]): T[] {
   // rows straddle a second boundary. Mirrors dedup()'s slice(0,10) normalization.
   const day = l.date.slice(0, 10);
   return rows.filter((r) => r.date.slice(0, 10) === day);
+}
+
+/** latestGroup, or nothing once its newest row is over `maxDays` old. For tabs written
+ *  by a job that can stop: old rows must not read as today's. */
+function freshGroup<T extends { date: string }>(rows: T[], maxDays: number): T[] {
+  const group = latestGroup(rows);
+  return group.length && daysAgo(group[0].date) <= maxDays ? group : [];
 }
 
 function sortByDate<T extends { date: string }>(rows: T[]): T[] {
@@ -212,11 +220,12 @@ export async function fetchDashboard(): Promise<DashboardData> {
       casparPositions: latestGroup(casparPos),
       sarahPositions: latestGroup(sarahPos),
       options: latestGroup(optionRows),
-      technicalScores: latestGroup(techRows),
+      technicalScores: freshGroup(techRows, 7),
       technicalScoresHistory: sortByDate(techRows),
-      wheelNextLeg: latestGroup(wheelRows),
+      wheelNextLeg: freshGroup(wheelRows, 7),
       exitPlans: latestGroup(exitRows),
-      optionsDefense: latestGroup(defenseRows),
+      optionsDefense: freshGroup(defenseRows, 3),
+      optionsDefenseLastRun: latest(defenseRows)?.date ?? "",
       wsrSummary: (() => {
         const full = sortByDate(wsrSumRows.filter((r) => r.source !== "wsr_lite"));
         return full.length ? full[full.length - 1] : null;
@@ -303,7 +312,7 @@ export async function fetchDashboard(): Promise<DashboardData> {
       dailyHistory: [], daily: null, caspar: null, sarah: null,
       casparPositions: [], sarahPositions: [], options: [],
       technicalScores: [], technicalScoresHistory: [],
-      wheelNextLeg: [], exitPlans: [], optionsDefense: [],
+      wheelNextLeg: [], exitPlans: [], optionsDefense: [], optionsDefenseLastRun: "",
       wsrSummary: null, wsrLite: null, decisions: [], decisionsAll: [],
       macro: null, casparHistory: [], sarahHistory: [], macroHistory: [],
       archive: [],
