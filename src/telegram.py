@@ -148,13 +148,22 @@ def send(
         # the newer link_preview_options object. Either works.
         payload["disable_web_page_preview"] = True
 
-    r = requests.post(url, json=payload, timeout=15)
+    try:
+        r = requests.post(url, json=payload, timeout=15)
+    except requests.RequestException as e:
+        # requests puts the full URL (the bot token) in its exception text.
+        raise RuntimeError(f"telegram request failed: {type(e).__name__}") from None
     if not r.ok:
         import logging as _log
         _log.getLogger(__name__).error(
             "Telegram %s → %s", r.status_code, r.text[:500]
         )
-    r.raise_for_status()
+    try:
+        r.raise_for_status()
+    except requests.HTTPError:
+        # HTTPError's text is "<code> Client Error: ... for url: <url>", and the
+        # url carries the bot token. Callers only ever `except Exception`.
+        raise RuntimeError(f"telegram http {r.status_code}") from None
     body = r.json()
     if not body.get("ok"):
         raise RuntimeError(f"Telegram API error: {body}")

@@ -188,14 +188,10 @@ def render_report(results: list[PositionResult], window: tuple[str, str, int]) -
     if winners:
         gb = [r.given_back for r in winners]
         caps = [r.capture for r in winners if r.capture is not None]
-        usd = [r.given_back_usd for r in winners if r.given_back_usd is not None]
         L.append(f"  Positions that reached >={MEANINGFUL_MFE:.0f}% profit: {len(winners)}")
         L.append(f"  Given back from peak — median {st.median(gb):.0f} pts, mean {st.mean(gb):.0f} pts")
         if caps:
             L.append(f"  Capture (fraction of peak kept) — median {st.median(caps) * 100:.0f}%")
-        if usd:
-            L.append(f"  Est. $ surrendered from peaks: ${sum(usd):,.0f} "
-                     f"(across {len(usd)} sized positions)")
     else:
         L.append("  No position cleared +5% MFE in this window.")
     L.append("")
@@ -203,11 +199,10 @@ def render_report(results: list[PositionResult], window: tuple[str, str, int]) -
     def _tbl(title: str, items: list[PositionResult]) -> None:
         L.append(title)
         L.append(f"  {'ticker':18}{'MFE':>8}{'MAE':>8}{'exit/now':>10}"
-                 f"{'gaveback':>10}{'$back':>10}  status")
+                 f"{'gaveback':>10}  status")
         for r in items:
-            usd = "" if r.given_back_usd is None else f"-${abs(r.given_back_usd):,.0f}"
             L.append(f"  {r.ticker:18}{r.mfe:>7.0f}%{r.mae:>7.0f}%{r.exit:>9.0f}%"
-                     f"{r.given_back:>8.0f}pts{usd:>10}  {r.status}")
+                     f"{r.given_back:>8.0f}pts  {r.status}")
         L.append("")
 
     by_gb = sorted(winners, key=lambda r: -r.given_back)

@@ -299,8 +299,7 @@ def main() -> int:
     snap_c = read_latest_snapshot(client, S.SnapshotCaspar.TAB_NAME)
     snap_s = read_latest_snapshot(client, S.SnapshotSarah.TAB_NAME)
     logger.info(
-        f"  caspar NLV={snap_c.get('net_liq_usd', 'n/a')} "
-        f"sarah NLV={snap_s.get('net_liq_sgd', 'n/a')}"
+        f"  snapshots present: caspar {bool(snap_c)}, sarah {bool(snap_s)}"
     )
 
     # Materialize signal files + invoke exposure-coach.

@@ -245,9 +245,11 @@ def main() -> int:
     # Surface anything non-HEALTHY for quick visual review
     notable = [r for r in new_rows if r.status not in ("HEALTHY",)]
     if notable:
-        logger.info(f"Non-HEALTHY exit_plans ({len(notable)}):")
+        by_status: dict[str, int] = {}
         for r in notable:
-            logger.info(f"  {r.account}/{r.ticker:6s} {r.status:18s} ${r.current:>9.2f}  stop ${r.stop_loss:>9.2f}  → {r.recommendation[:80]}")
+            by_status[r.status] = by_status.get(r.status, 0) + 1
+        logger.info(f"Non-HEALTHY exit_plans ({len(notable)}): "
+                    + ", ".join(f"{s} {n}" for s, n in sorted(by_status.items())))
 
     if args.dry:
         logger.info(f"[DRY] would write {len(new_rows)} rows to exit_plans")

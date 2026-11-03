@@ -226,7 +226,8 @@ def fetch_newsdata(timeout: float = 8.0, max_items: int = 10) -> list[dict]:
         r.raise_for_status()
         results = (r.json() or {}).get("results") or []
     except Exception as e:
-        log.warning("newsdata.io fetch failed: %s", e)
+        # Type only: the exception text embeds the request URL, which carries the key.
+        log.warning("newsdata.io fetch failed: %s", type(e).__name__)
         return []
 
     out: list[dict] = []

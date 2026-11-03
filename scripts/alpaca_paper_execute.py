@@ -171,7 +171,7 @@ def manage_exits(alpaca, today: "date", execute: bool) -> int:
     closed = 0
     for it in intents:
         coid = f"casaa-exit-{today.isoformat()}-{it.symbol}"[:48]
-        print(f"  EXIT {tag.get(it.action, it.action):10} {it.symbol} ×{it.qty} "
+        print(f"  EXIT {tag.get(it.action, it.action):10} {it.symbol} "
               f"(captured {it.captured_pct:+.0%}, {it.dte}DTE)")
         if not execute:
             continue
@@ -351,6 +351,13 @@ def _norm_strat(s: str) -> str:
     return "CSP" if s == "HARVEST_CSP" else str(s or "")
 
 
+def _log_label(spec: dict) -> str:
+    """Order label for the PUBLIC Actions log. Equity labels embed a dollar
+    notional (a % of the real book's NLV), so only the symbol is printed for
+    those; option labels carry strike / credit only."""
+    return f"EQUITY {spec['symbol']}" if spec.get("kind") == "equity" else spec["label"]
+
+
 def _read_plan_and_context():
     """Read the ONE source of truth (daily_plan) plus what's needed to execute
     it: scan_results (to rebuild option-spread legs), account NLV, VIX, GEX gate,
@@ -435,8 +442,7 @@ def main() -> int:
     except Exception as e:
         print(f"  (event-blackout check failed: {e})")
 
-    print(f"=== Alpaca paper executor · {today} · NLV ${acct['nlv']:,.0f} "
-          f"excess ${acct['excess_liq'] or 0:,.0f} · VIX {vix if vix > 0 else '?'} ===")
+    print(f"=== Alpaca paper executor · {today} · VIX {vix if vix > 0 else '?'} ===")
     if macro_degraded:
         print("  ⚠ MACRO DATA DEGRADED — VIX and/or SPX-vs-200dma unknown from the "
               "macro tab; sizing HALVED (0.5× CAUTION-equivalent), never full-size.")
@@ -490,12 +496,12 @@ def main() -> int:
             gap = round(target - cur, 2)
             if gap < max(1.0, 0.15 * target):     # within 15% of target → hold
                 statuses[key] = "held (at target)"
-                print(f"  HOLD {tk:6} {leg:9} — ${cur:,.0f}/${target:,.0f} at target")
+                print(f"  HOLD {tk:6} {leg:9} — at target")
                 continue
             spec = {"kind": "equity", "symbol": tk, "side": "buy",
                     "notional": gap, "label": f"{leg.upper()} {tk} +${gap:,.0f}→target"}
             orders.append((key, spec, 0, _alloc_coid(tk)))
-            print(f"  PLAN {spec['label']}  [rebalance]")
+            print(f"  PLAN {leg.upper()} {tk}  [rebalance]")
 
         elif leg == "growth":
             skip = growth_leg_skip_reason()
@@ -507,7 +513,7 @@ def main() -> int:
                     "notional": _f(r.get("notional")),
                     "label": f"GROWTH {tk} ${_f(r.get('notional')):,.0f}"}
             orders.append((key, spec, 0, f"casaa-{today}-GROWTH-{tk}"[:48]))
-            print(f"  PLAN {spec['label']}  [equity]")
+            print(f"  PLAN GROWTH {tk}  [equity]")
 
         elif leg == "income":
             skip = income_skip_reason(strat, gex_caution, blackout_event)
@@ -533,7 +539,7 @@ def main() -> int:
                 print(f"  SKIP {spec['label']} — sized to 0 contracts")
                 continue
             orders.append((key, spec, qty, client_order_id(today, pick)))
-            print(f"  PLAN {spec['label']}  ×{qty}  [{spec['kind']}]")
+            print(f"  PLAN {spec['label']}  [{spec['kind']}]")
         else:
             statuses[key] = f"skipped:unknown leg {leg}"
 
@@ -561,10 +567,10 @@ def main() -> int:
                                          limit_price=spec["limit_price"], client_order_id=coid)
             placed += 1
             statuses[key] = "filled"
-            print(f"  ✓ PLACED {spec['label']} ×{qty}")
+            print(f"  ✓ PLACED {_log_label(spec)}")
         except Exception as e:
             statuses[key] = f"failed:{e}"[:60]
-            print(f"  ✗ FAILED {spec['label']} — {e}")
+            print(f"  ✗ FAILED {_log_label(spec)} — {e}")
 
     _writeback_fill_status(today, statuses)
     print(f"\nPlaced {placed}/{len(orders)} orders on Alpaca PAPER (daily_plan executed).")

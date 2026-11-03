@@ -543,7 +543,7 @@ def main() -> int:
         return 1
     if args.limit > 0:
         universe = universe[:args.limit]
-    logger.info(f"  universe: {len(universe)} tickers — {', '.join(universe)}")
+    logger.info(f"  universe: {len(universe)} tickers")
 
     rows = pull_signals(universe, today, logger)
     elapsed = time.time() - t0

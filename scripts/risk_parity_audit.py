@@ -442,11 +442,7 @@ def main() -> int:
         if net_liq <= 0:
             logger.warning(f"  [{account}] skipped — no NLV available")
             continue
-        ccy = "USD" if account == "caspar" else "SGD"
-        logger.info(f"  [{account}] NLV={net_liq:,.0f} {ccy} | classes seen: {len(capital_by_class)}")
-        for cls, val in sorted(capital_by_class.items(), key=lambda kv: -kv[1]):
-            pct = (val / net_liq) * 100.0
-            logger.info(f"    {cls:24} {val:>12,.0f} {ccy} ({pct:>5.1f}%)")
+        logger.info(f"  [{account}] classes seen: {len(capital_by_class)}")
         rows = build_audit_rows(
             account=account,
             net_liq=net_liq,

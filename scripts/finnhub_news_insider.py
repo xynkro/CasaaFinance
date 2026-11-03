@@ -92,7 +92,8 @@ def _fh_get(path: str, params: dict, logger: logging.Logger,
     url = f"{FH_BASE}/{path}"
     for attempt in range(retries + 1):
         try:
-            r = requests.get(url, params={**params, "token": api_key}, timeout=15)
+            r = requests.get(url, params=params,
+                             headers={"X-Finnhub-Token": api_key}, timeout=15)
         except Exception as e:
             logger.warning(f"  {path} network: {e}")
             time.sleep(2)

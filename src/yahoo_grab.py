@@ -222,7 +222,7 @@ def refresh_account(
 
         price = prices.get(ticker)
         if price is None:
-            logger.warning(f"  {ticker}: no price from Yahoo — keeping last={pos.get('last','?')}")
+            logger.warning("  a position has no Yahoo price — keeping its last price")
             price = float(pos.get("last", 0) or 0)
 
         mkt_val = qty * price
@@ -252,9 +252,6 @@ def refresh_account(
         total_mkt_val_acct += mkt_val_acct
         total_upl_acct += upl_acct
 
-        upl_txt = f"{upl:+9.2f}" if upl is not None else "  unknown"
-        logger.info(f"  {ticker:8} qty={qty:6.0f}  last={price:10.4f}  mkt_val={mkt_val:10.2f}  upl={upl_txt}")
-
         row = [
             now_ts,
             ticker,
@@ -266,6 +263,8 @@ def refresh_account(
             "",  # weight — filled below
         ]
         updated_rows.append(row)
+
+    logger.info(f"  {len(updated_rows)} positions repriced")
 
     # Fill weights
     for row in updated_rows:
@@ -308,7 +307,7 @@ def refresh_account(
     upl_pct = total_upl_acct / net_liq_prev if net_liq_prev else 0
     snap_row = [now_ts, f"{net_liq:.2f}", f"{cash:.2f}", f"{total_upl_acct:.2f}", f"{upl_pct:.4f}"]
 
-    logger.info(f"  Snapshot: net_liq={snap_row[1]} cash={cash:.2f} upl={snap_row[3]} upl_pct={snap_row[4]}")
+    logger.info("  snapshot row built")
 
     if not dry:
         replace_today_rows_ws(ws_snap, [snap_row])
@@ -363,7 +362,7 @@ def main() -> int:
         logger.error("No tickers found in any position sheet")
         return 1
 
-    logger.info(f"Fetching prices for: {', '.join(all_tickers)}")
+    logger.info(f"Fetching prices for {len(all_tickers)} tickers")
     try:
         prices = fetch_prices(all_tickers)
     except RuntimeError as e:
@@ -372,10 +371,9 @@ def main() -> int:
 
     missing = [t for t in all_tickers if t not in prices]
     if missing:
-        logger.warning(f"No price returned for: {', '.join(missing)}")
+        logger.warning(f"No price returned for {len(missing)} of {len(all_tickers)} tickers")
 
-    for t, p in sorted(prices.items()):
-        logger.info(f"  Price: {t:10} = {p:.4f}")
+    logger.info(f"  {len(prices)} prices fetched")
 
     usdsgd = fetch_usdsgd()
     logger.info(f"USD/SGD: {usdsgd:.4f}")

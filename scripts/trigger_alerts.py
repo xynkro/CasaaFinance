@@ -1572,9 +1572,8 @@ def main() -> int:
             if row.entry_price else 0
         )
         logger.info(
-            f"  • {row.ticker:6} {row.account:7} {row.strategy:10} "
-            f"state={row.last_state:8} cur=${row.current_price:>7.2f} entry=${row.entry_price:>7.2f} "
-            f"({pct_to_trigger:+.1%}){gate_str}"
+            f"  • {row.account:7} {row.strategy:10} "
+            f"state={row.last_state:8} ({pct_to_trigger:+.1%}){gate_str}"
         )
     if skipped:
         logger.info(f"Skipped {len(skipped)} unevaluable decisions:")
@@ -1672,7 +1671,7 @@ def main() -> int:
     # leading line) — the original ping still goes to Macro News too.
     positions_by_account = load_account_positions(client)
     portfolio_tickers = held_tickers_from_positions(positions_by_account)
-    logger.info(f"Portfolio tickers (for mirror): {sorted(portfolio_tickers) or '(none)'}")
+    logger.info(f"Portfolio tickers (for mirror): {len(portfolio_tickers)}")
 
     def _matched_tickers(text: str) -> list[str]:
         """Return portfolio tickers mentioned in `text` (case-insensitive,
@@ -1774,7 +1773,7 @@ def main() -> int:
     # Snapshot freshness in the lane log — a cashfloor/conc count of 0
     # must be distinguishable between "healthy" and "no snapshot data".
     snap_desc = ", ".join(
-        f"{a} nlv={s.get('nlv', 0):,.0f}" for a, s in sorted(snapshots.items())
+        f"{a} present={bool(s)}" for a, s in sorted(snapshots.items())
     ) or "none"
     logger.info(
         f"Lane plans: defense={len(defense_plan)} fires "
@@ -2030,12 +2029,9 @@ def main() -> int:
                 account=plan["account"],
             )
             defense_sent += 1
-            logger.info(
-                f"  ✓ sent DEFENSE {plan['level'].upper()}: {plan['ticker']} "
-                f"{plan['underlying']:.2f} vs short {plan['strike']:g}{plan['right']}"
-            )
+            logger.info(f"  ✓ sent DEFENSE {plan['level'].upper()}: {plan['account']}")
         except Exception as e:
-            logger.warning(f"  ✗ DEFENSE failed: {plan['ticker']} {plan['strike']:g}{plan['right']}: {e}")
+            logger.warning(f"  ✗ DEFENSE failed: {plan['account']}: {e}")
             continue
         for k in plan["keys_to_mark"]:
             macro_state_rows.append(S.MacroAlertStateRow(
@@ -2147,7 +2143,7 @@ def main() -> int:
         try:
             send_fn()
             mech_sent += 1
-            logger.info(f"  ✓ sent {ev_type.upper()}: {summary}")
+            logger.info(f"  ✓ sent {ev_type.upper()}: {plan['account']}")
             # Concentration carries keys_to_mark (ALERT also marks WARN, like
             # the pressure lane); the others mark their single key.
             for k in (plan.get("keys_to_mark") or [plan["key"]]):

@@ -331,12 +331,11 @@ def main() -> int:
     plan = build_plan(nlv, latest("scan_results"), latest("screen_candidates"),
                       today, lean=lean, curated_rows=curated)
     now_iso = S.now_sgt_iso()
-    print(f"=== Daily Plan · {today} · NLV ${nlv:,.0f} · macro lean: {lean} · {len(plan)} rows ===\n")
+    print(f"=== Daily Plan · {today} · macro lean: {lean} · {len(plan)} rows ===\n")
     rows = []
     for p in plan:
         flag = "▶" if p["execute"] else " "
-        print(f"  {flag} #{p['rank']:<2} {p['leg']:9} {p['ticker']:6} {p['strategy']:9} "
-              f"conv {p['conviction']:5.1f}  {p['detail']}")
+        print(f"  {flag} #{p['rank']:<2} {p['leg']:9} {p['strategy']:9}")
         rows.append(S.DailyPlanRow(
             date=today, rank=p["rank"], leg=p["leg"], ticker=p["ticker"],
             strategy=p["strategy"], detail=p["detail"], conviction=p["conviction"],

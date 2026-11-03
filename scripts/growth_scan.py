@@ -296,7 +296,7 @@ def main() -> int:
     ranked = rank_candidates(scored)[:TOP_N]
     nlvs = read_account_nlvs(logger)
     size_note = sizing_note(nlvs)
-    logger.info(f"\nTop {len(ranked)} growth candidates" + (f"  ({size_note})" if size_note else "") + ":")
+    logger.info(f"\nTop {len(ranked)} growth candidates:")
     for r in ranked:
         tag = f"  [{r['conf_tag']}]" if r.get("conf_tag") else ""
         logger.info(f"  {r['ticker']:6} score {r['score']:5.1f}  3mo {r['mom_3m']:+6.1f}%  "

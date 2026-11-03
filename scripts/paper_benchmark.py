@@ -148,8 +148,7 @@ def main() -> int:
         external = [p for p in positions if p.get("symbol", "") not in owned]
         positions = [p for p in positions if p.get("symbol", "") in owned]
         if external:
-            print(f"(excluded {len(external)} non-FinancePWA positions from the "
-                  f"benchmark: {', '.join(sorted({p.get('symbol','') for p in external}))})")
+            print(f"(excluded {len(external)} non-FinancePWA positions from the benchmark)")
 
     entry = _entry_dates(orders)
     start = min([entry.get(p.get("symbol", ""), today) for p in positions] + [today])
@@ -173,10 +172,6 @@ def main() -> int:
         tot_equiv += pa["spy_equiv"]
         if pa["beat"]:
             beat += 1
-        label = occ["underlying"] if occ else sym
-        flag = "BEAT" if pa["beat"] else "lag "
-        print(f"  {flag} {label:6} {days:3}d  P&L {pl:+8.2f}  vs SPY {pa['spy_equiv']:+8.2f}  "
-              f"α {pa['alpha']:+8.2f}  (SPY {spy_ret:+.1f}%)")
         rows.append(S.PaperBenchmarkRow(
             date=today, ticker=sym, entry_date=edate, days_held=max(days, 0),
             cost_basis=round(cap, 2), position_pl=round(pl, 2),
@@ -186,8 +181,6 @@ def main() -> int:
     total_alpha = round(tot_pl - tot_equiv, 2)
     n = len(positions)
     print(f"\n  {'═'*60}")
-    print(f"  BOOK: P&L {tot_pl:+.2f}  ·  SPY-equivalent {tot_equiv:+.2f}  ·  "
-          f"ALPHA {total_alpha:+.2f}")
     print(f"  {beat}/{n} positions beat SPY  →  the book is "
           f"{'BEATING' if total_alpha > 0 else 'LAGGING'} the index.")
     rows.append(S.PaperBenchmarkRow(
@@ -207,8 +200,8 @@ def main() -> int:
     # layer: separately measurable from the rest of the shared book).
     mf = mf_sleeve_alpha(rows, _mf_core_tickers(ss))
     if mf:
-        print(f"  MF SLEEVE: P&L {mf['position_pl']:+.2f} · SPY-equiv {mf['spy_equiv_pl']:+.2f} "
-              f"· α {mf['alpha_pl']:+.2f}  ({mf['n']} names)")
+        print(f"  MF SLEEVE: {mf['n']} names · "
+              f"{'BEATING' if mf['beat_spy'] else 'LAGGING'} SPY")
         rows.append(S.PaperBenchmarkRow(
             date=today, ticker="MF_SLEEVE", entry_date="", days_held=0, cost_basis=0.0,
             position_pl=mf["position_pl"], spy_return_pct=0.0, spy_equiv_pl=mf["spy_equiv_pl"],
