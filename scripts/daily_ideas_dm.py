@@ -17,6 +17,10 @@ TWO SENDS A DAY
            once-a-day dedup ledger and the record the DM will be graded on later.
            If a plan went out, the message only says what changed.
 
+A second message follows with the cash-secured puts each book's cash covers, from
+the latest options scan (src/put_lines.py). The re-check re-quotes them live and
+only sends that message again if a line came or went.
+
 SCHEDULE
   deploy/vm/casaa_dispatch.py on the GCP VM starts this at 08:45 and 09:47 ET,
   because GitHub's cron runs land hours late. The workflow's cron stays as a
@@ -46,6 +50,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from src import daily_ideas as di  # noqa: E402
+from src import put_lines as pl  # noqa: E402
 from src.hold_list import hold_key  # noqa: E402
 
 log = logging.getLogger("daily_ideas_dm")
@@ -54,12 +59,14 @@ PREOPEN_WINDOW = (time(8, 0), time(9, 29))
 WINDOW = (time(9, 40), time(11, 30))
 MARKET_OPEN = time(9, 30)
 SMA_HISTORY_DAYS = 320       # calendar days, enough for a 200-day average
+PUT_LOOKUPS = 25             # put lines to price-check per run, best first
 
 TABS = [
     "decision_queue", "uoa_alerts", "gov_confluence_signals", "screen_candidates",
     "snapshot_caspar", "snapshot_sarah", "positions_caspar", "positions_sarah",
     "hold_list", "monthly_deposits", "earnings_calendar", "ideas_log",
     "daily_brief_latest", "gex_regime", "macro", "daily_ideas",
+    "scan_results", "signal_outcomes",
 ]
 LOG_TAB = "ideas_log"
 LOG_HEADERS = ["date", "sent_at", "num", "source", "tier", "ticker", "kind", "action",
@@ -225,11 +232,12 @@ def fetch_fx() -> float:
     raise RuntimeError("no SGD/USD rate from yfinance — not sending a mis-sized DM")
 
 
-def fetch_option(ticker: str, expiry: str, strike: float) -> tuple[float, float] | None:
+def fetch_option(ticker: str, expiry: str, strike: float, right: str = "C") -> tuple[float, float] | None:
     import yfinance as yf
     try:
-        calls = yf.Ticker(ticker).option_chain(expiry).calls
-        row = calls[abs(calls["strike"] - strike) < 1e-6]
+        chain = yf.Ticker(ticker).option_chain(expiry)
+        side = chain.puts if right == "P" else chain.calls
+        row = side[abs(side["strike"] - strike) < 1e-6]
         if row.empty:
             return None
         return float(row["bid"].iloc[0] or 0), float(row["ask"].iloc[0] or 0)
@@ -347,6 +355,72 @@ def build_accounts(tabs: dict, today: str, sgd_per_usd: float) -> list[di.Accoun
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Put lines
+# ─────────────────────────────────────────────────────────────────────────
+
+def build_puts(tabs: dict, accounts: list[di.Account], sgd_per_usd: float, today: str, phase: str,
+               sheet_dates: dict[str, list[str]], meta: dict | None = None
+               ) -> tuple[dict[str, pl.BookPuts], dict[str, str]]:
+    """Each book's put list from the latest scan, brought up to date: the stock's
+    price, earnings before expiry and, after the open, a live quote. `meta` is the
+    fixture's data; without one this goes to Yahoo. Logs counts only: these lines
+    sit just under a book's cash, and CI logs are public."""
+    lines = pl.parse_scan_rows(tabs.get("scan_results", []), today)
+    if not lines or not accounts:
+        return {}, {}
+    money = {a.name: (di.to_usd(a.cash, a.ccy, sgd_per_usd),
+                      0.0 if a.deposit_landed else di.to_usd(a.deposit, a.deposit_ccy, sgd_per_usd))
+             for a in accounts}
+    top = max(c + d for c, d in money.values())
+    near = sorted((ln for ln in lines if ln.collateral <= top), key=pl.rank)[:PUT_LOOKUPS]
+    tickers = sorted({ln.ticker for ln in near})
+
+    if meta is not None:
+        bars = bars_from_csv(Path(meta["dir"]) / "prices.csv")
+        kinds, yahoo, quotes = meta.get("kinds", {}), meta.get("yahoo_earnings", {}), meta.get("options", {})
+    else:
+        start = (date.fromisoformat(today) - timedelta(days=10)).isoformat()
+        bars = fetch_bars(tickers, start) if tickers else {}
+        if phase == "preopen":
+            bars = di.with_premarket(bars, fetch_premarket(tickers, today), today)
+        kinds = fetch_kinds([ln.ticker for ln in near if not ln.kind])
+        yahoo = fetch_earnings(sorted(t for t in tickers
+                                      if kinds.get(t) != "ETF" and not any(
+                                          ln.ticker == t and ln.kind == "ETF" for ln in near)))
+        quotes = None
+
+    kept, dropped = [], 0
+    for ln in near:
+        if phase == "open":
+            key = f"{ln.ticker}|{ln.expiry}|{ln.strike:g}"
+            q = quotes.get(key) if quotes is not None else fetch_option(ln.ticker, ln.expiry, ln.strike, "P")
+            bid, ask = (q["bid"], q["ask"]) if isinstance(q, dict) else (q or (0.0, 0.0))
+            if bid <= 0 or ask < bid:        # no buyer now: the market is open, so this is real
+                dropped += 1
+                continue
+            ln.bid, ln.ask, ln.premium, ln.live = bid, ask, (bid + ask) / 2, True
+        b = bars.get(ln.ticker)
+        e = di.reconcile_earnings(sheet_dates.get(ln.ticker, []), yahoo.get(ln.ticker), today)
+        why = pl.check_line(ln, b.c[-1] if b is not None and b.c else None, e.upcoming, e.reported,
+                            kinds.get(ln.ticker, ""), today)
+        if why:
+            dropped += 1
+            continue
+        kept.append(ln)
+    log.info("put lines: %d near a book's cash, %d kept, %d dropped", len(near), len(kept), dropped)
+
+    pool = kept + [ln for ln in lines if ln.collateral > top]
+    graded = pl.graded_contracts(tabs.get("signal_outcomes", []))
+    books, records = {}, {}
+    for a in accounts:
+        cash, dep = money[a.name]
+        bp = pl.for_book(pool, cash, dep, di.to_usd(a.nlv, a.ccy, sgd_per_usd), a.weights, di.CONCENTRATION_CAP)
+        books[a.name] = bp
+        records[a.name] = pl.record_text(graded, bp.fits or bp.rung)
+    return books, records
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────
 
@@ -355,6 +429,8 @@ def print_dry(dm: di.DM, is_fixture: bool) -> None:
     DM names account cash, so under GitHub Actions only synthetic runs print."""
     if is_fixture or not os.environ.get("GITHUB_ACTIONS"):
         print(dm.text)
+        if dm.puts_text:
+            print("\n" + dm.puts_text)
     else:
         log.info("dry run: DM built (%d sized, %d exits, %d watch), not printed: CI logs are public",
                  len(dm.sized), len(dm.exits), len(dm.watch))
@@ -507,6 +583,8 @@ def run(args) -> int:
                 for t in set(sheet_dates) | set(yahoo)}
     blocked = di.blocked_sells(dq, today, upl, holds)
     growth_on = os.environ.get("GROWTH_LEG_ENABLED", "").lower() in ("true", "1", "yes")
+    puts, put_records = build_puts(tabs, accounts, sgd_per_usd, today, phase, sheet_dates,
+                                   {**meta, "dir": str(fixture)} if fixture else None)
 
     dm = di.build_dm(now_et=now_et, today=today, records=records, wsr=wsr, uoa=uoa, gov=gov,
                      momentum=mom, bars=bars, accounts=accounts, sgd_per_usd=sgd_per_usd,
@@ -514,7 +592,8 @@ def run(args) -> int:
                      exits=exits, holdings=holdings, phase=phase,
                      direction=di.direction_lines(tabs.get("daily_brief_latest", []), spy, today),
                      levels=di.level_lines(bars, tabs.get("gex_regime", []), tabs.get("macro", []), today),
-                     prior_cards=[r for r in todays_cards if r.get("phase") == "preopen"] if phase == "open" else None)
+                     prior_cards=[r for r in todays_cards if r.get("phase") == "preopen"] if phase == "open" else None,
+                     puts=puts, put_records=put_records)
 
     for s, r in records.items():
         log.info("record %-8s n=%-4d beat=%-4d alpha=%+.2f%% t=%s weeks=%d tier=%s "
@@ -529,6 +608,8 @@ def run(args) -> int:
 
     from src import telegram as tg
     tg.ping_daily_ideas(dm.text)
+    if dm.puts_text:
+        tg.ping_daily_ideas(dm.puts_text)
     from src import sheets as sh
     client = sh.authenticate()
     if phase == "preopen":      # a preview: not graded, and it must not block the re-check

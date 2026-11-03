@@ -4,11 +4,15 @@ daily_options_scan.py — Unified options scanner (merged daily + harvest).
 Two-universe pipeline:
   1. WATCHLIST universe (positions + decision queue + gov/screen signals)
      → all strategies: CSP, CC, LONG_CALL, IC, PCS, CCS, PMCC
-  2. HIGH-IV DISCOVERY universe (FinViz screener → optionable high-IV stocks)
+  2. DISCOVERY universe (Yahoo screener → most-traded US stocks)
      → CSP only (harvest pipeline: macro gate, fundamental gate,
        technical conviction, earnings gate, vol-adjusted OTM)
 
 Both universes funnel into ONE scan_results sheet and ONE Telegram push.
+
+A third pass, cash-fit puts, starts from what each book's cash can secure rather
+than from the market. Its rows go to scan_results too, for the morning plan
+(src/put_lines.py) and for grading, but stay out of the shared digest.
 CSP picks from the discovery universe are ALSO written to harvest_scan
 (the PWA Harvest page reads that tab for signal-block display).
 
@@ -18,6 +22,7 @@ Triggered daily by .github/workflows/daily-options-scan.yml at 10:35 SGT
 Usage:
   python scripts/daily_options_scan.py            # full live scan
   python scripts/daily_options_scan.py --dry      # print, no sheet write
+  python scripts/daily_options_scan.py --puts-only # just the cash-fit put pass
 """
 from __future__ import annotations
 
@@ -27,6 +32,7 @@ import logging
 import math
 import os
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -558,32 +564,43 @@ def _best_leaps_expiry(expiries: tuple[str, ...], min_dte: int = 270) -> str | N
 # Harvest Discovery Pipeline (absorbed from premium_harvest_scan.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def discover_universe(logger: logging.Logger, top_n: int = HARVEST_UNIVERSE_TOP) -> list[str]:
-    """FinViz screener for optionable high-IV stocks. Falls back to curated list."""
+def _yahoo_screen(min_price: float, max_price: float | None, min_avg_volume: int,
+                  min_market_cap: int, size: int) -> list[dict]:
+    """Liquid US stocks from Yahoo's screener, most traded first. Most traded first
+    matters: the scan keeps only the top of this list, and option markets are
+    tightest on the names that trade most."""
+    import yfinance as yf
+    from yfinance import EquityQuery as Q
+
+    terms = [Q("eq", ["region", "us"]),
+             Q("gt", ["avgdailyvol3m", min_avg_volume]),
+             Q("gt", ["intradaymarketcap", min_market_cap])]
+    terms.append(Q("btwn", ["intradayprice", min_price, max_price]) if max_price
+                 else Q("gt", ["intradayprice", min_price]))
     try:
-        from finvizfinance.screener.overview import Overview
+        res = yf.screen(Q("and", terms), size=size, sortField="avgdailyvol3m", sortAsc=False)
+    except Exception:       # Yahoo throws the odd 500 on a query that works a second later
+        time.sleep(2)
+        res = yf.screen(Q("and", terms), size=size, sortField="avgdailyvol3m", sortAsc=False)
+    return res.get("quotes") or []
 
-        foverview = Overview()
-        filters_dict = {
-            "Option/Short": "Optionable",
-            "Price": "Over $5",
-            "Average Volume": "Over 500K",
-            "Market Cap": "+Small (over $300mln)",
-        }
-        foverview.set_filter(filters_dict=filters_dict)
-        df = foverview.screener_view()
 
-        if df is not None and not df.empty:
-            tickers = df["Ticker"].tolist()[:top_n]
-            logger.info(f"  Discovery: FinViz returned {len(df)} optionable stocks, taking top {len(tickers)}")
-            return tickers
-        else:
-            logger.warning("  Discovery: FinViz returned empty — using fallback universe")
-            return FALLBACK_HIGH_IV_UNIVERSE[:top_n]
+def discover_universe(logger: logging.Logger, top_n: int = HARVEST_UNIVERSE_TOP) -> list[str]:
+    """Most-traded US stocks over $5. Falls back to the curated list.
 
+    Was a FinViz screen until Nov 2026: FinViz renamed the 'Market Cap' filter, so
+    every run raised and silently used the fallback list, and the screen itself
+    now returns 403. The chain fetch drops anything without listed options."""
+    try:
+        tickers = [q["symbol"] for q in _yahoo_screen(5.0, None, 500_000, 300_000_000, top_n)]
     except Exception as e:
-        logger.warning(f"  Discovery: FinViz unavailable ({e}) — using fallback universe")
+        logger.warning(f"  Discovery: Yahoo screener failed ({type(e).__name__}: {e}) — using fallback universe")
         return FALLBACK_HIGH_IV_UNIVERSE[:top_n]
+    if not tickers:
+        logger.warning("  Discovery: Yahoo screener returned nothing — using fallback universe")
+        return FALLBACK_HIGH_IV_UNIVERSE[:top_n]
+    logger.info(f"  Discovery: Yahoo screener gave {len(tickers)} stocks")
+    return tickers
 
 
 # ── Macro gate: fail-SAFE, Sheet-first ─────────────────────────────────────
@@ -2082,9 +2099,10 @@ def scan_ticker(
 # ── Position sizing (Tranche 1b) ───────────────────────────────────────────
 
 def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
-    """Read latest NLV per account from snapshot tabs → per-account sizing state.
+    """Read latest NLV and cash per account from snapshot tabs → per-account sizing state.
 
-    Returns {account: {nlv (USD), is_margin, profile}} for FUNDED accounts only.
+    Returns {account: {nlv, cash, deposit (all USD), is_margin, profile}} for FUNDED
+    accounts only. `deposit` is the month's planned deposit, landed or not.
     Caspar = USD margin / aggressive; Sarah = SGD cash / balanced (NLV → USD).
     Excess-liquidity isn't in the snapshot sheet yet, so the margin liquidity
     floor is NOT enforced here (it's enforced in the account-aware daily_tracker
@@ -2114,6 +2132,15 @@ def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
         except (TypeError, ValueError):
             return 0.0
 
+    deposits: dict[str, float] = {}
+    try:
+        for r in _tab_dicts(ss, "monthly_deposits"):
+            amt = _f(r, "amount")
+            ccy = str(r.get("ccy") or "SGD").strip().upper()
+            deposits[str(r.get("account") or "").strip().lower()] = amt / usd_sgd if ccy == "SGD" else amt
+    except Exception as e:
+        logger.debug(f"  sizing: monthly_deposits read failed: {e}")
+
     # Caspar — USD margin account, aggressive profile.
     try:
         last = _latest("snapshot_caspar")
@@ -2122,6 +2149,7 @@ def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
             states["caspar"] = {
                 "nlv": nlv, "is_margin": True, "profile": "aggressive",
                 "excess_liq": _f(last, "excess_liq") or None,
+                "cash": _f(last, "cash"), "deposit": deposits.get("caspar", 0.0),
             }
     except Exception as e:
         logger.debug(f"  sizing: snapshot_caspar read failed: {e}")
@@ -2135,6 +2163,7 @@ def _read_account_states(ss, logger: logging.Logger) -> dict[str, dict]:
             states["sarah"] = {
                 "nlv": nlv_sgd / usd_sgd, "is_margin": False, "profile": "balanced",
                 "excess_liq": (xl / usd_sgd) if xl else None,
+                "cash": _f(last, "cash_sgd") / usd_sgd, "deposit": deposits.get("sarah", 0.0),
             }
     except Exception as e:
         logger.debug(f"  sizing: snapshot_sarah read failed: {e}")
@@ -2326,6 +2355,11 @@ def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
                 bpr_override=override, vix=float(vix), spx_above_200dma=spx_ok,
             )
             n = sr.recommended_contracts
+            # A cash account can only post the cash it has. The NLV limits alone
+            # said 1 contract of a $16 put for a book holding about $11 of strike.
+            if strat.upper() == "CSP" and not st["is_margin"] and "cash" in st \
+                    and float(c.get("strike", 0)) > 0:
+                n = min(n, int(st["cash"] // (float(c["strike"]) * 100)))
             if halve:
                 parts.append(f"{acct[0].upper()}:{n}x→{n // 2}x")
             else:
@@ -2340,10 +2374,240 @@ def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
     return note
 
 
+# ── Puts a book's cash can cover ───────────────────────────────────────────
+# The main scan picks the 0.25Δ strike on names over $10, whatever they cost, so
+# on a small book almost nothing it lists can be cash-secured. This pass starts
+# from the cash: for each book's limit, on today's cash and with the month's
+# deposit, it finds the put closest to the target delta that the cash covers.
+# src/put_lines.py turns these rows into each book's list. They go to scan_results
+# so signal_feedback grades them, and stay out of the shared digest.
+CASH_FIT_TOP = 120               # most-traded names to try, per cash level
+CASH_FIT_MIN_PRICE = 5.0
+CASH_FIT_MIN_PREMIUM = 0.20      # $20 a contract: below this, costs eat it
+CASH_FIT_MIN_AVG_VOLUME = 1_000_000
+CASH_FIT_MIN_MCAP = 500_000_000
+CASH_FIT_MAX_OTM = 0.30
+CASH_FIT_MAX_EXPIRIES = 3
+CASH_FIT_DTE_RANGE = (21, 50)    # under 21 days is where the exit rule already closes a put
+
+
+def cash_fit_caps(states: dict[str, dict]) -> list[float]:
+    """The highest strike each book can secure: on cash alone, and with the deposit."""
+    floor = CASH_FIT_MIN_PRICE * (1 - CASH_FIT_MAX_OTM)
+    caps = set()
+    for st in states.values():
+        cash = st.get("cash") or 0.0
+        for total in (cash, cash + (st.get("deposit") or 0.0)):
+            if total / 100 >= floor:
+                caps.add(round(total / 100, 2))
+    return sorted(caps)
+
+
+def pick_cash_fit_put(puts, ticker: str, expiry: str, price: float, dte: int, cap: float):
+    """The put closest to the target delta among the strikes `cap` covers, or None."""
+    df = puts[puts["openInterest"] >= MIN_OI].copy()
+    # Adjusted contracts (a root like "F1", a strike like 11.67) deliver something
+    # other than 100 shares, so the cash and breakeven here would be wrong.
+    df = df[df["contractSymbol"].str.startswith(f"{ticker}{expiry[2:4]}{expiry[5:7]}{expiry[8:10]}")]
+    # An ask with no bid has no buyer, and its "mid" is half the ask. Bid and ask
+    # both zero is the off-hours chain, which keeps its last trade.
+    df = df[~((df["bid"].fillna(0) <= 0) & (df["ask"].fillna(0) > 0))]
+    if df.empty:
+        return None
+    df["mid"] = df.apply(_option_mid, axis=1)
+    df = df[(df["mid"] >= CASH_FIT_MIN_PREMIUM) & (df["strike"] <= cap)
+            & (df["strike"] <= price * (1 - CSP_OTM_RANGE[0]))
+            & (df["strike"] >= price * (1 - CASH_FIT_MAX_OTM))].copy()
+    if df.empty:
+        return None
+    df["abs_delta"] = df.apply(lambda row: abs(_compute_greeks(row, price, dte, "P")[0]), axis=1)
+    df["ann_yield"] = df["mid"] / df["strike"] * (365 / dte) * 100
+    df = df[(df["abs_delta"] >= CSP_DELTA_RANGE[0]) & (df["abs_delta"] <= CSP_DELTA_RANGE[1])
+            & (df["ann_yield"] >= MIN_CSP_YIELD)]
+    if df.empty:
+        return None
+    return df.iloc[(df["abs_delta"] - CSP_DELTA_TARGET).abs().argsort().iloc[0]]
+
+
+def cash_fit_expiries(expiries: tuple[str, ...], today: date | None = None) -> list[str]:
+    """Expiries to try, monthlies first: open interest gathers on the third Friday,
+    and on a cheap stock a weekly at the same distance often has almost none."""
+    today = today or date.today()
+    ranked = []
+    for e in expiries:
+        try:
+            d = datetime.strptime(e, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        dte = (d - today).days
+        if CASH_FIT_DTE_RANGE[0] <= dte <= CASH_FIT_DTE_RANGE[1]:
+            third_friday = d.weekday() == 4 and 15 <= d.day <= 21
+            ranked.append((not third_friday, abs(dte - TARGET_DTE), e))
+    return [e for _, _, e in sorted(ranked)[:CASH_FIT_MAX_EXPIRIES]]
+
+
+def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger) -> list[dict[str, Any]]:
+    """One candidate per strike this ticker offers across the books' limits."""
+    import yfinance as yf
+    from src.indicators import fetch_earnings_dates
+    from src.put_lines import spread_ok
+    from src.technical_score import compute_signals
+    from src.trading_rules import csp_blocked_by_bucket
+
+    if csp_blocked_by_bucket(ticker)[0]:
+        return []
+    yt = yf.Ticker(ticker)
+    try:
+        price = float(yt.fast_info.last_price or 0)
+        expiries = yt.options
+    except Exception as e:
+        logger.debug(f"  {ticker}: cash-fit price fail — {e}")
+        return []
+    if price < CASH_FIT_MIN_PRICE or price * (1 - CASH_FIT_MAX_OTM) > caps[-1]:
+        return []
+    # Only names that produced a line pay for the earnings and fundamentals lookups.
+    away: int | None = None
+    rows: dict[tuple[str, float], tuple[Any, int]] = {}
+    open_caps = list(caps)
+    for expiry in cash_fit_expiries(expiries):
+        dte = (datetime.strptime(expiry, "%Y-%m-%d").date() - date.today()).days
+        if away is not None and 0 <= away <= dte:
+            continue
+        try:
+            puts = yt.option_chain(expiry).puts
+        except Exception:
+            continue
+        found = [(cap, pick_cash_fit_put(puts, ticker, expiry, price, dte, cap)) for cap in open_caps]
+        if any(r is not None for _, r in found) and away is None:
+            away = fetch_earnings_dates([ticker]).get(ticker, {}).get("earnings_days_away", -1)
+            if 0 <= away <= dte:
+                continue
+        for cap, r in found:
+            if r is not None:
+                rows[(expiry, float(r["strike"]))] = (r, dte)
+                open_caps.remove(cap)
+        if not open_caps:
+            break
+    if not rows:
+        return []
+
+    info = yt.info or {}
+    is_etf = info.get("quoteType") == "ETF"
+    if not is_etf and ((info.get("marketCap") or 0) < CASH_FIT_MIN_MCAP or (info.get("totalRevenue") or 0) <= 0):
+        return []
+    eps = info.get("trailingEps")
+
+    ctx = _technical_context(yt)
+    csp_score = ctx.get("_scores", {}).get("CSP", 0)
+    snapshot: dict[str, float] = {}
+    try:
+        snapshot = {k: round(float(v), 4) for k, v in compute_signals(ctx.get("_indicators") or {}).items()}
+    except Exception:
+        pass
+    # Numbers only: signal_feedback parses every value here as a float.
+    snapshot.update({"cash_fit": 1.0, "is_etf": 1.0 if is_etf else 0.0})
+    if isinstance(eps, (int, float)):
+        snapshot["eps"] = round(float(eps), 2)
+
+    out = []
+    for (expiry, strike), (r, dte) in rows.items():
+        bid, ask, mid = float(r.get("bid", 0) or 0), float(r.get("ask", 0) or 0), float(r["mid"])
+        if bid > 0 and ask > 0 and not spread_ok(bid, ask):
+            continue
+        delta, iv = _compute_greeks(r, price, dte, "P")
+        out.append({
+            "ticker": ticker, "strategy": "CSP", "right": "P", "strike": strike,
+            "expiry": expiry.replace("-", ""), "dte": dte, "delta": delta,
+            "premium": round(mid, 2), "bid": round(bid, 2), "ask": round(ask, 2),
+            "annual_yield_pct": round(float(r["ann_yield"]), 2),
+            "cash_required": round(strike * 100, 2), "breakeven": round(strike - mid, 2),
+            "iv": iv, "iv_rank": round(_estimate_ivr(iv, ctx.get("hv30", 0)), 1),
+            "spread_pct": round((ask - bid) / mid * 100, 2) if bid > 0 and ask > 0 and mid > 0 else 0.0,
+            "underlying_last": round(price, 2), "technical_score": round(csp_score, 1),
+            "composite_score": max(0, min(100, int((csp_score + 100) / 2))),
+            "catalyst_flag": False, "notes": "cash-fit", "signals_json": json.dumps(snapshot),
+        })
+    return out
+
+
+def run_cash_fit(logger: logging.Logger, states: dict[str, dict], watchlist: set[str],
+                 macro: dict) -> list[dict[str, Any]]:
+    """Logs counts only: a price limit here would give away a book's cash, and CI
+    logs on this repo are public."""
+    caps = cash_fit_caps(states)
+    if not caps:
+        logger.info("  Cash-fit puts: no book has the cash for a strike over the floor")
+        return []
+    if macro.get("halted"):
+        logger.warning("  Cash-fit puts: skipped, macro gate halted")
+        return []
+    # One list per cash level, or the biggest limit's pricier names crowd out the
+    # cheap ones the smallest limit needs.
+    try:
+        universe = {q["symbol"] for cap in caps
+                    for q in _yahoo_screen(CASH_FIT_MIN_PRICE, cap / (1 - CASH_FIT_MAX_OTM),
+                                           CASH_FIT_MIN_AVG_VOLUME, CASH_FIT_MIN_MCAP, CASH_FIT_TOP)}
+    except Exception as e:
+        logger.warning(f"  Cash-fit puts: Yahoo screener failed ({type(e).__name__}) — using the fallback list")
+        universe = set(FALLBACK_HIGH_IV_UNIVERSE)
+    names = sorted(universe | set(watchlist))
+    out: list[dict[str, Any]] = []
+    for ticker in names:
+        try:
+            out.extend(scan_cash_fit(ticker, caps, logger))
+        except Exception as e:
+            logger.debug(f"  {ticker}: cash-fit error — {e}")
+    logger.info(f"  Cash-fit puts: {len(out)} lines from {len(names)} names")
+    return out
+
+
+def _tag_adverse_flow(ss, candidates: list[dict], logger: logging.Logger) -> int:
+    """Tag wheel candidates with the last five days' adverse option flow."""
+    rows = _tab_dicts(ss, "uoa_alerts")
+    recent = sorted({(r.get("date") or "")[:10] for r in rows if r.get("date")})[-5:]
+    return _apply_uoa_warnings(candidates, rows, recent_days=recent)
+
+
+def _scan_row(S, c: dict, notes: str, today_iso: str) -> list[str]:
+    """One candidate as a scan_results row. HARVEST_CSP is stored as plain CSP."""
+    return S.ScanResultRow(
+        date=today_iso, ticker=c["ticker"],
+        strategy="CSP" if c["strategy"] == "HARVEST_CSP" else c["strategy"],
+        right=c["right"], strike=c["strike"], expiry=c["expiry"], dte=c["dte"], delta=c["delta"],
+        premium=c["premium"], bid=c["bid"], ask=c["ask"], annual_yield_pct=c["annual_yield_pct"],
+        cash_required=c["cash_required"], breakeven=c["breakeven"], iv=c["iv"], iv_rank=c["iv_rank"],
+        spread_pct=c["spread_pct"], underlying_last=c["underlying_last"],
+        technical_score=c["technical_score"], composite_score=c["composite_score"],
+        catalyst_flag=c["catalyst_flag"], notes=notes, signals_json=c.get("signals_json", ""),
+    ).to_row()
+
+
+def _with_size(c: dict, states: dict[str, dict], macro: dict) -> str:
+    """A candidate's notes plus its per-account contract count."""
+    size = _sizing_note(c, states, macro)
+    notes = c.get("notes", "")
+    return f"{notes} | {size}" if notes and size else (size or notes)
+
+
+def write_cash_fit(client, candidates: list[dict], states: dict[str, dict], macro: dict,
+                   logger: logging.Logger) -> None:
+    from src import sheets as sh
+    from src import schema as S
+    if not candidates:
+        return
+    today_iso = date.today().isoformat()
+    sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
+    sh.append_rows(client, S.ScanResultRow.TAB_NAME,
+                   [_scan_row(S, c, _with_size(c, states, macro), today_iso) for c in candidates])
+    logger.info(f"✓ Wrote {len(candidates)} cash-fit puts to scan_results")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry", action="store_true", help="Print, no sheet write")
     ap.add_argument("--top", type=int, default=HARVEST_UNIVERSE_TOP, help="Discovery universe cap")
+    ap.add_argument("--puts-only", action="store_true",
+                    help="Only the cash-fit put pass: quick, and works off-hours on last trades")
     args = ap.parse_args()
 
     logger = setup_logging("daily-scan")
@@ -2362,6 +2626,21 @@ def main() -> int:
 
     # ── Macro Gate ────────────────────────────────────────────────────
     macro = macro_gate(logger, ss=ss)
+
+    if args.puts_only:
+        states = _read_account_states(ss, logger)
+        cands = run_cash_fit(logger, states, set(gather_watchlist(logger)), macro)
+        _tag_adverse_flow(ss, cands, logger)
+        _apply_macro_warnings(cands, macro)
+        if args.dry:
+            if not os.environ.get("GITHUB_ACTIONS"):    # a price list near a book's cash stays off public logs
+                for c in sorted(cands, key=ranking_key, reverse=True):
+                    print(f"{c['ticker']:6} ${c['strike']:<6g} {c['expiry']} {c['dte']}d mid={c['premium']} "
+                          f"bid={c['bid']} ask={c['ask']} d={c['delta']} y={c['annual_yield_pct']:.0f}% "
+                          f"px={c['underlying_last']} eps={json.loads(c['signals_json']).get('eps')}")
+            return 0
+        write_cash_fit(client, cands, states, macro, logger)
+        return 0
 
     # ── Universe Assembly ─────────────────────────────────────────────
     # 1) User's watchlist (positions + decision queue + gov/screen signals)
@@ -2403,9 +2682,9 @@ def main() -> int:
     # ── Signal data (client/ss authenticated above, before the macro gate) ──
     # Per-account sizing state (NLV per account → recommended contracts per profile)
     account_states = _read_account_states(ss, logger)
+    # Names and profiles only: CI logs on this repo are public.
     if account_states:
-        logger.info("  sizing: " + ", ".join(
-            f"{a}=${st['nlv']:,.0f} {st['profile']}" for a, st in account_states.items()))
+        logger.info("  sizing: " + ", ".join(f"{a} {st['profile']}" for a, st in account_states.items()))
 
     # Gov confluence signals (for catalyst tagging + LONG_CALL trigger)
     gov_data: dict[str, dict] = {}
@@ -2617,6 +2896,16 @@ def main() -> int:
             f"  ⚠ macro overlay [{_macro_warning_tags(macro)}] — tagged {n_tagged} "
             f"premium-selling candidates; suggested sizing HALVED in notes")
 
+    # Puts each book's cash can cover. Same tags, kept out of the shared digest.
+    seen = {(c["ticker"], c["strike"], c["expiry"]) for c in all_candidates}
+    cash_fit = [c for c in run_cash_fit(logger, account_states, watchlist_set, macro)
+                if (c["ticker"], c["strike"], c["expiry"]) not in seen]
+    try:
+        _tag_adverse_flow(ss, cash_fit, logger)
+    except Exception as e:
+        logger.warning(f"  ⚠ UOA adverse-flow tagging of cash-fit puts SKIPPED: {type(e).__name__}: {e}")
+    _apply_macro_warnings(cash_fit, macro)
+
     if args.dry:
         for c in (other_picks[:5] + harvest_picks[:5]):
             logger.info(f"  {c['strategy']:15} {c['ticker']:6} ${c['strike']:.0f} {c['dte']}d yield={c['annual_yield_pct']:.0f}%")
@@ -2644,6 +2933,8 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001 — heartbeat is non-critical
         logger.warning(f"scan_meta heartbeat failed (non-fatal): {e}")
 
+    write_cash_fit(client, cash_fit, account_states, macro, logger)
+
     if not all_candidates:
         logger.warning("No candidates met threshold — sheet not updated")
         return 0
@@ -2654,39 +2945,8 @@ def main() -> int:
     sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
     scan_rows: list[list[str]] = []
     for c in other_picks + harvest_picks[:MAX_HARVEST_PICKS]:
-        # Normalize HARVEST_CSP → CSP for scan_results (one canonical strategy name)
-        strat = "CSP" if c["strategy"] == "HARVEST_CSP" else c["strategy"]
         # Append per-account recommended contract count (sizing annotation).
-        _sz = _sizing_note(c, account_states, macro)
-        _notes = c.get("notes", "")
-        if _sz:
-            _notes = f"{_notes} | {_sz}" if _notes else _sz
-        row = S.ScanResultRow(
-            date=today_iso,
-            ticker=c["ticker"],
-            strategy=strat,
-            right=c["right"],
-            strike=c["strike"],
-            expiry=c["expiry"],
-            dte=c["dte"],
-            delta=c["delta"],
-            premium=c["premium"],
-            bid=c["bid"],
-            ask=c["ask"],
-            annual_yield_pct=c["annual_yield_pct"],
-            cash_required=c["cash_required"],
-            breakeven=c["breakeven"],
-            iv=c["iv"],
-            iv_rank=c["iv_rank"],
-            spread_pct=c["spread_pct"],
-            underlying_last=c["underlying_last"],
-            technical_score=c["technical_score"],
-            composite_score=c["composite_score"],
-            catalyst_flag=c["catalyst_flag"],
-            notes=_notes,
-            signals_json=c.get("signals_json", ""),
-        )
-        scan_rows.append(row.to_row())
+        scan_rows.append(_scan_row(S, c, _with_size(c, account_states, macro), today_iso))
     sh.append_rows(client, S.ScanResultRow.TAB_NAME, scan_rows)
     logger.info(f"✓ Wrote {len(scan_rows)} rows to scan_results")
 

@@ -39,8 +39,10 @@ import re
 import statistics as st
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
+
+from src.put_lines import BookPuts, PutLine
 
 HOLD_DAYS = 20          # trading days each graded idea is held
 COST_PER_SIDE = 0.001   # slippage and commission allowance per trade: 10 bps
@@ -51,12 +53,15 @@ STALE_AFTER_REPORT_DAYS = 30    # a Sheet date this soon after a confirmed repor
 ONE_UNIT_MAX_OVER = 1.5      # one share/contract allowed up to 1.5× the size
 CONCENTRATION_CAP = 0.30     # never size a name past 30% of a book (alert band)
 MAX_SIZED = 5                # sized ideas per DM
+PUT_MANAGE = ("Manage: buy back at 50% of the credit, or with 21 days left. "
+              "Assigned means owning 100 shares at the breakeven.")
 NEAR_TRIGGER = 0.03          # dip-buys within 3% above trigger get sized
 WSR_MAX_AGE_DAYS = 8         # a WSR row older than one weekly cycle is stale
 TRIM_GAP_DAYS = 14           # a trim re-stated daily is one idea until it lapses 2 weeks
 MAX_EXITS = 5                # take-profit exits per DM
 TELEGRAM_LIMIT = 4096
 SGT = ZoneInfo("Asia/Singapore")
+ET = ZoneInfo("America/New_York")
 RECHECK_ET = (9, 47)         # the post-open re-check, ET wall clock
 STALE_BOOK_DAYS = 10         # cash and share counts this still = prices-only data
 EARNINGS_AHEAD_DAYS = 7      # a book's section lists reports due this soon
@@ -1168,14 +1173,15 @@ class DM:
     exits: list[Exit] = field(default_factory=list)
     cards: list[dict] = field(default_factory=list)   # the PWA's copy of this DM, see CARD_COLUMNS
     changes: list[str] = field(default_factory=list)  # what moved since the pre-open plan
+    puts_text: str = ""        # the put lines, a second message; blank when there's nothing to send
 
 
 # The `daily_ideas` Sheet tab: one row per card the PWA shows. Every string is
 # the one the DM text carries, with the Telegram markup removed, so the PWA can
 # never disagree with the DM. Sections: `meta` (one, first), then per book a
 # `book` row (cash, summary, warning, budget, earnings) followed by its `idea`,
-# `exit_note`, `exit` and `watch` rows with `account` set, then `watch` rows with
-# no account, which are for both books. The app's idea card keeps the full text
+# `exit_note`, `exit`, `put`, `put_note` and `watch` rows with `account` set, then
+# `watch` rows with no account, which are for both books. The app's idea card keeps the full text
 # where the DM's second-book copy points at the first.
 CARD_COLUMNS = (
     "date", "sent_at", "section", "num", "ticker", "kind", "action", "source", "tier",
@@ -1254,13 +1260,45 @@ def _book_size_line(idea: Idea, a: Account, bud: Budget, num: int, sgd_per_usd: 
     return f"{line} · doesn't fit this month"
 
 
+def _put_when(scanned_at: str) -> str:
+    """How old a scan row's quotes are. Rows carry a Singapore stamp, and a scan
+    outside US hours only sees the last close's quotes, whatever its stamp says."""
+    try:
+        t = datetime.strptime(scanned_at[:17], "%Y-%m-%dT%H%M%S").replace(tzinfo=SGT).astimezone(ET)
+    except ValueError:
+        return f"quotes from {scanned_at[:10]}"
+    if t.weekday() >= 5 or not 9 * 60 + 30 <= t.hour * 60 + t.minute <= 16 * 60:
+        return "last close's quotes"
+    return f"quotes {t.strftime('%a %-d %b %H:%M')} ET · {t.astimezone(SGT).strftime('%H:%M')} SGT"
+
+
+def _put_note_lines(ln: PutLine, weight: float) -> list[str]:
+    """What should give someone pause about this line. Empty on a clean one."""
+    notes = []
+    if ln.earnings == "unknown":
+        notes.append("⚠ No earnings date found: check before selling")
+    if ln.flow:
+        run = re.search(r"x(\d+)d", ln.flow)
+        days = f" for {run.group(1)} day{'s' if run.group(1) != '1' else ''}" if run else ""
+        notes.append(f"{ln.flow[:1]} Heavy put buying on {ln.ticker}{days}")
+    if ln.loses_money:
+        notes.append(f"⚠ Losing money (EPS {_minus(f'{ln.eps:.2f}')}): if assigned, it stays in the book")
+    if weight > 0:
+        notes.append(f"Already {pct(weight, 0, sign=False)} of the book")
+    if abs(ln.moved) >= 0.02:
+        notes.append(f"Stock {pct(ln.moved, 0)} since the quote")
+    if not ln.quoted:
+        notes.append("⚠ No live quote: last trade only, re-quoted after the open")
+    return notes
+
+
 def plan_changes(prior: list[dict], cards: list[dict]) -> list[str]:
     """What moved between the pre-open plan and the re-check: actions that
     appeared or went, and ones that crossed their level either way."""
     def actions(rows):
         out = {}
         for c in rows:
-            if c.get("section") in ("idea", "exit"):
+            if c.get("section") in ("idea", "exit", "put"):
                 st_ = c.get("status") or ""
                 out[(c.get("account") or "", c.get("ticker") or "", c.get("action") or "")] = (
                     "above trigger" in st_ or "below the trim level" in st_)
@@ -1284,11 +1322,15 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
              blocked: list[tuple[str, str]], growth_leg_on: bool = False,
              exits: list[Exit] = (), holdings: dict[tuple[str, str], tuple[float, float]] | None = None,
              phase: str = "open", direction: list[str] = (), levels: list[str] = (),
-             prior_cards: list[dict] | None = None) -> DM:
+             prior_cards: list[dict] | None = None,
+             puts: dict[str, BookPuts] | None = None,
+             put_records: dict[str, str] | None = None) -> DM:
     """Re-check every candidate live, size the survivors, and render the DM.
     `holdings` is (account, ticker) → (shares held, average cost), for exits.
     `phase` is "preopen" (bars carry pre-market as today) or "open". `prior_cards`
-    is today's pre-open plan, if one went out, so the re-check can say what moved."""
+    is today's pre-open plan, if one went out, so the re-check can say what moved.
+    `puts` is each book's cash-secured put lines and `put_records` their graded
+    record, from src/put_lines.py; no book in `puts` means no put block."""
     dropped: list[str] = []
     watch: list[str] = []
     waiting: list[str] = []
@@ -1480,6 +1522,8 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
 
     log_rows: list[dict] = []
     book_cards: list[dict] = []
+    put_msg: list[str] = []
+    put_quotes: list[PutLine] = []
     numbered = list(enumerate(sized, 1))
     exit_nums = {id(e): k for k, e in enumerate(act_sells, 1)}
     printed: dict[int, str] = {}    # idea number → the book whose section carries it in full
@@ -1503,11 +1547,14 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
         my_sells = [e for e in act_sells if e.account == a.name]
         my_levels = [e for e in sells if e.account == a.name] if trec.tier == "red" else []
 
+        my_puts = (puts or {}).get(a.name)
         counts = []
         if mine:
             counts.append(f"{len(mine)} buy{'s' if len(mine) != 1 else ''}")
         if my_sells:
             counts.append(f"{len(my_sells)} sell{'s' if len(my_sells) != 1 else ''}")
+        if my_puts and my_puts.fits:
+            counts.append(f"{len(my_puts.fits)} put{'s' if len(my_puts.fits) != 1 else ''}")
         status_txt = " · ".join(counts) or "No action"
         cash_txt = _cash_headline(a)
         warnings = []
@@ -1626,6 +1673,59 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
                 "status": ex.status, "account": ex.account, "units": ex.units,
             })
 
+        if my_puts:
+            nlv = nlv_usd(a)
+            cash_usd = to_usd(a.cash, a.ccy, sgd_per_usd)
+            rec_txt = (put_records or {}).get(a.name, "")
+            put_msg.append(f"<b>👤 {esc(a.label)}</b> — {esc(cash_txt)}")
+            if a.stale_since:
+                put_msg.append(f"<b>⚠ Cash unchanged since {day(a.stale_since).strftime('%-d %b')}: "
+                               f"check it against IBKR first.</b>")
+            for k, ln in enumerate(my_puts.fits, 1):
+                exp = day(ln.expiry).strftime("%-d %b")
+                quote = f"bid {ln.bid:.2f} · ask {ln.ask:.2f}" if ln.quoted else f"last trade {prem(ln.premium)}"
+                plan_txt = f"Sell 1× {exp} ${ln.strike:g} put, limit ≥ {prem(ln.fill)} ({quote})"
+                share = f" ({pct(ln.collateral / nlv, 1, sign=False)} of the book)" if nlv else ""
+                detail_txt = (f"Collect ≈ {usd(ln.credit)} · puts up {usd(ln.collateral)}{share} · "
+                              f"breakeven {px(ln.breakeven)}, {pct(ln.cushion, 0, sign=False)} under {px(ln.underlying)}")
+                odds = [f"{pct(ln.ann_yield, 0, sign=False)}/yr",
+                        f"about {pct(abs(ln.delta), 0, sign=False)} odds of assignment"]
+                if ln.earnings == "clear":
+                    odds.append(f"earnings clear, last {day(ln.last_report).strftime('%-d %b')}"
+                                if ln.last_report else "earnings clear")
+                if int(cash_usd // ln.collateral) > 1:
+                    odds.append(f"cash covers {int(cash_usd // ln.collateral)}")
+                odds_txt = " · ".join(odds)
+                notes = _put_note_lines(ln, a.weights.get(ln.ticker, 0.0))
+                put_msg.append(f"<b>P{k} · {esc(ln.ticker)}</b> · {esc(plan_txt)}")
+                put_msg.append(esc(detail_txt))
+                put_msg.append(esc(odds_txt))
+                put_msg.extend(esc(n) for n in notes)
+                put_quotes.append(ln)
+                book_cards.append(card(
+                    section="put", num=f"P{k}", ticker=ln.ticker, kind="option", action=f"SELL ${ln.strike:g} PUT",
+                    source="put_scan", plan=plan_txt, stop=detail_txt, size=odds_txt,
+                    notes=" | ".join(notes), record=rec_txt, account=a.label))
+            note_txts = []
+            if my_puts.fits:
+                note_txts.append(PUT_MANAGE)
+            elif my_puts.cheapest:
+                c = my_puts.cheapest
+                note_txts.append(f"None fit this cash. Smallest on the list: {c.ticker} ${c.strike:g} "
+                                 f"needs {usd(c.collateral)}.")
+            else:
+                note_txts.append("None on the list today.")
+            if my_puts.rung:
+                dep = "S$" if a.deposit_ccy == "SGD" else "$"
+                names = " · ".join(f"{ln.ticker} ${ln.strike:g}" for ln in my_puts.rung)
+                note_txts.append(f"With the {short_money(a.deposit, dep)} deposit: {names}.")
+            if rec_txt and (my_puts.fits or my_puts.rung):
+                note_txts.append(rec_txt)
+            for n in note_txts:
+                put_msg.append(f"<i>{esc(n)}</i>")
+                book_cards.append(card(section="put_note", plan=n, account=a.label))
+            put_msg.append("")
+
         budget_txt = ""
         parts = []
         if bud.now:
@@ -1711,5 +1811,16 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
     if len(text) > TELEGRAM_LIMIT:   # cut at a line break so no HTML tag is split
         text = text[:TELEGRAM_LIMIT - 12].rsplit("\n", 1)[0] + "\n…(trimmed)"
 
-    return DM(text=text, sized=sized, watch=watch, dropped=dropped, log_rows=log_rows,
+    # The puts go as their own message: the plan is often near Telegram's limit, and
+    # cutting it would lose the re-check time. A re-check only repeats them if a line moved.
+    puts_text = ""
+    if put_msg and (not prior_cards or any(" PUT" in c for c in changes)):
+        when = "live quotes" if any(ln.live for ln in put_quotes) else (
+            _put_when(put_quotes[0].scanned_at) if put_quotes else "")
+        title = f"🪙 <b>Puts this cash covers · {stamp}</b>"
+        puts_text = "\n".join([title] + ([esc(when[0].upper() + when[1:])] if when else []) + put_msg).strip()
+        if len(puts_text) > TELEGRAM_LIMIT:
+            puts_text = puts_text[:TELEGRAM_LIMIT - 12].rsplit("\n", 1)[0] + "\n…(trimmed)"
+
+    return DM(puts_text=puts_text, text=text, sized=sized, watch=watch, dropped=dropped, log_rows=log_rows,
               exits=act_sells, cards=cards, changes=changes)
