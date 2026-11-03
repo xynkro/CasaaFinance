@@ -59,14 +59,14 @@ PREOPEN_WINDOW = (time(8, 0), time(9, 29))
 WINDOW = (time(9, 40), time(11, 30))
 MARKET_OPEN = time(9, 30)
 SMA_HISTORY_DAYS = 320       # calendar days, enough for a 200-day average
-PUT_LOOKUPS = 25             # put lines to price-check per run, best first
+PUT_LOOKUPS = 15             # put lines to price-check per book, best first
 
 TABS = [
     "decision_queue", "uoa_alerts", "gov_confluence_signals", "screen_candidates",
     "snapshot_caspar", "snapshot_sarah", "positions_caspar", "positions_sarah",
     "hold_list", "monthly_deposits", "earnings_calendar", "ideas_log",
     "daily_brief_latest", "gex_regime", "macro", "daily_ideas",
-    "scan_results", "signal_outcomes",
+    "scan_results", "cash_fit_puts", "options", "signal_outcomes",
 ]
 LOG_TAB = "ideas_log"
 LOG_HEADERS = ["date", "sent_at", "num", "source", "tier", "ticker", "kind", "action",
@@ -175,13 +175,13 @@ def fetch_bars(tickers: list[str], start: str) -> dict[str, di.Bars]:
         if not missing:
             break
         _t.sleep(3)
-        log.info("retrying %d tickers yfinance dropped: %s", len(missing), " ".join(missing))
+        log.info("retrying %d tickers yfinance dropped", len(missing))   # counts only: CI logs are public
         for i in range(0, len(missing), size):
             batch(missing[i:i + size])
             _t.sleep(0.5)
     still = [t for t in want if t not in out]
     if still:
-        log.warning("no prices for %d tickers after retries: %s", len(still), " ".join(still))
+        log.warning("no prices for %d tickers after retries", len(still))
     return out
 
 
@@ -242,7 +242,7 @@ def fetch_option(ticker: str, expiry: str, strike: float, right: str = "C") -> t
             return None
         return float(row["bid"].iloc[0] or 0), float(row["ask"].iloc[0] or 0)
     except Exception as e:
-        log.warning("option chain %s %s failed: %s", ticker, expiry, e)
+        log.warning("option chain lookup failed: %s", type(e).__name__)
         return None
 
 
@@ -365,14 +365,19 @@ def build_puts(tabs: dict, accounts: list[di.Account], sgd_per_usd: float, today
     price, earnings before expiry and, after the open, a live quote. `meta` is the
     fixture's data; without one this goes to Yahoo. Logs counts only: these lines
     sit just under a book's cash, and CI logs are public."""
-    lines = pl.parse_scan_rows(tabs.get("scan_results", []), today)
+    lines = pl.parse_scan_rows(tabs.get("scan_results", []) + tabs.get("cash_fit_puts", []), today)
     if not lines or not accounts:
         return {}, {}
-    money = {a.name: (di.to_usd(a.cash, a.ccy, sgd_per_usd),
+    tied_up = pl.cash_securing_puts(tabs.get("options", []))
+    money = {a.name: (max(0.0, di.to_usd(a.cash, a.ccy, sgd_per_usd) - tied_up.get(a.name, 0.0)),
                       0.0 if a.deposit_landed else di.to_usd(a.deposit, a.deposit_ccy, sgd_per_usd))
              for a in accounts}
     top = max(c + d for c, d in money.values())
-    near = sorted((ln for ln in lines if ln.collateral <= top), key=pl.rank)[:PUT_LOOKUPS]
+    # A budget per book, so the bigger book's lines can't use up the smaller one's.
+    near: list[pl.PutLine] = []
+    for c, d in money.values():
+        mine = sorted((ln for ln in lines if ln.collateral <= c + d), key=pl.rank)[:PUT_LOOKUPS]
+        near.extend(ln for ln in mine if ln not in near)
     tickers = sorted({ln.ticker for ln in near})
 
     if meta is not None:
@@ -423,6 +428,17 @@ def build_puts(tabs: dict, accounts: list[di.Account], sgd_per_usd: float, today
 # ─────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────
+
+def send_puts(tg, text: str) -> None:
+    """The puts follow the plan. The plan has gone by now, so a failure here must not
+    stop the ledger and card writes, or the next run would send the plan again."""
+    if not text:
+        return
+    try:
+        tg.ping_daily_ideas(text)
+    except Exception as e:
+        log.warning("put message failed: %s", type(e).__name__)
+
 
 def print_dry(dm: di.DM, is_fixture: bool) -> None:
     """Print a dry run. Job logs on this public repo are world-readable and the
@@ -583,8 +599,14 @@ def run(args) -> int:
                 for t in set(sheet_dates) | set(yahoo)}
     blocked = di.blocked_sells(dq, today, upl, holds)
     growth_on = os.environ.get("GROWTH_LEG_ENABLED", "").lower() in ("true", "1", "yes")
-    puts, put_records = build_puts(tabs, accounts, sgd_per_usd, today, phase, sheet_dates,
-                                   {**meta, "dir": str(fixture)} if fixture else None)
+    # The plan goes out whatever happens to the put list. Exception type only: a
+    # message could carry a request's values, and CI logs are public.
+    try:
+        puts, put_records = build_puts(tabs, accounts, sgd_per_usd, today, phase, sheet_dates,
+                                       {**meta, "dir": str(fixture)} if fixture else None)
+    except Exception as e:
+        log.warning("put list skipped: %s", type(e).__name__)
+        puts, put_records = {}, {}
 
     dm = di.build_dm(now_et=now_et, today=today, records=records, wsr=wsr, uoa=uoa, gov=gov,
                      momentum=mom, bars=bars, accounts=accounts, sgd_per_usd=sgd_per_usd,
@@ -608,8 +630,7 @@ def run(args) -> int:
 
     from src import telegram as tg
     tg.ping_daily_ideas(dm.text)
-    if dm.puts_text:
-        tg.ping_daily_ideas(dm.puts_text)
+    send_puts(tg, dm.puts_text)
     from src import sheets as sh
     client = sh.authenticate()
     if phase == "preopen":      # a preview: not graded, and it must not block the re-check

@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 MAX_QUOTE_AGE_DAYS = 4       # keeps Friday's scan on Monday morning
-MIN_DTE = 7                  # closer than this, the scan's expiry has gone stale
+MIN_DTE = 21                 # closer than this, the exit rule would already close it
 FILL_SHARE = 0.25            # assume a sell fills a quarter of the way up from the bid
 MAX_SPREAD_PCT = 0.25        # of the mid; wider and the mid is not a price
 MAX_SPREAD_USD = 0.10        # ...except a cheap option, where one tick is already this
@@ -66,6 +66,7 @@ class PutLine:
     premium: float          # the scan's mid, or the last trade when it had no quote
     underlying: float
     scanned_at: str
+    scan_ts: float | None = None  # when the row was scanned; only cash-fit rows carry it
     eps: float | None = None   # trailing EPS at the scan; None when the scan didn't look
     kind: str = ""             # "ETF" | "stock" | ""
     flow: str = ""             # the scan's adverse-flow tag
@@ -129,21 +130,25 @@ def parse_scan_rows(rows: list[dict], today: str) -> list[PutLine]:
         strike, under = _fnum(r.get("strike")), _fnum(r.get("underlying_last"))
         if not tk or not strike or not under or not r.get("expiry"):
             continue
-        expiry = _iso(r["expiry"])
-        dte = (date.fromisoformat(expiry) - t0).days
+        try:
+            expiry = _iso(r["expiry"])
+            dte = (date.fromisoformat(expiry) - t0).days
+        except ValueError:
+            continue
         if dte < MIN_DTE:
             continue
-        extra = {}
         try:
             extra = json.loads(r.get("signals_json") or "{}")
         except (TypeError, ValueError):
-            pass
+            extra = {}
+        if not isinstance(extra, dict):
+            extra = {}
         flow = _FLOW.search(str(r.get("notes") or ""))
         out[(tk, strike, expiry)] = PutLine(
             ticker=tk, strike=strike, expiry=expiry, dte=dte,
             delta=_fnum(r.get("delta")) or 0.0, bid=_fnum(r.get("bid")) or 0.0,
             ask=_fnum(r.get("ask")) or 0.0, premium=_fnum(r.get("premium")) or 0.0,
-            underlying=under, scanned_at=str(r.get("date") or ""),
+            underlying=under, scanned_at=str(r.get("date") or ""), scan_ts=_fnum(extra.get("scan_ts")),
             eps=_fnum(extra.get("eps")),
             kind="" if "is_etf" not in extra else "ETF" if extra["is_etf"] else "stock",
             flow=flow.group(0).strip() if flow else "")
@@ -153,13 +158,14 @@ def parse_scan_rows(rows: list[dict], today: str) -> list[PutLine]:
 def check_line(line: PutLine, last: float | None, upcoming: list[str], reported: str,
                kind: str, today: str) -> str | None:
     """Bring a line up to date. Returns why it's out, or None if it stays."""
-    if last:
-        line.moved = last / line.underlying - 1
-        if abs(line.moved) > MAX_MOVE_SINCE_QUOTE:
-            return f"moved {line.moved:+.0%} since the quote"
-        line.underlying = last
-        if line.strike > last * (1 - MIN_CUSHION):
-            return "no cushion left"
+    if not last:        # the scan's price may be days old, and nothing here can say so
+        return "no price"
+    line.moved = last / line.underlying - 1
+    if abs(line.moved) > MAX_MOVE_SINCE_QUOTE:
+        return f"moved {line.moved:+.0%} since the quote"
+    line.underlying = last
+    if line.strike > last * (1 - MIN_CUSHION):
+        return "no cushion left"
     if line.quoted and not line.spread_ok:
         return "spread too wide"
     if kind:
@@ -189,28 +195,43 @@ class BookPuts:
     fits: list[PutLine] = field(default_factory=list)      # cash covers it now, best first
     rung: list[PutLine] = field(default_factory=list)      # needs the month's deposit too
     cheapest: PutLine | None = None                        # smallest line, when nothing fits
+    free_cash: float | None = None                         # USD, net of cash securing open puts
 
 
 def for_book(lines: list[PutLine], cash_usd: float, deposit_usd: float, nlv_usd: float,
              weights: dict[str, float], cap: float) -> BookPuts:
-    """Sort checked lines into what this book's cash covers. One line per ticker,
-    and none that would take a name past the book's concentration cap if assigned."""
-    fits, rung, rest = [], [], []
-    seen: set[str] = set()
-    for ln in sorted(lines, key=rank):
-        if nlv_usd > 0 and weights.get(ln.ticker, 0.0) + ln.collateral / nlv_usd > cap:
+    """Sort checked lines into what this book's cash covers: one line per ticker,
+    and none that would take a name past the book's concentration cap if assigned.
+    A ticker with a line that fits now stays off the deposit rung."""
+    ok = [ln for ln in sorted(lines, key=rank)
+          if not (nlv_usd > 0 and weights.get(ln.ticker, 0.0) + ln.collateral / nlv_usd > cap)]
+    fits, rung, seen = [], [], set()
+    for ln in ok:
+        if ln.collateral <= cash_usd and ln.ticker not in seen:
+            seen.add(ln.ticker)
+            fits.append(ln)
+    for ln in ok:
+        if cash_usd < ln.collateral <= cash_usd + deposit_usd and ln.ticker not in seen:
+            seen.add(ln.ticker)
+            rung.append(ln)
+    out = BookPuts(fits=fits[:MAX_PER_BOOK], rung=rung[:MAX_RUNG], free_cash=cash_usd)
+    if not fits and ok:
+        out.cheapest = min(ok, key=lambda ln: (ln.collateral, rank(ln)))
+    return out
+
+
+def cash_securing_puts(option_rows: list[dict]) -> dict[str, float]:
+    """USD already securing open short puts, per account, from the `options` tab's
+    latest date. That cash can't secure a second put."""
+    last = max((str(r.get("date") or "")[:10] for r in option_rows), default="")
+    out: dict[str, float] = {}
+    for r in option_rows:
+        if str(r.get("date") or "")[:10] != last or str(r.get("right") or "").upper() != "P":
             continue
-        if ln.collateral > cash_usd + deposit_usd:
-            rest.append(ln)
-            continue
-        if ln.ticker in seen:
-            continue
-        seen.add(ln.ticker)
-        (fits if ln.collateral <= cash_usd else rung).append(ln)
-    out = BookPuts(fits=fits[:MAX_PER_BOOK], rung=rung[:MAX_RUNG])
-    if not fits:
-        pool = rung + rest
-        out.cheapest = min(pool, key=lambda ln: (ln.collateral, rank(ln))) if pool else None
+        qty, strike = _fnum(r.get("qty")), _fnum(r.get("strike"))
+        if qty and qty < 0 and strike:
+            acct = str(r.get("account") or "").strip().lower()
+            out[acct] = out.get(acct, 0.0) + strike * 100 * -qty
     return out
 
 

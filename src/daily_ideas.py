@@ -1260,16 +1260,30 @@ def _book_size_line(idea: Idea, a: Account, bud: Budget, num: int, sgd_per_usd: 
     return f"{line} · doesn't fit this month"
 
 
-def _put_when(scanned_at: str) -> str:
-    """How old a scan row's quotes are. Rows carry a Singapore stamp, and a scan
-    outside US hours only sees the last close's quotes, whatever its stamp says."""
-    try:
-        t = datetime.strptime(scanned_at[:17], "%Y-%m-%dT%H%M%S").replace(tzinfo=SGT).astimezone(ET)
-    except ValueError:
-        return f"quotes from {scanned_at[:10]}"
+def _put_when(ln: PutLine) -> str:
+    """How old a scan row's quotes are. Only cash-fit rows carry a true scan time:
+    the Sheet's stamp mixes the host's date with Singapore's clock, so on a late
+    run it reads a day out and only its date can be trusted. A scan outside US hours
+    only sees the last close's quotes, whatever time it ran."""
+    if not ln.scan_ts:
+        return f"quotes from {day(ln.scanned_at[:10]).strftime('%a %-d %b')}"
+    t = datetime.fromtimestamp(ln.scan_ts, ET)
     if t.weekday() >= 5 or not 9 * 60 + 30 <= t.hour * 60 + t.minute <= 16 * 60:
         return "last close's quotes"
     return f"quotes {t.strftime('%a %-d %b %H:%M')} ET · {t.astimezone(SGT).strftime('%H:%M')} SGT"
+
+
+def _put_cash_note(fits: list[PutLine], free_cash: float, buys_cost: float) -> str:
+    """Each line is tested against the whole cash, so say when they can't all happen."""
+    held = sum(ln.collateral for ln in fits)
+    if not fits or held + buys_cost <= free_cash:
+        return ""
+    parts = []
+    if len(fits) > 1 and held > free_cash:
+        parts.append("Pick one: the cash can't hold these at once.")
+    if buys_cost > 0:
+        parts.append(f"The buys above draw on the same cash ({usd(buys_cost)}).")
+    return " ".join(parts)
 
 
 def _put_note_lines(ln: PutLine, weight: float) -> list[str]:
@@ -1675,7 +1689,7 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
 
         if my_puts:
             nlv = nlv_usd(a)
-            cash_usd = to_usd(a.cash, a.ccy, sgd_per_usd)
+            cash_usd = to_usd(a.cash, a.ccy, sgd_per_usd) if my_puts.free_cash is None else my_puts.free_cash
             rec_txt = (put_records or {}).get(a.name, "")
             put_msg.append(f"<b>👤 {esc(a.label)}</b> — {esc(cash_txt)}")
             if a.stale_since:
@@ -1707,6 +1721,9 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
                     source="put_scan", plan=plan_txt, stop=detail_txt, size=odds_txt,
                     notes=" | ".join(notes), record=rec_txt, account=a.label))
             note_txts = []
+            cash_note = _put_cash_note(my_puts.fits, cash_usd, bud.cost_now)
+            if cash_note:
+                note_txts.append(cash_note)
             if my_puts.fits:
                 note_txts.append(PUT_MANAGE)
             elif my_puts.cheapest:
@@ -1815,8 +1832,11 @@ def build_dm(*, now_et, today: str, records: dict[str, Record], wsr: list[Idea],
     # cutting it would lose the re-check time. A re-check only repeats them if a line moved.
     puts_text = ""
     if put_msg and (not prior_cards or any(" PUT" in c for c in changes)):
-        when = "live quotes" if any(ln.live for ln in put_quotes) else (
-            _put_when(put_quotes[0].scanned_at) if put_quotes else "")
+        # The oldest quote on the list is the one to go by.
+        when = ""
+        if put_quotes:
+            oldest = min(put_quotes, key=lambda ln: (ln.scan_ts or 0, ln.scanned_at))
+            when = "live quotes" if all(ln.live for ln in put_quotes) else _put_when(oldest)
         title = f"🪙 <b>Puts this cash covers · {stamp}</b>"
         puts_text = "\n".join([title] + ([esc(when[0].upper() + when[1:])] if when else []) + put_msg).strip()
         if len(puts_text) > TELEGRAM_LIMIT:

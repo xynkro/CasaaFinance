@@ -96,6 +96,10 @@ def test_parse_reads_earnings_per_share_kind_and_flow():
 
 # ── bringing a line up to date ──────────────────────────────────────────────
 
+def test_no_price_drops_the_line_rather_than_trust_the_scans():
+    assert pl.check_line(_line(), None, ["2027-02-01"], "", "", TODAY) == "no price"
+
+
 def test_a_big_move_since_the_quote_drops_the_line():
     assert "moved −6%" in pl.check_line(_line(under=11.5), 10.8, [], "", "", TODAY).replace("-", "−")
 
@@ -111,41 +115,41 @@ def test_no_cushion_left_drops_the_line():
 
 
 def test_a_wide_spread_drops_the_line_but_no_quote_does_not():
-    assert pl.check_line(_line(bid=0.40, ask=2.05), None, [], "", "", TODAY) == "spread too wide"
-    assert pl.check_line(_line(bid=0, ask=0), None, ["2027-02-01"], "", "", TODAY) is None
+    assert pl.check_line(_line(bid=0.40, ask=2.05), 11.5, [], "", "", TODAY) == "spread too wide"
+    assert pl.check_line(_line(bid=0, ask=0), 11.5, ["2027-02-01"], "", "", TODAY) is None
 
 
 def test_earnings_before_expiry_drops_the_line():
-    assert "earnings 2026-12-10" in pl.check_line(_line(), None, ["2026-12-10"], "", "", TODAY)
+    assert "earnings 2026-12-10" in pl.check_line(_line(), 11.5, ["2026-12-10"], "", "", TODAY)
 
 
 def test_earnings_after_expiry_is_clear():
     ln = _line()
-    assert pl.check_line(ln, None, ["2027-02-01"], "2026-10-28", "", TODAY) is None
+    assert pl.check_line(ln, 11.5, ["2027-02-01"], "2026-10-28", "", TODAY) is None
     assert ln.earnings == "clear" and ln.last_report == "2026-10-28"
 
 
 def test_a_recent_report_means_the_next_cant_land_before_expiry():
     ln = _line()
-    pl.check_line(ln, None, [], "2026-10-28", "", TODAY)
+    pl.check_line(ln, 11.5, [], "2026-10-28", "", TODAY)
     assert ln.earnings == "clear"
 
 
 def test_no_dates_at_all_is_unknown_never_clear():
     ln = _line()
-    pl.check_line(ln, None, [], "", "", TODAY)
+    pl.check_line(ln, 11.5, [], "", "", TODAY)
     assert ln.earnings == "unknown"
 
 
 def test_an_old_report_with_nothing_ahead_is_unknown():
     ln = _line()
-    pl.check_line(ln, None, [], "2026-08-01", "", TODAY)
+    pl.check_line(ln, 11.5, [], "2026-08-01", "", TODAY)
     assert ln.earnings == "unknown"
 
 
 def test_an_etf_has_no_earnings():
     ln = _line()
-    assert pl.check_line(ln, None, [], "", "ETF", TODAY) is None
+    assert pl.check_line(ln, 11.5, [], "", "ETF", TODAY) is None
     assert ln.earnings == "none"
 
 
@@ -200,6 +204,23 @@ def test_one_line_per_ticker_best_first_and_capped():
     bp = pl.for_book(lines, cash_usd=5000, deposit_usd=0, nlv_usd=50_000, weights={}, cap=0.30)
     assert len(bp.fits) == pl.MAX_PER_BOOK
     assert len({ln.ticker for ln in bp.fits}) == pl.MAX_PER_BOOK
+
+
+def test_a_tickers_costlier_line_doesnt_hide_the_one_that_fits():
+    rich = _checked(strike=12, under=14, bid=0.60, ask=0.64)    # ranks first, needs the deposit
+    fits = _checked(strike=10, under=14, bid=0.30, ask=0.34)
+    assert pl.rank(rich) < pl.rank(fits)
+    bp = pl.for_book([rich, fits], cash_usd=1100, deposit_usd=500, nlv_usd=50_000, weights={}, cap=0.30)
+    assert [ln.strike for ln in bp.fits] == [10]
+    assert bp.rung == []            # the ticker is already on the list
+
+
+def test_cash_securing_open_puts_counts_on_the_latest_date_only():
+    rows = [{"date": "2026-11-02T1", "account": "sarah", "right": "P", "strike": 20, "qty": -1},
+            {"date": "2026-11-03T1", "account": "sarah", "right": "P", "strike": 10, "qty": -2},
+            {"date": "2026-11-03T1", "account": "sarah", "right": "C", "strike": 50, "qty": -1},
+            {"date": "2026-11-03T1", "account": "caspar", "right": "P", "strike": 5, "qty": 1}]
+    assert pl.cash_securing_puts(rows) == {"sarah": 2000.0}
 
 
 def test_assignment_cant_take_a_name_past_the_cap():
@@ -263,9 +284,10 @@ def test_expiries_try_monthlies_first_and_skip_the_exit_window():
     assert got == ["2026-12-18", "2026-12-11", "2026-12-04"]
 
 
-def _chain(rows):
+def _chain(rows, traded="2026-11-02"):
     return pd.DataFrame([{"contractSymbol": sym, "strike": k, "bid": b, "ask": a, "lastPrice": last,
-                          "openInterest": oi} for sym, k, b, a, last, oi in rows])
+                          "openInterest": oi, "lastTradeDate": pd.Timestamp(traded, tz="UTC")}
+                         for sym, k, b, a, last, oi in rows])
 
 
 def _sym(k, root="AAA"):
@@ -291,11 +313,30 @@ def test_pick_skips_adjusted_contracts():
     assert dos.pick_cash_fit_put(chain, "AAA", "2026-12-18", PRICE, DTE, cap=10.5) is None
 
 
-def test_pick_skips_an_ask_with_no_bid_but_keeps_an_off_hours_last_trade():
-    chain = _chain([(_sym(10), 10, 0, 0.90, 0, 500)])
-    assert dos.pick_cash_fit_put(chain, "AAA", "2026-12-18", PRICE, DTE, cap=10.5) is None
+def test_pick_skips_a_one_sided_quote():
+    for bid, ask in ((0, 0.90), (0.90, 0)):
+        chain = _chain([(_sym(10), 10, bid, ask, 0, 500)])
+        assert dos.pick_cash_fit_put(chain, "AAA", "2026-12-18", PRICE, DTE, 10.5, market_open=False) is None
+
+
+def test_a_blank_quote_is_a_dead_contract_during_hours():
     chain = _chain([(_sym(10), 10, 0, 0, 0.32, 500)])
-    assert float(dos.pick_cash_fit_put(chain, "AAA", "2026-12-18", PRICE, DTE, cap=10.5)["strike"]) == 10
+    assert dos.pick_cash_fit_put(chain, "AAA", "2026-12-18", PRICE, DTE, 10.5, market_open=True) is None
+
+
+def test_a_blank_quote_keeps_a_recent_last_trade_when_the_market_is_shut(monkeypatch):
+    now = datetime(2026, 11, 3, 5, 0, tzinfo=ZoneInfo("UTC"))
+    recent = dos._usable_quotes(_chain([(_sym(10), 10, 0, 0, 0.32, 500)]), False, now)
+    assert len(recent) == 1
+    stale = dos._usable_quotes(_chain([(_sym(10), 10, 0, 0, 0.32, 500)], traded="2026-10-10"), False, now)
+    assert stale.empty
+
+
+def test_market_hours_by_the_clock():
+    et = ZoneInfo("America/New_York")
+    assert dos._us_market_open(datetime(2026, 11, 3, 10, 15, tzinfo=et))
+    assert not dos._us_market_open(datetime(2026, 11, 3, 8, 45, tzinfo=et))
+    assert not dos._us_market_open(datetime(2026, 11, 7, 11, 0, tzinfo=et))      # a Saturday
 
 
 def test_pick_skips_thin_open_interest():
@@ -322,6 +363,37 @@ def test_scan_logs_never_show_a_cash_limit(caplog, monkeypatch):
     assert not any(x in caplog.text for x in ("1234", "12.34", "32.34", "17.6", "46.2"))
 
 
+def test_cash_fit_rows_go_to_their_own_tab(monkeypatch):
+    """build_daily_plan takes the day's top CSP from scan_results for the paper
+    executor, so these must never land there."""
+    written = []
+    monkeypatch.setattr("src.sheets.ensure_headers", lambda c, tab, h: written.append(tab))
+    monkeypatch.setattr("src.sheets.append_rows", lambda c, tab, rows: written.append(tab))
+    monkeypatch.setattr(dos, "_scan_row", lambda S, c, n, d: ["row"])
+    dos.write_cash_fit(None, [{"notes": ""}], {}, {}, logging.getLogger("t"))
+    assert written == ["cash_fit_puts", "cash_fit_puts"]
+
+
+def test_a_cash_fit_failure_never_reaches_the_main_scan(caplog, monkeypatch):
+    def boom(*a):
+        raise RuntimeError("cash 1234 in the message")
+    monkeypatch.setattr(dos, "run_cash_fit", boom)
+    logger = logging.getLogger("test_put_lines")
+    with caplog.at_level(logging.DEBUG, logger=logger.name):
+        dos.cash_fit_step(None, None, {}, set(), {}, logger)
+    assert "RuntimeError" in caplog.text and "1234" not in caplog.text
+
+
+def test_time_budget_stops_the_pass_and_says_so(caplog, monkeypatch):
+    monkeypatch.setattr(dos, "_yahoo_screen", lambda *a: [{"symbol": "AAA"}, {"symbol": "BBB"}])
+    monkeypatch.setattr(dos, "scan_cash_fit", lambda *a: [])
+    monkeypatch.setattr(dos, "CASH_FIT_BUDGET_S", -1)
+    logger = logging.getLogger("test_put_lines")
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        assert dos.run_cash_fit(logger, {"s": {"cash": 1000.0, "deposit": 0.0}}, set(), {}) == []
+    assert "time budget hit after 0 of 2 names" in caplog.text
+
+
 def test_discovery_falls_back_when_the_screener_fails(monkeypatch):
     def boom(*a):
         raise RuntimeError("down")
@@ -334,6 +406,9 @@ def test_discovery_falls_back_when_the_screener_fails(monkeypatch):
 ET = ZoneInfo("America/New_York")
 
 
+SCAN_10_30_ET = datetime(2026, 11, 2, 10, 30, tzinfo=ET).timestamp()
+
+
 def _dm(puts, phase="preopen", prior=None, cash=1000.0):
     acct = di.Account("sarah", "USD", nlv=50_000, cash=cash, deposit=2000, deposit_ccy="USD")
     return di.build_dm(now_et=datetime(2026, 11, 3, 8, 45, tzinfo=ET), today=TODAY, records={}, wsr=[], uoa=[],
@@ -343,7 +418,7 @@ def _dm(puts, phase="preopen", prior=None, cash=1000.0):
 
 
 def test_dm_shows_the_order_the_cost_and_the_risk():
-    ln = _checked(strike=9, under=10.5, bid=0.40, ask=0.44)
+    ln = _checked(strike=9, under=10.5, bid=0.40, ask=0.44, scan_ts=SCAN_10_30_ET)
     dm = _dm(pl.BookPuts(fits=[ln]))
     text = dm.puts_text
     assert text.startswith("🪙 <b>Puts this cash covers · Tue 3 Nov · 08:45 ET")
@@ -375,10 +450,57 @@ def test_dm_flags_what_should_give_pause():
 
 
 def test_dm_says_when_quotes_are_only_the_last_close():
-    ln = _checked(strike=9, under=10.5)
-    ln.scanned_at = "2026-11-03T130000"       # 00:00 ET, market shut
+    ln = _checked(strike=9, under=10.5, scan_ts=datetime(2026, 11, 3, 0, 0, tzinfo=ET).timestamp())
     assert "Last close's quotes" in _dm(pl.BookPuts(fits=[ln])).puts_text
 
+
+def test_a_row_with_no_true_scan_time_only_claims_its_date():
+    """The Sheet's stamp mixes the host's date with Singapore's clock, so its time can't be shown."""
+    ln = _checked(strike=9, under=10.5)
+    assert "Quotes from Mon 2 Nov" in _dm(pl.BookPuts(fits=[ln])).puts_text
+
+
+def test_the_oldest_quote_on_the_list_is_the_one_shown():
+    new = _checked(ticker="NEW", strike=9, under=10.5, scan_ts=SCAN_10_30_ET)
+    old = _checked(ticker="OLD", strike=9, under=10.5, scan_ts=SCAN_10_30_ET - 3 * 86_400)
+    assert "Quotes Fri 30 Oct" in _dm(pl.BookPuts(fits=[new, old])).puts_text
+
+
+def test_says_when_the_cash_cant_hold_every_line():
+    a, b = _checked(ticker="AAA", strike=9, under=10.5), _checked(ticker="BBB", strike=8, under=9.5)
+    assert "Pick one: the cash can't hold these at once." in _dm(pl.BookPuts(fits=[a, b], free_cash=1000.0)).puts_text
+    assert "Pick one" not in _dm(pl.BookPuts(fits=[a, b], free_cash=5000.0), cash=5000.0).puts_text
+
+
+def test_cash_note_counts_the_books_buys():
+    ln = _checked(strike=9, under=10.5)
+    assert di._put_cash_note([ln], 1000.0, 300.0) == "The buys above draw on the same cash ($300)."
+    assert di._put_cash_note([ln], 1000.0, 50.0) == ""
+    assert di._put_cash_note([], 1000.0, 300.0) == ""
+
+
+def test_a_line_that_cant_be_parsed_is_skipped_not_fatal():
+    rows = [_row(expiry="garbage"), _row("BBB", signals_json="[1, 2]"), _row("CCC")]
+    got = {ln.ticker for ln in pl.parse_scan_rows(rows, TODAY)}
+    assert got == {"BBB", "CCC"}
+
+
+def test_put_list_failure_still_sends_the_plan(capsys, monkeypatch, caplog):
+    def boom(*a, **k):
+        raise RuntimeError("secret value")
+    monkeypatch.setattr(dm_script, "build_puts", boom)
+    assert dm_script.main(["--fixture", str(FIXTURE)]) == 0
+    assert capsys.readouterr().out.startswith("📈 <b>Ideas")
+    assert "secret value" not in caplog.text
+
+
+def test_a_failed_put_message_doesnt_stop_the_ledger(monkeypatch):
+    class Tg:
+        @staticmethod
+        def ping_daily_ideas(text):
+            raise RuntimeError("telegram down")
+    dm_script.send_puts(Tg, "text")     # returns: the caller goes on to the ledger
+    dm_script.send_puts(Tg, "")
 
 def test_dm_says_how_much_nothing_needs():
     ln = _checked(ticker="BIG", strike=50, under=55)
@@ -430,14 +552,17 @@ def puts_fixture(tmp_path):
     """The DM's synthetic fixture, plus a scan and a graded record."""
     d = tmp_path / "f"
     shutil.copytree(FIXTURE, d)
-    _write_csv(d / "scan_results.csv", [
+    _write_csv(d / "cash_fit_puts.csv", [
         _put_row("PUA", 10, 0.40, 0.44, 11.5),      # covered by the bigger book's cash
         _put_row("PUB", 9, 0.30, 0.34, 10.2),       # no live quote at the re-check: dropped
         _put_row("PUC", 25, 0.70, 0.74, 28.0),      # covered once the deposit lands
-        _put_row("PUD", 60, 1.40, 1.50, 66.0),      # over both books' money
     ])
+    _write_csv(d / "scan_results.csv", [_put_row("PUD", 60, 1.40, 1.50, 66.0)])     # over both books' money
     _write_csv(d / "signal_outcomes.csv", [
         _outcome("PUA", pnl=3.0, price=11), _outcome("PUC", strike=20, pnl=-6.0, outcome="LOSS", price=22)])
+    with open(d / "prices.csv", "a") as f:
+        f.write("PUA,2026-11-02,11.5,11.6,11.4,11.5\nPUC,2026-11-02,28,28.2,27.8,28\n"
+                "PUB,2026-11-02,10.2,10.3,10.1,10.2\n")
     meta = json.loads((d / "meta.json").read_text())
     meta["options"].update({"PUA|2026-12-18|10": {"bid": 0.42, "ask": 0.46},
                             "PUC|2026-12-18|25": {"bid": 0.72, "ask": 0.78}})
@@ -462,6 +587,16 @@ def test_fixture_run_lists_puts_per_book(capsys, monkeypatch, puts_fixture):
     assert "trimmed" not in out
 
 
+
+
+def test_open_short_puts_come_off_the_cash(capsys, monkeypatch, puts_fixture):
+    _write_csv(puts_fixture / "options.csv", [{"date": "2026-11-02T071300", "account": "sarah", "ticker": "HLD",
+                                               "right": "P", "strike": 5, "expiry": "20261218", "qty": -1}])
+    monkeypatch.delenv("GROWTH_LEG_ENABLED", raising=False)
+    assert dm_script.main(["--fixture", str(puts_fixture)]) == 0
+    sarah = capsys.readouterr().out.split("🪙")[1].split("<b>👤 Sarah</b>")[1]
+    assert "<b>P1" not in sarah         # about $1,250 of cash less $500 no longer covers $1,000
+    assert "With the S$2.5k deposit:" in sarah and "PUA $10" in sarah
 
 
 def test_recheck_says_when_a_put_comes_or_goes():

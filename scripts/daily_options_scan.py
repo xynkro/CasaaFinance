@@ -11,8 +11,9 @@ Two-universe pipeline:
 Both universes funnel into ONE scan_results sheet and ONE Telegram push.
 
 A third pass, cash-fit puts, starts from what each book's cash can secure rather
-than from the market. Its rows go to scan_results too, for the morning plan
-(src/put_lines.py) and for grading, but stay out of the shared digest.
+than from the market. Its rows go to their own tab, for the morning plan
+(src/put_lines.py) and for grading. They stay out of scan_results because the paper
+executor's plan and the app's Harvest page read that tab.
 CSP picks from the discovery universe are ALSO written to harvest_scan
 (the PWA Harvest page reads that tab for signal-block display).
 
@@ -36,6 +37,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -1256,6 +1258,7 @@ def scan_ticker(
         try:
             puts = chain.puts.copy()
             puts = puts[puts["openInterest"] >= MIN_OI]
+            puts = _standard_contracts(puts, ticker, expiry).copy()
             puts["mid"] = puts.apply(_option_mid, axis=1)
             puts = puts[puts["mid"] >= MIN_MID]
 
@@ -2379,8 +2382,11 @@ def _sizing_note(c: dict, states: dict[str, dict], macro: dict) -> str:
 # on a small book almost nothing it lists can be cash-secured. This pass starts
 # from the cash: for each book's limit, on today's cash and with the month's
 # deposit, it finds the put closest to the target delta that the cash covers.
-# src/put_lines.py turns these rows into each book's list. They go to scan_results
-# so signal_feedback grades them, and stay out of the shared digest.
+# src/put_lines.py turns these rows into each book's list. They get their own tab:
+# build_daily_plan takes the day's top CSP from scan_results for the paper executor,
+# and these are per-book lines, not market-wide picks. signal_feedback grades both.
+CASH_FIT_TAB = "cash_fit_puts"
+CASH_FIT_BUDGET_S = 480          # the pass runs last, and stops here rather than risk the job's timeout
 CASH_FIT_TOP = 120               # most-traded names to try, per cash level
 CASH_FIT_MIN_PRICE = 5.0
 CASH_FIT_MIN_PREMIUM = 0.20      # $20 a contract: below this, costs eat it
@@ -2388,6 +2394,7 @@ CASH_FIT_MIN_AVG_VOLUME = 1_000_000
 CASH_FIT_MIN_MCAP = 500_000_000
 CASH_FIT_MAX_OTM = 0.30
 CASH_FIT_MAX_EXPIRIES = 3
+CASH_FIT_MAX_TRADE_AGE_DAYS = 5  # off-hours, an older last trade says nothing about today's price
 CASH_FIT_DTE_RANGE = (21, 50)    # under 21 days is where the exit rule already closes a put
 
 
@@ -2403,15 +2410,42 @@ def cash_fit_caps(states: dict[str, dict]) -> list[float]:
     return sorted(caps)
 
 
-def pick_cash_fit_put(puts, ticker: str, expiry: str, price: float, dte: int, cap: float):
+def _us_market_open(now: datetime | None = None) -> bool:
+    """Regular US hours by the clock. Holidays read as open, which only makes the
+    quote check stricter."""
+    t = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/New_York"))
+    return t.weekday() < 5 and 9 * 60 + 30 <= t.hour * 60 + t.minute <= 16 * 60
+
+
+def _standard_contracts(df, ticker: str, expiry: str):
+    """Drop adjusted contracts (a root like "F1"): they deliver something other than
+    100 shares, so the cash and breakeven worked out here would be wrong."""
+    if "contractSymbol" not in df:
+        return df
+    return df[df["contractSymbol"].str.startswith(f"{ticker}{expiry[2:4]}{expiry[5:7]}{expiry[8:10]}")]
+
+
+def _usable_quotes(df, market_open: bool, now: datetime | None = None):
+    """Rows with a real two-sided quote. A one-sided quote has no market, and its
+    "mid" is half of one side. With the market shut Yahoo often blanks the whole
+    quote, so a recent last trade stands in until the re-check; during hours a blank
+    quote is a dead contract, and so is a last trade days old."""
+    import pandas as pd
+
+    bid, ask = df["bid"].fillna(0), df["ask"].fillna(0)
+    two_sided = (bid > 0) & (ask > 0)
+    if market_open or "lastTradeDate" not in df:
+        return df[two_sided]
+    cutoff = pd.Timestamp(now or datetime.now(timezone.utc)) - pd.Timedelta(days=CASH_FIT_MAX_TRADE_AGE_DAYS)
+    recent = pd.to_datetime(df["lastTradeDate"], utc=True, errors="coerce") >= cutoff
+    return df[two_sided | ((bid <= 0) & (ask <= 0) & recent)]
+
+
+def pick_cash_fit_put(puts, ticker: str, expiry: str, price: float, dte: int, cap: float,
+                      market_open: bool = True):
     """The put closest to the target delta among the strikes `cap` covers, or None."""
-    df = puts[puts["openInterest"] >= MIN_OI].copy()
-    # Adjusted contracts (a root like "F1", a strike like 11.67) deliver something
-    # other than 100 shares, so the cash and breakeven here would be wrong.
-    df = df[df["contractSymbol"].str.startswith(f"{ticker}{expiry[2:4]}{expiry[5:7]}{expiry[8:10]}")]
-    # An ask with no bid has no buyer, and its "mid" is half the ask. Bid and ask
-    # both zero is the off-hours chain, which keeps its last trade.
-    df = df[~((df["bid"].fillna(0) <= 0) & (df["ask"].fillna(0) > 0))]
+    df = _standard_contracts(puts[puts["openInterest"] >= MIN_OI], ticker, expiry)
+    df = _usable_quotes(df, market_open).copy()
     if df.empty:
         return None
     df["mid"] = df.apply(_option_mid, axis=1)
@@ -2446,7 +2480,8 @@ def cash_fit_expiries(expiries: tuple[str, ...], today: date | None = None) -> l
     return [e for _, _, e in sorted(ranked)[:CASH_FIT_MAX_EXPIRIES]]
 
 
-def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger) -> list[dict[str, Any]]:
+def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger,
+                  market_open: bool = True) -> list[dict[str, Any]]:
     """One candidate per strike this ticker offers across the books' limits."""
     import yfinance as yf
     from src.indicators import fetch_earnings_dates
@@ -2477,7 +2512,7 @@ def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger) -> lis
             puts = yt.option_chain(expiry).puts
         except Exception:
             continue
-        found = [(cap, pick_cash_fit_put(puts, ticker, expiry, price, dte, cap)) for cap in open_caps]
+        found = [(cap, pick_cash_fit_put(puts, ticker, expiry, price, dte, cap, market_open)) for cap in open_caps]
         if any(r is not None for _, r in found) and away is None:
             away = fetch_earnings_dates([ticker]).get(ticker, {}).get("earnings_days_away", -1)
             if 0 <= away <= dte:
@@ -2505,7 +2540,8 @@ def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger) -> lis
     except Exception:
         pass
     # Numbers only: signal_feedback parses every value here as a float.
-    snapshot.update({"cash_fit": 1.0, "is_etf": 1.0 if is_etf else 0.0})
+    # scan_ts: the row's date column mixes the host's date with Singapore's clock.
+    snapshot.update({"cash_fit": 1.0, "is_etf": 1.0 if is_etf else 0.0, "scan_ts": round(time.time())})
     if isinstance(eps, (int, float)):
         snapshot["eps"] = round(float(eps), 2)
 
@@ -2533,31 +2569,37 @@ def scan_cash_fit(ticker: str, caps: list[float], logger: logging.Logger) -> lis
 def run_cash_fit(logger: logging.Logger, states: dict[str, dict], watchlist: set[str],
                  macro: dict) -> list[dict[str, Any]]:
     """Logs counts only: a price limit here would give away a book's cash, and CI
-    logs on this repo are public."""
+    logs on this repo are public. Most-traded names go first, so if the time budget
+    runs out it's the thinnest ones that miss out."""
     caps = cash_fit_caps(states)
-    if not caps:
-        logger.info("  Cash-fit puts: no book has the cash for a strike over the floor")
-        return []
-    if macro.get("halted"):
-        logger.warning("  Cash-fit puts: skipped, macro gate halted")
+    if not caps or macro.get("halted"):
+        logger.info("  Cash-fit puts: 0 lines")
         return []
     # One list per cash level, or the biggest limit's pricier names crowd out the
     # cheap ones the smallest limit needs.
+    names: list[str] = []
     try:
-        universe = {q["symbol"] for cap in caps
-                    for q in _yahoo_screen(CASH_FIT_MIN_PRICE, cap / (1 - CASH_FIT_MAX_OTM),
-                                           CASH_FIT_MIN_AVG_VOLUME, CASH_FIT_MIN_MCAP, CASH_FIT_TOP)}
+        for cap in caps:
+            names += [q["symbol"] for q in _yahoo_screen(CASH_FIT_MIN_PRICE, cap / (1 - CASH_FIT_MAX_OTM),
+                                                         CASH_FIT_MIN_AVG_VOLUME, CASH_FIT_MIN_MCAP, CASH_FIT_TOP)]
     except Exception as e:
         logger.warning(f"  Cash-fit puts: Yahoo screener failed ({type(e).__name__}) — using the fallback list")
-        universe = set(FALLBACK_HIGH_IV_UNIVERSE)
-    names = sorted(universe | set(watchlist))
+        names = list(FALLBACK_HIGH_IV_UNIVERSE)
+    names = list(dict.fromkeys(names + sorted(watchlist)))
+    market_open = _us_market_open()
+    start = time.monotonic()
     out: list[dict[str, Any]] = []
+    tried = 0
     for ticker in names:
+        if time.monotonic() - start > CASH_FIT_BUDGET_S:
+            logger.warning(f"  Cash-fit puts: time budget hit after {tried} of {len(names)} names")
+            break
+        tried += 1
         try:
-            out.extend(scan_cash_fit(ticker, caps, logger))
+            out.extend(scan_cash_fit(ticker, caps, logger, market_open))
         except Exception as e:
-            logger.debug(f"  {ticker}: cash-fit error — {e}")
-    logger.info(f"  Cash-fit puts: {len(out)} lines from {len(names)} names")
+            logger.debug(f"  {ticker}: cash-fit error — {type(e).__name__}")
+    logger.info(f"  Cash-fit puts: {len(out)} lines from {tried} names")
     return out
 
 
@@ -2596,10 +2638,24 @@ def write_cash_fit(client, candidates: list[dict], states: dict[str, dict], macr
     if not candidates:
         return
     today_iso = date.today().isoformat()
-    sh.ensure_headers(client, S.ScanResultRow.TAB_NAME, S.ScanResultRow.HEADERS)
-    sh.append_rows(client, S.ScanResultRow.TAB_NAME,
+    sh.ensure_headers(client, CASH_FIT_TAB, S.ScanResultRow.HEADERS)
+    sh.append_rows(client, CASH_FIT_TAB,
                    [_scan_row(S, c, _with_size(c, states, macro), today_iso) for c in candidates])
-    logger.info(f"✓ Wrote {len(candidates)} cash-fit puts to scan_results")
+    logger.info(f"✓ Wrote {len(candidates)} cash-fit puts to {CASH_FIT_TAB}")
+
+
+def cash_fit_step(client, ss, states: dict[str, dict], watchlist: set[str], macro: dict,
+                  logger: logging.Logger) -> None:
+    """Find, tag and write the cash-fit puts. Runs after the main scan's writes and
+    never raises, so this pass can't cost the main scan anything. Exception types
+    only: messages can carry a request's values, and CI logs are public."""
+    try:
+        cands = run_cash_fit(logger, states, watchlist, macro)
+        _tag_adverse_flow(ss, cands, logger)
+        _apply_macro_warnings(cands, macro)
+        write_cash_fit(client, cands, states, macro, logger)
+    except Exception as e:
+        logger.warning(f"  ⚠ Cash-fit puts SKIPPED: {type(e).__name__}")
 
 
 def main() -> int:
@@ -2896,16 +2952,6 @@ def main() -> int:
             f"  ⚠ macro overlay [{_macro_warning_tags(macro)}] — tagged {n_tagged} "
             f"premium-selling candidates; suggested sizing HALVED in notes")
 
-    # Puts each book's cash can cover. Same tags, kept out of the shared digest.
-    seen = {(c["ticker"], c["strike"], c["expiry"]) for c in all_candidates}
-    cash_fit = [c for c in run_cash_fit(logger, account_states, watchlist_set, macro)
-                if (c["ticker"], c["strike"], c["expiry"]) not in seen]
-    try:
-        _tag_adverse_flow(ss, cash_fit, logger)
-    except Exception as e:
-        logger.warning(f"  ⚠ UOA adverse-flow tagging of cash-fit puts SKIPPED: {type(e).__name__}: {e}")
-    _apply_macro_warnings(cash_fit, macro)
-
     if args.dry:
         for c in (other_picks[:5] + harvest_picks[:5]):
             logger.info(f"  {c['strategy']:15} {c['ticker']:6} ${c['strike']:.0f} {c['dte']}d yield={c['annual_yield_pct']:.0f}%")
@@ -2933,10 +2979,9 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001 — heartbeat is non-critical
         logger.warning(f"scan_meta heartbeat failed (non-fatal): {e}")
 
-    write_cash_fit(client, cash_fit, account_states, macro, logger)
-
     if not all_candidates:
         logger.warning("No candidates met threshold — sheet not updated")
+        cash_fit_step(client, ss, account_states, watchlist_set, macro, logger)
         return 0
 
     today_iso = date.today().isoformat()
@@ -3030,6 +3075,8 @@ def main() -> int:
                     + (" (premium ideas suppressed)" if tg_banner else ""))
     except Exception as e:
         logger.warning(f"Telegram Options Intel ping failed: {e}")
+
+    cash_fit_step(client, ss, account_states, watchlist_set, macro, logger)
 
     logger.info("═══ unified options scan done ═══")
     return 0

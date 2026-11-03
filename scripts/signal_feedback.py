@@ -328,7 +328,8 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
     client = sh.authenticate()
 
     # 1. Read scan_results
-    scan_rows = _read_tab(client, S.ScanResultRow.TAB_NAME)
+    # The cash-fit puts get their own tab so the paper plan can't read them; graded all the same.
+    scan_rows = _read_tab(client, S.ScanResultRow.TAB_NAME) + _read_tab(client, "cash_fit_puts")
     logger.info(f"Read {len(scan_rows)} rows from scan_results")
 
     # 1b. Read the user's REAL fill/kill/defer decisions from Firestore (the
