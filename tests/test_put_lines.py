@@ -218,6 +218,19 @@ def test_one_line_per_ticker_best_first_and_capped():
     assert len(bp.fits) == pl.MAX_PER_BOOK and len({ln.ticker for ln in bp.fits}) == pl.MAX_PER_BOOK
 
 
+def test_book_cap_counts_the_listed_lines_together():
+    lines = [_checked(ticker=t, strike=20, under=23) for t in ("AAA", "BBB", "CCC")]   # 20% each if assigned
+    assert len(pl.for_book(lines, 10_000, {}, 0.50, 5000).fits) == 2
+    assert len(pl.for_book(lines, 10_000, {}, 0.50, 5000, open_puts_usd=2000).fits) == 1
+    assert len(pl.for_book(lines, 10_000, {}, 1.00, 5000).fits) == 3
+
+
+def test_a_smaller_line_can_still_use_the_room_a_bigger_one_cant():
+    big, small = _checked(ticker="BIG", strike=25, under=30), _checked(ticker="SML", strike=10, under=11)
+    bp = pl.for_book([big, small], 10_000, {}, 0.30, 5000, open_puts_usd=1000)
+    assert [ln.ticker for ln in bp.fits] == ["SML"]
+
+
 def test_nothing_fits_names_the_smallest_line():
     lines = [_checked(ticker="MID", strike=15, under=17), _checked(ticker="BIG", strike=50, under=55)]
     bp = pl.for_book(lines, 1_000, {}, 1.0, 50)
