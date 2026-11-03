@@ -129,7 +129,7 @@ def _compute_indicators(ticker: str, logger: logging.Logger) -> dict:
         yfsymbol = f"{ticker}.SI" if ticker in {"C6L", "G3B", "D05", "O39", "U11", "Z74", "V03"} else ticker
         hist = yf.Ticker(yfsymbol).history(period="1y", interval="1d", auto_adjust=False)
     except Exception as e:
-        logger.warning(f"  {ticker}: yfinance fetch failed ({e})")
+        logger.warning(f"  yfinance fetch failed for a ticker ({type(e).__name__})")
         return {}
     if hist.empty or len(hist) < 50:
         return {}
@@ -215,7 +215,7 @@ def main() -> int:
                     indicators=ind,
                 )
             except Exception as e:
-                logger.warning(f"    {account}/{ticker}: exit_plan failed ({e})")
+                logger.warning(f"    {account}: exit_plan failed ({type(e).__name__})")
                 continue
 
             new_rows.append(S.ExitPlanRow(

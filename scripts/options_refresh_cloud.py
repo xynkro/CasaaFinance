@@ -97,14 +97,14 @@ def _fetch_indicators(tickers: list[str], logger: logging.Logger) -> dict[str, d
     for orig, ysym in zip(tickers, yahoo_syms):
         df = ohlcv.get(ysym)
         if df is None or df.empty or len(df) < 20:
-            logger.warning(f"  {orig}: insufficient OHLCV ({0 if df is None else len(df)} bars)")
+            logger.warning(f"  a ticker has insufficient OHLCV ({0 if df is None else len(df)} bars)")
             out[orig] = {}
             continue
         try:
             ind = compute_indicators(df)
             out[orig] = ind
         except Exception as e:
-            logger.warning(f"  {orig}: indicator compute failed — {e}")
+            logger.warning(f"  indicator compute failed for a ticker — {type(e).__name__}")
             out[orig] = {}
     return out
 
@@ -332,7 +332,7 @@ def main() -> int:
             qty    = float(pos.get("qty", 0) or 0)
             credit = float(pos.get("credit", 0) or 0)
         except (ValueError, TypeError):
-            logger.warning(f"  {ticker}: malformed numeric fields — preserving row as-is")
+            logger.warning("  a leg has malformed numeric fields — preserving row as-is")
             skipped_count += 1
             new_row = [pos.get(h, "") for h in headers]
             if "date" in headers:
@@ -347,7 +347,7 @@ def main() -> int:
         underlying_last = underlying_prices.get(ticker, 0.0)
         if underlying_last <= 0:
             # Preserve last-known but timestamp-bump so latest_date advances
-            logger.warning(f"  {ticker}: no underlying price — preserving last-known row")
+            logger.warning("  a leg has no underlying price — preserving last-known row")
             skipped_count += 1
             new_row = [pos.get(h, "") for h in headers]
             new_row[headers.index("date")] = now_ts

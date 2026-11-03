@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -465,7 +466,11 @@ def main() -> int:
     )
 
     if args.dry:
-        _print_dry_table(all_rows)
+        if os.environ.get("GITHUB_ACTIONS"):
+            # The table carries per-class weights and rebalance amounts: not for a public log.
+            logger.info(f"[DRY] {len(all_rows)} rows built; table withheld from the Actions log")
+        else:
+            _print_dry_table(all_rows)
         return 0
 
     try:
