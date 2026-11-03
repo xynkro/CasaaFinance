@@ -474,8 +474,6 @@ def load_decisions(client, logger: logging.Logger) -> list[Decision]:
     out, held = drop_held_sell_recs(
         out, holds,
         account=lambda d: d.account, ticker=lambda d: d.ticker, strategy=lambda d: d.strategy)
-    for d in held:
-        logger.info(f"  hold-list: skipping {d.strategy.upper():5} {d.account}/{d.ticker.upper()}")
     logger.info(f"Loaded {len(out)} watching decisions for {latest_date}"
                 + (f" ({len(held)} held-name sell recs skipped)" if held else ""))
     return out
@@ -1520,7 +1518,7 @@ def main() -> int:
                 should_fire = False
                 cooled.append((d, blocked_on))
                 logger.info(
-                    f"  ⏳ cooldown: {d.ticker} {d.strategy} ({d.account}) already paged "
+                    f"  ⏳ cooldown: {d.strategy} ({d.account}) already paged "
                     f"{blocked_on} — inside the {ALERT_COOLDOWN_DAYS}d window, not re-firing")
 
         # Soft-fire criteria (opt-in): NEW transition into close from
@@ -1578,7 +1576,7 @@ def main() -> int:
     if skipped:
         logger.info(f"Skipped {len(skipped)} unevaluable decisions:")
         for d, reason in skipped:
-            logger.info(f"  · {d.ticker:6} {d.account:7} {d.strategy or '(no strat)':10}  {reason}")
+            logger.info(f"  · {d.account:7} {d.strategy or '(no strat)':10}  {reason}")
     logger.info(
         f"Fires: {len(fires)} act_now transition(s)"
         + (f"; {len(soft_fires)} close-state soft fire(s)" if include_close else f"; close-state alerts disabled (set TRIGGER_ALERTS_INCLUDE_CLOSE=true to enable, would have fired {len(soft_fires)})")
@@ -1788,6 +1786,19 @@ def main() -> int:
     )
 
     if args.dry:
+        if os.environ.get("GITHUB_ACTIONS"):
+            # Manual dispatch with dry=true lands in a PUBLIC log: the previews below
+            # name held tickers, strikes, cash and NLV. Counts only here; the full
+            # preview stays for local runs.
+            logger.info(
+                f"  [DRY] would fire: act_now={len(fires)} close={len(soft_fires)} "
+                f"blackout={bool(macro_blackout_plan)} news={len(macro_news_plan)} "
+                f"surprise={len(macro_surprise_plan)} defense={len(defense_plan)} "
+                f"held_news={len(held_news_plan)} pressure={bool(pressure_plan)} "
+                f"profit50={len(profit_take_plan)} dte21={len(dte_plan)} "
+                f"cashfloor={len(cash_floor_plan)} conc={len(conc_plan)}"
+            )
+            return 0
         for d, ev, cur in fires:
             logger.info(f"  [DRY] would fire ACT_NOW: {d.ticker} {d.account} entry=${d.entry:.2f} → cur=${cur:.2f}  ({ev.direction})")
         for d, ev, cur in soft_fires:
@@ -1866,7 +1877,7 @@ def main() -> int:
             deferred += 1
             logger.warning(
                 f"  ⏸ ACT_NOW deferred (macro blackout — {blackout_event['event']} "
-                f"{blackout_event['_minutes_until']:+d}min): {d.ticker} {d.account}"
+                f"{blackout_event['_minutes_until']:+d}min): {d.account}"
             )
             continue
         try:
@@ -1880,9 +1891,9 @@ def main() -> int:
                 pwa_url=PWA_URL,
             )
             sent += 1
-            logger.info(f"  ✓ sent ACT_NOW: {d.ticker} {d.account}")
+            logger.info(f"  ✓ sent ACT_NOW: {d.account}")
         except Exception as e:
-            logger.warning(f"  ✗ ACT_NOW failed: {d.ticker} {d.account}: {e}")
+            logger.warning(f"  ✗ ACT_NOW failed: {d.account}: {type(e).__name__}")
 
     soft_sent = 0
     soft_deferred = 0
@@ -1890,7 +1901,7 @@ def main() -> int:
         if in_blackout and blackout_event:
             soft_deferred += 1
             logger.warning(
-                f"  ⏸ CLOSE deferred (macro blackout): {d.ticker} {d.account}"
+                f"  ⏸ CLOSE deferred (macro blackout): {d.account}"
             )
             continue
         try:
@@ -1905,9 +1916,9 @@ def main() -> int:
                 pwa_url=PWA_URL,
             )
             soft_sent += 1
-            logger.info(f"  ✓ sent CLOSE: {d.ticker} {d.account}")
+            logger.info(f"  ✓ sent CLOSE: {d.account}")
         except Exception as e:
-            logger.warning(f"  ✗ CLOSE failed: {d.ticker} {d.account}: {e}")
+            logger.warning(f"  ✗ CLOSE failed: {d.account}: {type(e).__name__}")
 
     # ────────────────────────────────────────────────────────────────
     # Execute the macro-news plan computed above (live mode only).
@@ -1977,9 +1988,9 @@ def main() -> int:
                     url=n.get("url", ""),
                 )
                 swing_mirrored += 1
-                logger.info(f"    ↳ mirrored to swing topic (tickers: {matched})")
+                logger.info(f"    ↳ mirrored to swing topic ({len(matched)} held tickers matched)")
             except Exception as e:
-                logger.warning(f"    ↳ swing mirror failed: {e}")
+                logger.warning(f"    ↳ swing mirror failed: {type(e).__name__}")
 
         macro_state_rows.append(S.MacroAlertStateRow(
             event_key=news_key,
@@ -2031,7 +2042,7 @@ def main() -> int:
             defense_sent += 1
             logger.info(f"  ✓ sent DEFENSE {plan['level'].upper()}: {plan['account']}")
         except Exception as e:
-            logger.warning(f"  ✗ DEFENSE failed: {plan['account']}: {e}")
+            logger.warning(f"  ✗ DEFENSE failed: {plan['account']}: {type(e).__name__}")
             continue
         for k in plan["keys_to_mark"]:
             macro_state_rows.append(S.MacroAlertStateRow(
@@ -2060,9 +2071,9 @@ def main() -> int:
                 url=n["url"],
             )
             held_news_sent += 1
-            logger.info(f"  ✓ sent HELD NEWS: {n['ticker']} {n['score']:+.2f} {n['headline'][:60]}")
+            logger.info("  ✓ sent HELD NEWS")
         except Exception as e:
-            logger.warning(f"  ✗ HELD NEWS failed: {n['ticker']}: {e}")
+            logger.warning(f"  ✗ HELD NEWS failed: {type(e).__name__}")
             continue
         macro_state_rows.append(S.MacroAlertStateRow(
             event_key=n["key"],
@@ -2102,7 +2113,7 @@ def main() -> int:
                     updated_at=now_iso,
                 ))
         except Exception as e:
-            logger.warning(f"  ✗ PRESSURE failed: {e}")
+            logger.warning(f"  ✗ PRESSURE failed: {type(e).__name__}")
 
     # ── Mechanical-threshold sends (50% profit / 21 DTE / cash floor /
     # concentration). Same contract as the lanes above: the ledger row is
@@ -2156,7 +2167,7 @@ def main() -> int:
                     updated_at=now_iso,
                 ))
         except Exception as e:
-            logger.warning(f"  ✗ {ev_type.upper()} failed: {e}")
+            logger.warning(f"  ✗ {ev_type.upper()} failed: {plan['account']}: {type(e).__name__}")
 
     if macro_state_rows:
         upsert_macro_alert_state(client, macro_state_rows, logger)

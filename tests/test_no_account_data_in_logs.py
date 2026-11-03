@@ -23,7 +23,14 @@ WHAT IT CHECKS
 WHAT IS EXEMPT
   * ``len(...)`` and ``bool(...)``: a count or a True/False presence flag is the
     sanctioned way to log these. Anything inside them is ignored.
-  * The explicit ALLOWLIST below: paths that never run in Actions.
+  * Code that cannot run when ``GITHUB_ACTIONS`` is set: statements after an
+    ``if os.environ.get("GITHUB_ACTIONS"): ... return`` guard in the same block,
+    the ``else`` of such an ``if``, or the body of ``if not <same test>``. This is
+    how the ``--dry`` previews work: manual dispatch can reach ``--dry`` in a
+    public log, so Actions gets a count and a local run keeps the full preview.
+    (TestGuardedPreviews below pins each gated preview so the guard cannot be
+    dropped quietly.)
+  * The explicit ALLOWLIST below: paths that never run in Actions at all.
 
 KNOWN LIMITS (it is a guard, not a taint engine)
   A value that reaches a log through a function return, a loop variable or a
@@ -93,11 +100,10 @@ ALLOWLIST = [
     Allow("scripts/market_scan.py", "cash=$",
           "Not account data: cash_required is strike x 100, the collateral a "
           "candidate put WOULD need. Same value for anyone."),
-    Allow("scripts/trigger_alerts.py", "[DRY]",
-          "The --dry branch. Never on the schedule and no retained run used it, "
-          "but trigger-alerts.yml has a manual `dry` dispatch input that reaches "
-          "it, so a manual dry run prints these lines to the public log."),
 ]
+# (The trigger_alerts `[DRY]` entry that used to be here is gone: that block now
+# returns early with counts when GITHUB_ACTIONS is set, which the detector
+# recognises, so the full preview no longer needs an allowlist entry.)
 
 
 # ───────────────────────── detector ──────────────────────────────────────────
@@ -190,9 +196,59 @@ def _scopes(tree: ast.AST):
             yield n, list(own(n))
 
 
+def _is_actions_flag(expr: ast.AST) -> bool:
+    """os.environ.get("GITHUB_ACTIONS") / os.getenv("GITHUB_ACTIONS") / os.environ["GITHUB_ACTIONS"]."""
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) \
+            and expr.func.attr in ("get", "getenv") and expr.args:
+        a0 = expr.args[0]
+        return isinstance(a0, ast.Constant) and a0.value == "GITHUB_ACTIONS"
+    if isinstance(expr, ast.Subscript) and isinstance(expr.slice, ast.Constant):
+        return expr.slice.value == "GITHUB_ACTIONS"
+    return False
+
+
+def local_only_ids(tree: ast.AST) -> set[int]:
+    """ids of every node that cannot execute when GITHUB_ACTIONS is set.
+
+    Three shapes, all keyed on a test that is exactly the GITHUB_ACTIONS flag
+    (or its `not`), so a compound condition never grants an exemption:
+      if FLAG: ...; return/raise   -> every later statement in that block
+      if FLAG: ... else: <local>   -> the else branch
+      if not FLAG: <local>         -> the body
+    """
+    ids: set[int] = set()
+
+    def mark(stmts):
+        for s in stmts:
+            for n in ast.walk(s):
+                ids.add(id(n))
+
+    for node in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            stmts = getattr(node, field, None)
+            if not isinstance(stmts, list):
+                continue
+            for i, s in enumerate(stmts):
+                if not isinstance(s, ast.If):
+                    continue
+                negated = isinstance(s.test, ast.UnaryOp) and isinstance(s.test.op, ast.Not)
+                flag = s.test.operand if negated else s.test
+                if not _is_actions_flag(flag):
+                    continue
+                if negated:
+                    mark(s.body)
+                else:
+                    mark(s.orelse)
+                    if s.body and isinstance(s.body[-1], (ast.Return, ast.Raise)):
+                        mark(stmts[i + 1:])
+    return ids
+
+
 def find_leaks(source: str, path: str = "<sample>") -> list[Finding]:
-    """Every print/logger call in `source` that references account-data names."""
+    """Every print/logger call in `source` that references account-data names
+    and could run in Actions."""
     tree = ast.parse(source)
+    local_only = local_only_ids(tree)
     found: list[Finding] = []
     for _scope, nodes in _scopes(tree):
         # variable -> sensitive names baked into the string it was built from
@@ -216,7 +272,7 @@ def find_leaks(source: str, path: str = "<sample>") -> list[Finding]:
                         tainted.append((n.lineno, nm.id, names))
 
         for n in nodes:
-            if not (isinstance(n, ast.Call) and _is_log_call(n)):
+            if not (isinstance(n, ast.Call) and _is_log_call(n)) or id(n) in local_only:
                 continue
             parts = list(n.args) + [k.value for k in n.keywords]
             direct: set[str] = set()
@@ -341,8 +397,138 @@ def test_a_new_leak_in_an_otherwise_clean_file_would_fail_the_guard():
 
 def test_allowlist_is_path_scoped():
     """An allowlisted snippet in one file must not excuse the same text elsewhere."""
-    f = find_leaks('print(f"[DRY] would fire {cash}")', "scripts/growth_scan.py")[0]
+    f = find_leaks('print(f"Account  NLV ${nlv}")', "scripts/growth_scan.py")[0]
     assert _allowed(f) is None
+    f = find_leaks('print(f"Account  NLV ${nlv}")', "scripts/ibkr_flex_sync.py")[0]
+    assert _allowed(f) is not None
+
+
+# ───────────── GITHUB_ACTIONS guards: what is and is not local-only ──────────
+
+GUARD = 'os.environ.get("GITHUB_ACTIONS")'
+
+GUARDED_SAMPLES = {
+    "after an early-exit guard (the --dry preview shape)":
+        f'def main():\n    if args.dry:\n        if {GUARD}:\n            print(f"{{len(rows)}} rows")\n'
+        f'            return 0\n        print(f"cash {{cash}}")\n        return 0\n',
+    "the else branch of the flag (the crash_playbook shape)":
+        f'if {GUARD}:\n    print("status")\nelse:\n    print(f"cash {{cash}}")\n',
+    "under `if not flag`":
+        f'if not {GUARD}:\n    for t in held:\n        logger.info(f"{{t}} {{qty}}")\n',
+    "os.getenv spelling":
+        'if not os.getenv("GITHUB_ACTIONS"):\n    print(qty)\n',
+    "subscript spelling":
+        'if not os.environ["GITHUB_ACTIONS"]:\n    print(qty)\n',
+}
+
+
+@pytest.mark.parametrize("why", sorted(GUARDED_SAMPLES))
+def test_code_that_cannot_run_in_actions_is_exempt(why):
+    assert find_leaks(GUARDED_SAMPLES[why]) == [], why
+
+
+UNGUARDED_SAMPLES = {
+    "a leak BEFORE the guard still runs in Actions":
+        f'def main():\n    print(f"cash {{cash}}")\n    if {GUARD}:\n        return 0\n',
+    "a leak INSIDE the Actions branch is the branch that runs in Actions":
+        f'if {GUARD}:\n    print(f"cash {{cash}}")\n',
+    "a guard that does not exit exempts nothing after it":
+        f'if {GUARD}:\n    print("ci")\nprint(f"cash {{cash}}")\n',
+    "a compound condition grants no exemption":
+        f'if {GUARD} or verbose:\n    print("x")\n    return 0\nprint(qty)\n',
+    "a different env var is not the Actions flag":
+        'if not os.environ.get("CI"):\n    print(qty)\n',
+    "the negated branch's else runs in Actions":
+        f'if not {GUARD}:\n    print("local")\nelse:\n    print(qty)\n',
+}
+
+
+@pytest.mark.parametrize("why", sorted(UNGUARDED_SAMPLES))
+def test_guard_lookalikes_do_not_hide_a_leak(why):
+    assert find_leaks(UNGUARDED_SAMPLES[why]), why
+
+
+# These dry-run previews name held tickers or account figures, and a manual
+# `dry` dispatch can reach them in a public log. Each must stay behind a
+# GITHUB_ACTIONS guard. Most carry no sensitive NAME (just tickers), so the
+# detector above cannot see them: this table is what stops the guard being
+# deleted quietly. (path, a fragment of the preview call's unparsed source.)
+GATED_PREVIEWS = [
+    ("scripts/trigger_alerts.py", "[DRY] would fire ACT_NOW"),
+    ("scripts/trigger_alerts.py", "[DRY] would fire CASH FLOOR"),
+    ("scripts/trigger_alerts.py", "[DRY] would fire DEFENSE"),
+    ("scripts/trigger_alerts.py", "[DRY] would fire CONCENTRATION"),
+    ("scripts/exposure_posture_run.py", "[dry] rationale"),
+    ("scripts/risk_parity_audit.py", "_print_dry_table(all_rows)"),
+    ("scripts/tv_signals_run.py", "row[1]"),
+    ("scripts/screen_gov_confluence.py", "politicians, $"),
+    ("scripts/crash_playbook.py", "print(report)"),
+]
+# Deliberately NOT gated (a small top-N sample of idea candidates, or news /
+# earnings rows for a mixed watchlist universe, cannot tell a reader what is
+# held): options_yield_screener, finnhub_news_insider, finnhub_calendars,
+# daily_options_scan, signal_feedback.
+
+
+PREVIEW_HELPERS = {"_print_dry_table"}      # a helper whose whole job is to print the table
+
+
+def _is_preview_call(n: ast.AST) -> bool:
+    return isinstance(n, ast.Call) and (
+        _is_log_call(n) or (isinstance(n.func, ast.Name) and n.func.id in PREVIEW_HELPERS))
+
+
+@pytest.mark.parametrize("path,fragment", GATED_PREVIEWS)
+def test_dry_previews_stay_behind_the_actions_guard(path, fragment):
+    tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
+    local_only = local_only_ids(tree)
+    hits = [n for n in ast.walk(tree) if _is_preview_call(n) and fragment in ast.unparse(n)]
+    assert hits, f"{path}: no print/log call contains {fragment!r}; update GATED_PREVIEWS"
+    exposed = [n.lineno for n in hits if id(n) not in local_only]
+    assert not exposed, (
+        f"{path}:{exposed}: {fragment!r} would run in GitHub Actions; keep it behind "
+        "`if os.environ.get(\"GITHUB_ACTIONS\")` (print a count there instead)")
+
+
+# ───────────── the held-book scripts log no ticker names at all ──────────────
+# The sensitive-NAME check cannot see a ticker (it is just a string), and these
+# three scripts work on the real book, so every log line in them that could run
+# in Actions must be ticker-free: counts, the account name, or an exception TYPE.
+# (refresh_exit_plans and tv_price_refresh are left out only because each has one
+# unreachable-from-Actions line: a logger.debug, and a --dry loop no workflow passes.)
+
+TICKER_NAME = re.compile(r"ticker|^tk$|^t$|^orig$|matched|symbol", re.I)
+TICKER_FREE_LOG_FILES = [
+    "scripts/trigger_alerts.py",
+    "src/yahoo_grab.py",
+    "scripts/options_refresh_cloud.py",
+]
+
+
+@pytest.mark.parametrize("path", TICKER_FREE_LOG_FILES)
+def test_held_book_scripts_log_no_ticker_names(path):
+    tree = ast.parse((ROOT / path).read_text(encoding="utf-8"))
+    local_only = local_only_ids(tree)
+    named = []
+    for n in ast.walk(tree):
+        if not (isinstance(n, ast.Call) and _is_log_call(n)) or id(n) in local_only:
+            continue
+        hits = {i for part in list(n.args) + [k.value for k in n.keywords]
+                for i in _identifiers(part) if TICKER_NAME.search(i)}
+        if hits:
+            named.append(f"{path}:{n.lineno}: {sorted(hits)}")
+    assert not named, ("log lines that would name a ticker in a PUBLIC log "
+                       "(log a count, the account name or the exception type):\n  " + "\n  ".join(named))
+
+
+def test_ticker_free_check_flags_a_ticker_in_a_log_line():
+    """Proof the check above is not vacuous."""
+    src = 'logger.warning(f"  {d.ticker} {d.account}: {e}")\nlogger.info(f"tickers: {matched}")\n'
+    tree = ast.parse(src)
+    flagged = [n for n in ast.walk(tree)
+               if isinstance(n, ast.Call) and _is_log_call(n)
+               and any(TICKER_NAME.search(i) for part in n.args for i in _identifiers(part))]
+    assert len(flagged) == 2
 
 
 # ───────────────── behaviour: report text still reaches its destination ─────
@@ -496,6 +682,17 @@ def test_finnhub_scripts_send_the_key_as_a_header(monkeypatch, modname):
     mod._fh_get("some/path", {"symbol": "X"}, logging.getLogger("t"))
     _assert_key_in_header_only(cap)
     assert cap.calls[0][1]["params"] == {"symbol": "X"}      # other params untouched
+
+
+def test_screen_gov_confluence_sends_the_key_as_a_header(monkeypatch):
+    import requests
+    from scripts import screen_gov_confluence as sg
+    cap = _CaptureGet()
+    monkeypatch.setenv("FINNHUB_API_KEY", "KEY")
+    monkeypatch.setattr(requests, "get", cap)
+    sg._finnhub_market_cap("XYZ")
+    _assert_key_in_header_only(cap)
+    assert cap.calls[0][1]["params"] == {"symbol": "XYZ"}
 
 
 def test_macro_feed_sends_the_key_as_a_header(monkeypatch):

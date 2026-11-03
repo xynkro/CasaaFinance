@@ -230,7 +230,7 @@ def refresh_account(
         if upl is None:
             # No cost basis anywhere in history. Leave P&L blank rather than
             # reporting the position as pure profit.
-            logger.warning(f"  {ticker}: no cost basis — writing blank upl")
+            logger.warning("  a position has no cost basis — writing blank P&L")
         total_mkt_val += mkt_val
         total_upl += upl or 0.0
 

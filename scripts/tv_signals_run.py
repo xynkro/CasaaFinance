@@ -555,6 +555,10 @@ def main() -> int:
                 f"{n_ok} OK, {n_err} errors. {elapsed:.1f}s")
 
     if args.dry:
+        if os.environ.get("GITHUB_ACTIONS"):
+            # The universe includes the book, so listing rows lists what is held.
+            print(f"  [dry] {len(rows)} rows built, not listed")
+            return 0
         for r in rows:
             row = r.to_row()
             print(f"  [dry] {row[1]:6} {row[3]:3} {row[4]:12} score={row[8]:>6} "

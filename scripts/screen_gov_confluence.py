@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -77,7 +78,8 @@ def _finnhub_market_cap(ticker: str) -> float | None:
             return None
         r = requests.get(
             f"{_FH_BASE}/stock/profile2",
-            params={"symbol": ticker, "token": key},
+            params={"symbol": ticker},
+            headers={"X-Finnhub-Token": key},
             timeout=10,
         )
         if r.status_code != 200:
@@ -1212,8 +1214,9 @@ def main() -> int:
         ]
         if sell_candidates:
             logger.info(f"[DRY] would emit {len(sell_candidates)} TRIM candidates:")
-            for t, n_pol, total in sell_candidates:
-                logger.info(f"  · {t}: {n_pol} politicians, ${total/1e6:.2f}M total")
+            if not os.environ.get("GITHUB_ACTIONS"):    # these are held tickers: keep them off public logs
+                for t, n_pol, total in sell_candidates:
+                    logger.info(f"  · {t}: {n_pol} politicians, ${total/1e6:.2f}M total")
         else:
             logger.info("[DRY] no TRIM candidates (no overlap of Congress sells with held tickers)")
         return 0

@@ -230,7 +230,7 @@ def _yahoo_sgx_prices(tickers: list[str], logger: logging.Logger) -> dict[str, d
             # yfinance occasionally returns NaN for thinly-traded SGX
             # tickers; skip those rather than poison the upsert.
             if math.isnan(last) or last <= 0:
-                logger.warning(f"  {t}.SI returned NaN/0 — skipping")
+                logger.warning("  an SGX ticker returned NaN/0 — skipping")
                 continue
             prev = float(hist["Close"].iloc[-2]) if len(hist) > 1 else last
             if math.isnan(prev) or prev <= 0:
@@ -248,7 +248,7 @@ def _yahoo_sgx_prices(tickers: list[str], logger: logging.Logger) -> dict[str, d
                 "source": "yahoo",
             }
         except Exception as e:
-            logger.warning(f"  {t}.SI yahoo fetch failed: {e}")
+            logger.warning(f"  an SGX yahoo fetch failed: {type(e).__name__}")
     return out
 
 

@@ -351,6 +351,10 @@ def main() -> int:
     )
 
     if args.dry:
+        if os.environ.get("GITHUB_ACTIONS"):
+            # row.rationale carries the HEADROOM text (NLV, equity, target): not for a public log.
+            print(f"  [dry] posture row built (rationale {len(row.rationale)} chars)")
+            return 0
         out = row.to_row()
         # Trim components_json column for readable dry output.
         out_short = out[:7] + [f"<{len(out[7])} chars>"]
