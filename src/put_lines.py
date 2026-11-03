@@ -209,19 +209,23 @@ class BookPuts:
 def for_book(lines: list[PutLine], nlv_usd: float, weights: dict[str, float], book_cap: float,
              margin_cap_usd: float, open_puts_usd: float = 0.0) -> BookPuts:
     """The lines within this book's limits, one per ticker. `book_cap` is the share of
-    the book all its short puts may reach if assigned, `open_puts_usd` what's open."""
+    the book all its short puts may reach if assigned: what's open (`open_puts_usd`)
+    plus every line listed here."""
     if nlv_usd <= 0:
         return BookPuts()
     room = book_cap * nlv_usd - open_puts_usd
     fits, seen = [], set()
     for ln in sorted(lines, key=rank):
+        if len(fits) == MAX_PER_BOOK:
+            break
         if ln.ticker in seen or ln.if_assigned > room or ln.margin > margin_cap_usd:
             continue
         if weights.get(ln.ticker, 0.0) + ln.if_assigned / nlv_usd > MAX_NAME_IF_ASSIGNED:
             continue
         seen.add(ln.ticker)
         fits.append(ln)
-    out = BookPuts(fits=fits[:MAX_PER_BOOK])
+        room -= ln.if_assigned   # the lines run together, so each one spends the same room
+    out = BookPuts(fits=fits)
     if not fits and lines:
         out.cheapest = min(lines, key=lambda ln: (ln.if_assigned, rank(ln)))
     return out
@@ -295,4 +299,4 @@ def record_text(graded: list[dict], lines: list[PutLine]) -> str:
     avg = f"{rec.avg:+.1f}".replace("-", "−")
     worst = f"{rec.worst:+.0f}".replace("-", "−")
     return (f"Graded {what}: {rec.n}, {rec.kept:.0%} kept money, average {avg}% of the strike, "
-            f"{rec.lost5:.0%} lost over 5%, worst {worst}%. Modelled at the mid, before costs.")
+            f"{rec.lost5:.0%} lost over 5%, worst {worst}%. Modelled at the mid, held to expiry, after 2c a share in costs.")
