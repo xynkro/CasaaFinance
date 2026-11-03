@@ -658,7 +658,6 @@ def ping_macro_surprise(interp: dict) -> dict:
         f" ({direction}{prev_str})",
         f"{emoji} <b>{lean.replace('_', ' ').title()} surprise</b> — "
         f"{html.escape(interp.get('market_take', ''))}",
-        f"📍 Book: {html.escape(interp.get('book_note', ''))}",
     ]
     return send(
         "\n".join(lines),
