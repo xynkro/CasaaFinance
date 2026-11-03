@@ -16,7 +16,7 @@ Caspar's personal portfolio / personal-finance app for himself + Sarah. Two halv
 ## Architecture — only what isn't obvious from the code
 - `src/sync.py` — CLI entry for the Sheet/Drive/Telegram sinks (subcommands `auth`/`daily`/`wsr`/`dryrun`; exit 0 OK, 1 partial, 2 fatal).
 - `scripts/mirror_to_firestore.py` — copies Sheet tabs into private Firestore docs every 15 min; **inert until `FIREBASE_SERVICE_ACCOUNT_JSON` is set**, so safe to ship before Firebase setup. `firestore.rules` enforces an email allowlist and blocks all client writes.
-- The Sheet (`SHEET_ID` in `.env` and `transport.ts`) is the source of truth; the PWA never writes back. The backend and PWA do NOT talk over HTTP — they communicate indirectly through the Sheet (+ optional Firestore mirror). 
+- The Sheet (`SHEET_ID` in `.env`) is the source of truth; the PWA never writes back. The backend and PWA do NOT talk over HTTP — they communicate indirectly through the Sheet (+ optional Firestore mirror). 
 
 ## Anti-patterns — things that have gone wrong here
 - Don't read portfolio data via the Sheet's gviz CSV URL — that originally leaked holdings to anyone who view-sourced the bundle; the Firestore mirror + Auth allowlist exists to close that. The PWA's gviz and PIN paths are gone: don't bring them back.
