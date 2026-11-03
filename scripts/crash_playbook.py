@@ -26,6 +26,7 @@ USAGE
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -171,7 +172,13 @@ def main() -> int:
     cash = _f(snap.get("cash")) or _f(snap.get("cash_sgd")) or 0.0
 
     report = render(dd, tier, hedge_drift(held, total), nlv, cash, total)
-    print(report)
+    if os.environ.get("GITHUB_ACTIONS"):
+        # Public Actions log: the report names holdings and cash. It goes to the
+        # DM only (--telegram); the log gets a one-line status.
+        print(f"[crash-playbook] report built ({len(report)} chars, tier {tier['name']}); "
+              "full text withheld from the Actions log")
+    else:
+        print(report)
 
     if args.telegram:
         from src import telegram as tg

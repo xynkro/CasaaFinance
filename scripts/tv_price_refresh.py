@@ -378,7 +378,7 @@ def main() -> int:
     missing = sorted(set(tickers) - set(rows_by_ticker.keys()))
     logger.info(f"  Got prices for {len(rows_by_ticker)}/{len(tickers)} tickers")
     if missing:
-        logger.warning(f"  Missing: {missing}")
+        logger.warning(f"  Missing prices for {len(missing)} tickers")
 
     if args.dry:
         for t, d in sorted(rows_by_ticker.items()):

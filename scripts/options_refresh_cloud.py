@@ -298,7 +298,7 @@ def main() -> int:
     if not tickers:
         logger.warning("No tickers in latest snapshot — nothing to refresh")
         return 0
-    logger.info(f"Underlyings to refresh: {', '.join(tickers)}")
+    logger.info(f"Underlyings to refresh: {len(tickers)}")
 
     # ─── Fetch indicators (1y OHLCV → momentum/RSI/SMAs/sigma) ──────────────
     logger.info("Fetching indicators...")
@@ -310,8 +310,7 @@ def main() -> int:
             underlying_prices[t] = float(ind["close"])
     got = sum(1 for v in indicators.values() if v)
     logger.info(f"  Got indicators for {got}/{len(tickers)} tickers")
-    for t, p in sorted(underlying_prices.items()):
-        logger.info(f"  Price: {t:<6} = ${p:.2f}")
+    logger.info(f"  {len(underlying_prices)} underlying prices")
 
     # ─── Build refreshed rows ───────────────────────────────────────────────
     # SGT timestamp so cloud writes sort chronologically with Mac writes
@@ -425,13 +424,6 @@ def main() -> int:
                 new_row.append(pos.get(h, ""))
         refreshed_rows.append(new_row)
         refreshed_count += 1
-
-        logger.info(
-            f"  {ticker:<6} {right} ${strike:>7.2f} exp={expiry} dte={dte:>3} "
-            f"u=${underlying_last:>7.2f} opt=${last_opt:>5.2f} "
-            f"{moneyness:>3} risk={assignment_risk:<4} trend={trend:<10} "
-            f"upl={upl:>+8.2f}"
-        )
 
     # ─── Summary ────────────────────────────────────────────────────────────
     logger.info(

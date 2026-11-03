@@ -85,7 +85,7 @@ def sync(dry: bool = False) -> dict:
 
     sh.ensure_headers(client, S.AlpacaSnapshotRow.TAB_NAME, S.AlpacaSnapshotRow.HEADERS)
     sh.append_row(client, S.AlpacaSnapshotRow.TAB_NAME, snap.to_row())
-    print(f"OK snapshot_alpaca: NLV={snap.net_liq} cash={snap.cash}")
+    print("OK snapshot_alpaca: 1 row appended")
 
     sh.ensure_headers(client, S.AlpacaPositionRow.TAB_NAME, S.AlpacaPositionRow.HEADERS)
     ss = sh._open_sheet(client)

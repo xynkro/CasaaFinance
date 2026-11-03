@@ -62,7 +62,8 @@ def _fh_get(path: str, params: dict, logger: logging.Logger,
         try:
             r = requests.get(
                 f"{FH_BASE}/{path}",
-                params={**params, "token": api_key},
+                params=params,
+                headers={"X-Finnhub-Token": api_key},
                 timeout=15,
             )
         except Exception as e:

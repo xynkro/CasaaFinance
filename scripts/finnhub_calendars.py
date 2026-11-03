@@ -79,11 +79,11 @@ def _fh_get(path: str, params: dict, logger: logging.Logger,
     api_key = os.getenv("FINNHUB_API_KEY")
     if not api_key:
         raise RuntimeError("FINNHUB_API_KEY not set")
-    params = {**params, "token": api_key}
     url = f"{FH_BASE}/{path}"
     for attempt in range(retries + 1):
         try:
-            r = requests.get(url, params=params, timeout=15)
+            r = requests.get(url, params=params,
+                             headers={"X-Finnhub-Token": api_key}, timeout=15)
         except Exception as e:
             logger.warning(f"  {path} network error: {e} (attempt {attempt+1})")
             time.sleep(2)

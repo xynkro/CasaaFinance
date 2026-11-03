@@ -128,7 +128,8 @@ class MacroFeed:
             try:
                 r = requests.get(
                     f"{FINNHUB_BASE}/news",
-                    params={"category": cat, "token": api_key},
+                    params={"category": cat},
+                    headers={"X-Finnhub-Token": api_key},
                     timeout=timeout,
                 )
                 r.raise_for_status()
@@ -219,7 +220,8 @@ class MacroFeed:
             end = today + timedelta(days=14)
             r = requests.get(
                 f"{FINNHUB_BASE}/calendar/economic",
-                params={"token": api_key, "from": today.isoformat(), "to": end.isoformat()},
+                params={"from": today.isoformat(), "to": end.isoformat()},
+                headers={"X-Finnhub-Token": api_key},
                 timeout=timeout,
             )
             r.raise_for_status()
