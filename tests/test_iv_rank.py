@@ -72,11 +72,3 @@ def test_iv_rank_cleans_zeroes():
     history = [0, 0, None] + list(range(10, 50))  # 40 clean values
     rank = compute_iv_rank(30.0, history)
     assert rank > 0  # should compute from clean values only
-
-
-def test_option_scanner_uses_robust_rank():
-    """option_scanner._iv_rank should delegate to iv_rank module."""
-    from src.option_scanner import _iv_rank
-    # Should return -1 for insufficient data (not 0.0 like before)
-    result = _iv_rank(30.0, [25.0, 35.0])
-    assert result == -1.0

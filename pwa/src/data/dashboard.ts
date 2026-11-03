@@ -282,9 +282,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
       scanMeta: scanMetaRows[scanMetaRows.length - 1] ?? null,
       // Same shape: one row, overwritten weekly by signal_feedback.py.
       selectionSkill: selectionSkillRows[selectionSkillRows.length - 1] ?? null,
-      // Only rows that carry a `section` count. The gviz CSV endpoint answers a
-      // sheet name it can't find with ANOTHER sheet's rows (no `section`), which
-      // would otherwise pass for ideas and set the "newest date".
+      // Only rows that carry a `section` count, so a stray row can't pass for an
+      // idea and set the "newest date".
       dailyIdeas: latestGroup(
         dailyIdeaRows.filter((r) => typeof r.date === "string" && r.date !== "" && (r.section ?? "").trim() !== ""),
       ),

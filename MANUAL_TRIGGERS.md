@@ -100,7 +100,7 @@ that window must avoid those ticks).
 | trigger-alerts | Mon-Fri every 10 min, 21:00-05:00 next day | `*/10 13-21 * * 1-5` |
 | poll-drive-wsr | Daily 14:08 / 20:08 / 02:08 | `8 6,12,18 * * *` |
 | market-scan | Daily 10:15 | `15 2 * * *` |
-| daily-options-scan | Mon-Fri 10:35 | `35 2 * * 1-5` |
+| daily-options-scan | Mon-Fri 23:15 | `15 15 * * 1-5` |
 | gex-regime | Mon-Fri 21:02 | `2 13 * * 1-5` |
 | iv-surface-scan | Mon-Fri 22:38 (10:38 ET — live quotes) | `38 14 * * 1-5` |
 | finnhub-calendars | Daily 21:06 | `6 13 * * *` |
@@ -108,7 +108,6 @@ that window must avoid those ticks).
 | build-daily-plan | Mon-Fri 22:03 | `3 14 * * 1-5` |
 | alpaca-paper-execute | Mon-Fri 22:33 | `33 14 * * 1-5` |
 | unusual-options-scan | Mon-Fri 22:36 | `36 14 * * 1-5` |
-| execute-decisions | Mon-Fri 08:00 | `0 0 * * 1-5` |
 | regime-signals (+ exposure-posture) | Mon-Fri 06:10 next day | `10 22 * * 1-5` |
 | tv-signals | Mon-Fri 06:40 next day | `40 22 * * 1-5` |
 | fetch-gov-contracts | Sun-Thu 06:00 next day | `0 22 * * 0-4` |
@@ -119,7 +118,6 @@ that window must avoid those ticks).
 | api-usage | Daily 07:30 next day | `30 23 * * *` |
 | screen-gov-confluence | Sun-Thu 07:00 next day | `0 23 * * 0-4` |
 | daily-brief | Sun-Thu 07:03 next day | `3 23 * * 0-4` |
-| tail-hedge | Mon 07:15 next day | `15 23 * * 1` |
 | growth-scan | Mon & Thu 20:30 | `30 12 * * 1,4` |
 | screen-candidates | Sun 19:00 | `0 11 * * 0` |
 | finnhub-analyst | Sun 20:02 | `2 12 * * 0` |

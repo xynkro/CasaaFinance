@@ -8,7 +8,7 @@
  * and hardening, never a redesign.
  *
  * Import from the barrel:
- *   import { Chip, ConvictionDots, StatusPill, DeltaText } from "../components/ui";
+ *   import { Chip, ConvictionDots, StatusPill } from "../components/ui";
  *
  * Async / data-state primitives (LoadingState, EmptyState, ErrorState,
  * NotAuthorized, SignInScreen) live in ../AsyncStates and are re-exported here
@@ -24,7 +24,6 @@ export {
   resolveStatus,
   type DecisionStatusConfig,
 } from "./statusConfig";
-export { DeltaText, type DeltaTextProps } from "./DeltaText";
 export { SectionLabel, type SectionLabelProps } from "./SectionLabel";
 export { ActionButton, type ActionButtonProps } from "./ActionButton";
 

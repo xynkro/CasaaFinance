@@ -5,42 +5,33 @@ Phone-first portfolio dashboard for Caspar + Sarah. Wraps the Daily News Brief +
 ## Architecture
 
 ```
-Cowork workflows (Daily, WSR)
-  └─ emit md + PDF + sidecar JSON
-      └─ python sync.py daily | wsr
-          ├─ Google Sheet PORTFOLIO_DASHBOARD (7 tabs)
-          ├─ Google Drive WSR_Archive (PDFs)
-          └─ Telegram @Tron_shaft_bot ping
-              └─ PWA on GitHub Pages reads Sheet CSV + Drive listing
+GitHub Actions jobs (started by a timer on the GCP VM, deploy/vm/)
+  ├─ scanners, portfolio sync, paper executor, daily ideas
+  ├─ Google Sheet PORTFOLIO_DASHBOARD (hand-editable source of truth)
+  ├─ Telegram DM + topic pings
+  └─ scripts/mirror_to_firestore.py (every 15 min)
+       └─ private Firestore docs (allowlist, no client writes)
+            └─ PWA on GitHub Pages, behind Google sign-in
 ```
 
-Full design: `docs/plans/2026-04-15-portfolio-pwa-design.md`
-
-### Private read path (Firebase Auth + Firestore mirror)
-
-The PWA originally read the Sheet via the **public** gviz CSV endpoint, which
-leaked portfolio data to anyone who view-sourced the bundle. The private read
-path closes this: `scripts/mirror_to_firestore.py` runs every 15 min
-(`.github/workflows/mirror-firestore.yml`) and copies the 39 PWA-needed tabs into
-private Firestore docs (`tabs/{name} = { rows, updatedAt, rowCount, sourceHash,
-chunks }`), hash-diffed so unchanged tabs aren't rewritten. The PWA reads those
-docs behind Google sign-in; `firestore.rules` allows reads only to an allowlist
-and blocks all client writes (the Admin SDK writes). The Sheet stays the
-hand-editable source of truth. The mirror is **inert until
-`FIREBASE_SERVICE_ACCOUNT_JSON` is set**, so it's safe to ship before setup.
-Design: `docs/plans/2026-06-07-private-read-path-design.md` · Setup:
-`docs/runbooks/setup-firebase.md`.
+The Python jobs and the PWA never talk directly: they meet at the Sheet and its
+Firestore mirror. Plan for the mirror: `docs/plans/2026-06-07-private-read-path-plan.md`.
+Setup: `docs/runbooks/setup-firebase.md`.
 
 ## Repo layout
 
 ```
 FinancePWA/
-├── src/            Python sync layer (S1)
-├── pwa/            Vite + React PWA (S2, not yet scaffolded)
-├── docs/plans/     Design docs
-├── fixtures/       Synthetic inputs for dryrun
+├── src/            Shared Python: sinks, schema, scoring, ideas
+├── scripts/        Job entry points, one per workflow
+├── pwa/            Vite + React PWA
+├── prompts/        Prompts the brief and weekly review jobs run
+├── vendor/skills/  Vendored regime and screener skills
+├── deploy/vm/      Job starter for the GCP VM
+├── docs/           Runbooks and pre-registered trial gates
+├── fixtures/       Synthetic inputs for dryrun and tests
 ├── .config/        OAuth client secret (gitignored)
-└── .state/         OAuth token cache + sync log (gitignored)
+└── .state/         OAuth token cache and local logs (gitignored)
 ```
 
 ## Setup

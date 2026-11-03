@@ -57,8 +57,7 @@ MIN_EVAL_DAYS = 5  # don't evaluate anything less than 5 days old
 
 # Outcome thresholds — a trade within ±PNL_SCRATCH_EPS% of breakeven is a SCRATCH.
 # Defined on P&L (not price distance from the strike) so the kept premium is never
-# thrown away. Matches option_scanner.KELLY_SCRATCH_EPS so a row labelled SCRATCH
-# here is also the row Kelly drops from both buckets — one breakeven band system-wide.
+# thrown away.
 PNL_SCRATCH_EPS = 0.10
 
 # yfinance rate limiting — pause between ticker downloads

@@ -1167,8 +1167,6 @@ def main():
     # too (with different strike params + append mode) produced inconsistent,
     # order-dependent rows for the same ticker/day. daily_tracker keeps all its other
     # jobs (portfolio snapshot, exit plans, options-defense, wheel next-leg, etc.).
-    # The Kelly sizing engine (option_scanner.realized_kelly_inputs /
-    # _fractional_kelly_size) is unaffected — it still lives in src/option_scanner.py.
 
     # Per-account cash + VIX are still needed downstream by the options-defense brief
     # and the wheel next-leg suggestions (both kept). These were previously computed

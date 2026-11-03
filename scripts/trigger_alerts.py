@@ -725,8 +725,7 @@ def load_open_option_legs(client, logger: logging.Logger) -> list[dict]:
 
     The tab is append-per-grab with audit timestamps in `date`
     ('YYYY-MM-DDTHHMMSS'), so "open positions" = rows whose date equals
-    the max date value — same exact-timestamp convention as
-    telegram_portfolio_responder.py.
+    the max date value.
     """
     ss = sh._open_sheet(client)
     try:

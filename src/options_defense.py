@@ -12,7 +12,7 @@ specific action recommendation, and supporting evidence. Pushed to the
 
 Separation of concerns:
   - wheel_continuation = what's next when this expires (weeks out)
-  - option_scanner = fresh idea generation (new candidates)
+  - daily_options_scan = fresh idea generation (new candidates)
   - option_recommendations = weekly analyst notes (strategy-level context)
   - options_defense = TODAY'S action items for open positions (THIS FILE)
 """

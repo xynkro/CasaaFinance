@@ -602,13 +602,13 @@ function DecisionStatusGlossary() {
 /**
  * Run a Job — force-trigger a GitHub Actions workflow on demand instead of
  * waiting for its cron. Curated to SELF-CONTAINED jobs that are safe to run
- * anytime; dependent/aggregation jobs (WSR, signal-feedback, execute-decisions,
+ * anytime; dependent/aggregation jobs (WSR, signal-feedback,
  * deploy) are deliberately excluded so nothing fails out of order.
  *
  * Trigger path: with a token set → POST to the workflow_dispatch API (one tap).
  * Without a token → open GitHub's "Run workflow" page (safe, no token needed).
  * The token (fine-grained PAT, Actions:write, this repo) lives only in this
- * device's localStorage, behind the PIN gate.
+ * device's localStorage, behind the sign-in gate.
  */
 const CRON_REPO = "xynkro/CasaaFinance";
 const SAFE_WORKFLOWS: { file: string; label: string }[] = [
@@ -626,7 +626,6 @@ const SAFE_WORKFLOWS: { file: string; label: string }[] = [
   { file: "regime-signals.yml", label: "Regime Signals" },
   { file: "macro-grab.yml", label: "Macro Grab" },
   { file: "risk-parity-audit.yml", label: "Risk Parity" },
-  { file: "tail-hedge.yml", label: "Tail Hedge" },
   { file: "gex-regime.yml", label: "GEX Regime" },
   { file: "fetch-congress-trades.yml", label: "Congress Trades" },
   { file: "fetch-gov-contracts.yml", label: "Gov Contracts" },
@@ -733,19 +732,15 @@ export function SettingsPage({
   onUpdate,
   onLogout,
   apiUsage,
-  authMode = "pin",
   userEmail = null,
 }: {
   settings: Settings;
   onUpdate: (patch: Partial<Settings>) => void;
   onLogout: () => void;
   apiUsage?: ApiUsageRow[];
-  /** 'firestore' = Google sign-in (private read path); 'pin' = legacy PIN gate. */
-  authMode?: "pin" | "firestore";
   /** Signed-in Google email, shown in the Account row when in firestore mode. */
   userEmail?: string | null;
 }) {
-  const isFirestore = authMode === "firestore";
   return (
     <div className="flex flex-col gap-4 px-4 pb-4">
       {/* Run a cloud job on demand */}
@@ -880,7 +875,7 @@ export function SettingsPage({
       {/* Account */}
       <div className="glass rounded-2xl p-5">
         <h3 className="text-[length:var(--t-xs)] font-medium text-slate-300 uppercase tracking-wider mb-2">Account</h3>
-        {isFirestore && userEmail && (
+        {userEmail && (
           <div className="flex items-center gap-3 py-3 border-b border-white/5">
             <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center shrink-0">
               <UserIcon size={16} className="text-indigo-300" />
@@ -898,7 +893,7 @@ export function SettingsPage({
           <div className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center">
             <LogOut size={16} />
           </div>
-          <span className="text-[length:var(--t-sm)] font-medium">{isFirestore ? "Sign out" : "Lock app"}</span>
+          <span className="text-[length:var(--t-sm)] font-medium">Sign out</span>
         </button>
       </div>
 
