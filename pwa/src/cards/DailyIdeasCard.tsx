@@ -30,6 +30,7 @@ const TIER_COLOR: Record<string, string> = {
 };
 const BUY_COLOR = "#34d399";
 const SELL_COLOR = "#38bdf8";     // take-profits: distinct from buys and from the tier dots
+const PUT_COLOR = "#a78bfa";   // selling a put: neither the buy nor the sell colour
 
 const PLAN_ET = { h: 8, mi: 45, et: "08:45" };     // pre-open plan: "about 08:45 ET on trading days"
 const RECHECK_ET = { h: 9, mi: 47, et: "09:47" };  // re-check on live prices
@@ -160,6 +161,43 @@ function ExitRow({
   );
 }
 
+/** Cash-secured puts this book's cash covers, then the lines that say what doesn't fit. */
+function PutLines({
+  puts, putNotes, onTap, className = "mt-3",
+}: { puts: DailyIdeaRow[]; putNotes: DailyIdeaRow[]; onTap: (t: string) => void; className?: string }) {
+  if (puts.length + putNotes.length === 0) return null;
+  return (
+    <div className={className}>
+      <SectionLabel color={PUT_COLOR} icon={<CircleDollarSign size={11} aria-hidden="true" />}>
+        Puts this cash covers
+      </SectionLabel>
+      <div className="mt-2 space-y-2">
+        {puts.map((r, i) => (
+          <div
+            key={`p${i}-${r.num}`}
+            className="rounded-xl pl-3 pr-3 py-2.5 min-w-0"
+            style={{
+              background: "rgba(167,139,250,0.05)",
+              border: "1px solid rgba(167,139,250,0.14)",
+              borderLeft: `3px solid ${PUT_COLOR}`,
+            }}
+          >
+            <div className="flex items-center flex-wrap gap-x-2 gap-y-1">
+              <span className={`${T2XS} font-bold text-slate-500 tabular-nums`}>{r.num}</span>
+              <TickerButton ticker={r.ticker} onTap={onTap} />
+              <Chip color={PUT_COLOR} tone="bold">{r.action}</Chip>
+            </div>
+            <Lines row={r} showRecord={false} />
+          </div>
+        ))}
+      </div>
+      {putNotes.map((n, i) => (
+        <p key={`pn${i}`} className={`${TXS} text-slate-400 leading-snug break-words mt-2`}>{n.plan}</p>
+      ))}
+    </div>
+  );
+}
+
 /** Take-profit rows for one list or one book. Renders nothing when there are none. */
 function TakeProfits({
   exitNotes, exits, onTap, showAccount, className = "mt-4",
@@ -247,19 +285,21 @@ function Direction({ meta }: { meta: DailyIdeaRow | undefined }) {
  * no book on the list, so none of them is dropped.
  */
 function BookSection({
-  name, book, ideas, exitNotes, exits, watch, onTap,
+  name, book, ideas, exitNotes, exits, puts = [], putNotes = [], watch, onTap,
 }: {
   name: string;
   book?: DailyIdeaRow;
   ideas: DailyIdeaRow[];
   exitNotes: DailyIdeaRow[];
   exits: DailyIdeaRow[];
+  puts?: DailyIdeaRow[];
+  putNotes?: DailyIdeaRow[];
   watch: DailyIdeaRow[];
   onTap: (t: string) => void;
 }) {
   const budgetLines = splitLines(book?.budget);
   const earnings = splitLines(book?.notes);
-  const hasActions = ideas.length + exits.length > 0;
+  const hasActions = ideas.length + exits.length + puts.length > 0;
   return (
     <section aria-label={name} className="mt-4 pt-3 border-t border-white/10 min-w-0">
       <div className="flex items-center justify-between gap-3">
@@ -288,6 +328,7 @@ function BookSection({
         </div>
       )}
       <TakeProfits exitNotes={exitNotes} exits={exits} onTap={onTap} showAccount={false} className="mt-3" />
+      <PutLines puts={puts} putNotes={putNotes} onTap={onTap} />
 
       {(budgetLines.length > 0 || earnings.length > 0 || !!book?.waiting) && (
         <div className="mt-3 space-y-1">
@@ -336,6 +377,8 @@ export function DailyIdeasCard({
   const ideas = rows.filter((r) => r.section === "idea");
   const exits = rows.filter((r) => r.section === "exit");
   const exitNotes = rows.filter((r) => r.section === "exit_note");   // a losing trim record: levels only
+  const puts = rows.filter((r) => r.section === "put");
+  const putNotes = rows.filter((r) => r.section === "put_note");
   const watch = rows.filter((r) => r.section === "watch");
   const listDate = (meta ?? rows[0])?.date?.slice(0, 10) ?? "";
   const hasList = rows.length > 0 && listDate !== "";
@@ -471,6 +514,8 @@ export function DailyIdeasCard({
                   ideas={forBook(ideas, b)}
                   exitNotes={forBook(exitNotes, b)}
                   exits={forBook(exits, b)}
+                  puts={forBook(puts, b)}
+                  putNotes={forBook(putNotes, b)}
                   watch={forBook(watch, b)}
                   onTap={onTap}
                 />
