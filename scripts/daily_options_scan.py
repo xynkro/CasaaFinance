@@ -2426,26 +2426,26 @@ def _standard_contracts(df, ticker: str, expiry: str):
 
 
 def _usable_quotes(df, market_open: bool, now: datetime | None = None):
-    """Rows with a real two-sided quote. A one-sided quote has no market, and its
-    "mid" is half of one side. With the market shut Yahoo often blanks the whole
-    quote, so a recent last trade stands in until the re-check; during hours a blank
-    quote is a dead contract, and so is a last trade days old."""
+    """Rows with a real two-sided quote on a contract with open interest. A one-sided
+    quote has no market, and its "mid" is half of one side. Overnight Yahoo blanks
+    bid, ask and open interest together, so with the market shut a recent last trade
+    stands in until the re-check prices it live. During hours a blank quote is a dead
+    contract, and so is a last trade days old."""
     import pandas as pd
 
     bid, ask = df["bid"].fillna(0), df["ask"].fillna(0)
-    two_sided = (bid > 0) & (ask > 0)
+    live = (bid > 0) & (ask > 0) & (df["openInterest"].fillna(0) >= MIN_OI)
     if market_open or "lastTradeDate" not in df:
-        return df[two_sided]
+        return df[live]
     cutoff = pd.Timestamp(now or datetime.now(timezone.utc)) - pd.Timedelta(days=CASH_FIT_MAX_TRADE_AGE_DAYS)
     recent = pd.to_datetime(df["lastTradeDate"], utc=True, errors="coerce") >= cutoff
-    return df[two_sided | ((bid <= 0) & (ask <= 0) & recent)]
+    return df[live | ((bid <= 0) & (ask <= 0) & recent)]
 
 
 def pick_cash_fit_put(puts, ticker: str, expiry: str, price: float, dte: int, cap: float,
                       market_open: bool = True):
     """The put closest to the target delta among the strikes `cap` covers, or None."""
-    df = _standard_contracts(puts[puts["openInterest"] >= MIN_OI], ticker, expiry)
-    df = _usable_quotes(df, market_open).copy()
+    df = _usable_quotes(_standard_contracts(puts, ticker, expiry), market_open).copy()
     if df.empty:
         return None
     df["mid"] = df.apply(_option_mid, axis=1)

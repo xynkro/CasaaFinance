@@ -332,6 +332,17 @@ def test_a_blank_quote_keeps_a_recent_last_trade_when_the_market_is_shut(monkeyp
     assert stale.empty
 
 
+def test_overnight_yahoo_blanks_open_interest_too_and_a_last_trade_still_stands_in():
+    chain = _chain([(_sym(10), 10, 0, 0, 0.32, 0)], traded=date.today().isoformat())
+    assert float(dos.pick_cash_fit_put(chain, "AAA", "2026-12-18", PRICE, DTE, 10.5, market_open=False)["strike"]) == 10
+    assert dos.pick_cash_fit_put(chain, "AAA", "2026-12-18", PRICE, DTE, 10.5, market_open=True) is None
+
+
+def test_thin_open_interest_on_a_live_quote_stays_out_with_the_market_shut():
+    chain = _chain([(_sym(10), 10, 0.30, 0.34, 0, 3)], traded=date.today().isoformat())
+    assert dos.pick_cash_fit_put(chain, "AAA", "2026-12-18", PRICE, DTE, 10.5, market_open=False) is None
+
+
 def test_market_hours_by_the_clock():
     et = ZoneInfo("America/New_York")
     assert dos._us_market_open(datetime(2026, 11, 3, 10, 15, tzinfo=et))
