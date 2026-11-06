@@ -455,7 +455,6 @@ def test_guard_lookalikes_do_not_hide_a_leak(why):
 # deleted quietly. (path, a fragment of the preview call's unparsed source.)
 GATED_PREVIEWS = [
     ("scripts/trigger_alerts.py", "[DRY] would fire ACT_NOW"),
-    ("scripts/trigger_alerts.py", "[DRY] would fire CASH FLOOR"),
     ("scripts/trigger_alerts.py", "[DRY] would fire DEFENSE"),
     ("scripts/trigger_alerts.py", "[DRY] would fire CONCENTRATION"),
     ("scripts/exposure_posture_run.py", "[dry] rationale"),

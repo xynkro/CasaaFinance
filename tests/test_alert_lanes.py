@@ -491,20 +491,17 @@ def test_plan_defense_dedup_day_decoupled_from_expiry_guard():
     assert plans[0]["key"].endswith("|2026-06-10")
 
 
-# ── Mechanical-threshold lanes (50% profit / 21 DTE / cash floor / concentration) ──
+# ── Mechanical-threshold lanes (50% profit / 21 DTE / concentration) ──
 
 import pytest
 
 from scripts.trigger_alerts import (
     plan_profit_take_pings,
     plan_dte_pings,
-    plan_cash_floor_pings,
     plan_concentration_pings,
     PROFIT_TAKE_PCT,
     DTE_RULE_DAYS,
     DTE_RULE_FLOOR,
-    CASH_FLOOR_ABS,
-    CASH_FLOOR_NLV_PCT,
     CONC_WARN_PCT,
     CONC_ALERT_PCT,
 )
@@ -580,42 +577,6 @@ class TestDte21Lane:
     def test_skips_already_paged(self):
         prior = {"dte21:NVDA|P190|20260919"}
         assert plan_dte_pings([_short_leg(dte=15)], prior) == []
-
-
-class TestCashFloorLane:
-    def test_fires_below_absolute_floor(self):
-        # 0.7% of NLV AND $69 < $500 abs floor → page
-        snaps = {"caspar": {"nlv": 10_000, "cash": 69, "ccy": "$"}}
-        plans = plan_cash_floor_pings(snaps, set(), "2026-06-12")
-        assert len(plans) == 1
-        assert plans[0]["account"] == "caspar"
-        assert plans[0]["floor"] == max(CASH_FLOOR_ABS,
-                                        CASH_FLOOR_NLV_PCT * 10_000)
-
-    def test_fires_below_nlv_pct_even_if_above_abs(self):
-        # big account: 2% of 100k = $2000 floor; $1500 < $2000
-        snaps = {"sarah": {"nlv": 100_000, "cash": 1_500, "ccy": "S$"}}
-        plans = plan_cash_floor_pings(snaps, set(), "2026-06-12")
-        assert len(plans) == 1 and plans[0]["floor"] == 2000.0
-
-    def test_skips_when_healthy(self):
-        snaps = {"caspar": {"nlv": 10_000, "cash": 2_000, "ccy": "$"}}
-        assert plan_cash_floor_pings(snaps, set(), "2026-06-12") == []
-
-    def test_daily_re_arm_keyed_to_sgt_day(self):
-        # Yesterday's ping shouldn't suppress today's.
-        snaps = {"caspar": {"nlv": 10_000, "cash": 50, "ccy": "$"}}
-        prior = {"cashfloor:caspar|2026-06-11"}
-        plans = plan_cash_floor_pings(snaps, prior, "2026-06-12")
-        assert len(plans) == 1
-        # but same-day repeat is suppressed
-        assert plan_cash_floor_pings(snaps, prior | {plans[0]["key"]},
-                                     "2026-06-12") == []
-
-    def test_skips_missing_nlv(self):
-        # no data → no page (not "no cash")
-        snaps = {"caspar": {"nlv": 0, "cash": 0, "ccy": "$"}}
-        assert plan_cash_floor_pings(snaps, set(), "2026-06-12") == []
 
 
 class TestConcentrationLane:

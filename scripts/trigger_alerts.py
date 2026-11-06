@@ -2,7 +2,7 @@
 trigger_alerts.py — every-N-min poll that fires Telegram pushes when a
 WATCHING decision transitions into ACT_NOW, plus three held-book lanes
 (spread-defense / held-name news / market pressure) and four MECHANICAL-
-THRESHOLD lanes (50% profit-take / 21-DTE / cash floor / concentration)
+THRESHOLD lanes (50% profit-take / 21-DTE / concentration)
 so the trading rules page the user the moment they fire instead of
 waiting for him to open the app.
 
@@ -19,7 +19,7 @@ Inputs (all read from Sheets):
                        21-DTE lanes)
   - news_sentiment   → held-name news lane (4×/day Finnhub cache; this
                        script makes NO Finnhub calls of its own)
-  - snapshot_caspar / snapshot_sarah → cash-floor lane (NLV + cash)
+  - snapshot_caspar / snapshot_sarah → concentration lane (NLV)
   - positions_caspar / positions_sarah → concentration lane (mkt_val vs
                        NLV) + the held-ticker set for news/pressure
 
@@ -203,13 +203,8 @@ PROFIT_TAKE_PCT = 0.50
 DTE_RULE_DAYS = 21
 DTE_RULE_FLOOR = 7
 
-# Cash-floor lane: per-account "new CSPs are not cash-securable" page,
-# from the snapshot tabs. floor = max(CASH_FLOOR_ABS, CASH_FLOOR_NLV_PCT
-# × NLV). Unlike profit50/dte21 this is a STATE, not an event — the key
-# embeds the SGT day so it re-arms daily while the account stays
-# breached (the $30.51 incident class).
-CASH_FLOOR_ABS = 500.0
-CASH_FLOOR_NLV_PCT = 0.02
+# No cash-floor lane: Caspar sells puts on margin, so "raise cash before
+# selling puts" was wrong advice. Removed 6 Nov 2026 at his request.
 
 # Concentration lane: single-name |mkt_val| / NLV per account, from the
 # positions tabs. WARN at ≥30%, ALERT at ≥40%. Concentration is a slow
@@ -899,7 +894,7 @@ def plan_market_pressure(
 
 # ════════════════════════════════════════════════════════════════════
 # Mechanical-threshold lanes (UI-audit #7) — 50% profit-take, 21-DTE,
-# cash floor, single-name concentration. The rules the user trades by
+# single-name concentration. The rules the user trades by
 # were computed in Sheets/PWA but reached no push channel: a 50%-captured
 # winner or a $30.51 cash balance was only discoverable by opening the
 # app and looking at the right card. Same plan/dedup/send shape as the
@@ -1037,51 +1032,6 @@ def plan_dte_pings(legs: list[dict], prior_keys: set[str]) -> list[dict]:
             "dte": dte,
             "label": spread_label(leg, legs),
             "account": (leg.get("account") or "").lower(),
-        })
-    return plans
-
-
-def plan_cash_floor_pings(
-    snapshots: dict[str, dict],
-    prior_keys: set[str],
-    sgt_today: str,
-) -> list[dict]:
-    """Plan per-account cash-floor pings. Pure — testable without Sheets.
-
-    `snapshots`: {account: {"nlv": float, "cash": float, "ccy": "$"}}
-    (load_account_snapshots shape). Page when
-    cash < max(CASH_FLOOR_ABS, CASH_FLOOR_NLV_PCT × NLV).
-
-    Dedup: event_key = "cashfloor:<account>|<SGT-day>" — re-arms DAILY
-    while breached (a state, not an event: a once-ever key would go
-    silent while the account stays un-securable). SGT day, not US-
-    session day, is deliberate — this isn't tied to the cash session
-    and one nag per calendar day is the right cadence.
-
-    Accounts with NLV ≤ 0 are skipped: that's "no snapshot data", not
-    "no cash" — paging a floor breach off a missing grab would be noise.
-    """
-    plans: list[dict] = []
-    for account in sorted(snapshots):
-        snap = snapshots[account] or {}
-        nlv = _f(snap.get("nlv"))
-        cash = _f(snap.get("cash"))
-        if nlv <= 0:
-            continue
-        floor = max(CASH_FLOOR_ABS, CASH_FLOOR_NLV_PCT * nlv)
-        if cash >= floor:
-            continue
-        key = f"cashfloor:{account}|{sgt_today}"
-        if key in prior_keys:
-            continue
-        plans.append({
-            "key": key,
-            "account": account,
-            "cash": cash,
-            "nlv": nlv,
-            "floor": floor,
-            "pct_of_nlv": cash / nlv,
-            "ccy": snap.get("ccy") or "$",
         })
     return plans
 
@@ -1690,7 +1640,7 @@ def main() -> int:
     # pressure (added after the June 5-9 2026 incident where held put
     # credit spreads rode an SPX selloff with zero pages) + the four
     # mechanical-threshold lanes (UI-audit #7: 50% profit-take, 21-DTE,
-    # cash floor, concentration — the rules were pull-only before).
+    # concentration — the rules were pull-only before).
     # All dedup through the same macro_alerts_state ledger and are NOT
     # gated by the macro blackout: the blackout exists to stop ENTRY
     # pings minutes before FOMC/CPI — these are exit-side risk /
@@ -1728,7 +1678,6 @@ def main() -> int:
     snapshots = load_account_snapshots(client)
     profit_take_plan = plan_profit_take_pings(option_legs, prior_keys, today_sgt)
     dte_plan = plan_dte_pings(option_legs, prior_keys)
-    cash_floor_plan = plan_cash_floor_pings(snapshots, prior_keys, today_sgt)
     conc_plan = plan_concentration_pings(
         positions_by_account,
         {a: s.get("nlv", 0.0) for a, s in snapshots.items()},
@@ -1781,7 +1730,7 @@ def main() -> int:
         f"pressure={pressure_desc} "
         f"(SPY {live_changes.get('SPY', '?')}% QQQ {live_changes.get('QQQ', '?')}%) | "
         f"profit50={len(profit_take_plan)} | dte21={len(dte_plan)} | "
-        f"cashfloor={len(cash_floor_plan)} | conc={len(conc_plan)} "
+        f"conc={len(conc_plan)} "
         f"(snapshots: {snap_desc})"
     )
 
@@ -1796,7 +1745,7 @@ def main() -> int:
                 f"surprise={len(macro_surprise_plan)} defense={len(defense_plan)} "
                 f"held_news={len(held_news_plan)} pressure={bool(pressure_plan)} "
                 f"profit50={len(profit_take_plan)} dte21={len(dte_plan)} "
-                f"cashfloor={len(cash_floor_plan)} conc={len(conc_plan)}"
+                f"conc={len(conc_plan)}"
             )
             return 0
         for d, ev, cur in fires:
@@ -1846,18 +1795,12 @@ def main() -> int:
                 f"{plan['strike']:g}{plan['right']} {plan['dte']} DTE "
                 f"({plan['label']} exp {plan['expiry']}, {plan['account']})"
             )
-        for plan in cash_floor_plan:
-            logger.info(
-                f"  [DRY] would fire CASH FLOOR: {plan['account']} cash "
-                f"{plan['ccy']}{plan['cash']:,.2f} ({plan['pct_of_nlv']:.1%} of NLV) "
-                f"< floor {plan['ccy']}{plan['floor']:,.0f}"
-            )
         for plan in conc_plan:
             logger.info(
                 f"  [DRY] would fire CONCENTRATION {plan['band']}: "
                 f"{plan['account']} {plan['ticker']} {plan['weight']:.0%} of NLV"
             )
-        if not profit_take_plan and not dte_plan and not cash_floor_plan and not conc_plan:
+        if not profit_take_plan and not dte_plan and not conc_plan:
             logger.info("  [DRY] no mechanical-threshold pings queued")
         return 0
 
@@ -2115,7 +2058,7 @@ def main() -> int:
         except Exception as e:
             logger.warning(f"  ✗ PRESSURE failed: {type(e).__name__}")
 
-    # ── Mechanical-threshold sends (50% profit / 21 DTE / cash floor /
+    # ── Mechanical-threshold sends (50% profit / 21 DTE /
     # concentration). Same contract as the lanes above: the ledger row is
     # appended ONLY after a successful send, so failures retry next run.
     # Exit/risk-side alerts — they deliberately bypass the macro blackout
@@ -2136,12 +2079,6 @@ def main() -> int:
                 expiry=p["expiry"], dte=p["dte"], label=p["label"],
                 account=p["account"]))
            for p in dte_plan]
-        + [(p, "cash_floor",
-            f"{p['account']} cash {p['cash']:,.2f} < floor {p['floor']:,.0f}",
-            lambda p=p: tg.ping_cash_floor(
-                account=p["account"], cash=p["cash"], nlv=p["nlv"],
-                floor=p["floor"], ccy=p["ccy"]))
-           for p in cash_floor_plan]
         + [(p, "concentration",
             f"{p['account']} {p['ticker']} {p['weight']:.0%} {p['band']}",
             lambda p=p: tg.ping_concentration(

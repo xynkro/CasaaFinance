@@ -1239,25 +1239,6 @@ def ping_dte_rule(
     )
 
 
-def ping_cash_floor(
-    account: str,
-    cash: float,
-    nlv: float,
-    floor: float,
-    ccy: str = "$",
-) -> dict:
-    """Per-account cash below floor (daily re-arm while breached). Fired by
-    scripts/trigger_alerts.py when cash < max($500, 2% of NLV)."""
-    pct = (cash / nlv * 100) if nlv > 0 else 0.0
-    return send(
-        f"🪫 CASH FLOOR: {account} cash {ccy}{cash:,.2f} ({pct:.1f}% of NLV) is below the "
-        f"{ccy}{floor:,.0f} floor. New CSPs are not cash-securable — raise cash before "
-        f"adding short premium.",
-        parse_mode="none",
-        message_thread_id=MULTI_DAY_SWING_TOPIC,
-    )
-
-
 def ping_concentration(
     account: str,
     ticker: str,

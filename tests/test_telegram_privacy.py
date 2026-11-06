@@ -92,13 +92,6 @@ def test_daily_ideas_dm_fails_closed(captured, monkeypatch):
     assert "payload" not in captured
 
 
-def test_cash_floor_ping_goes_to_dm(captured):
-    # End-to-end through the real ping: the literal "how low am I" message.
-    tg.ping_cash_floor(account="caspar", cash=487.0, nlv=27000.0, floor=540.0)
-    assert captured["payload"]["chat_id"] == tg.PERSONAL_CHAT_ID
-    assert "message_thread_id" not in captured["payload"]
-
-
 # ── 2026-10-30 leak: empty TELEGRAM_CHAT_ID in CI fell through to the group ──
 import importlib
 
