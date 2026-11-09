@@ -1685,6 +1685,15 @@ def main() -> int:
         sgt_week(today_sgt),
     )
 
+    # MOVED 9 Nov 2026: open options are watched every 30 minutes by casaa-engine's
+    # holdings monitor (legacy/scripts/holdings_monitor.py), which pings stop, strike
+    # and take-profit with a keeper check; market pressure and concentration carry no
+    # action of their own. GitHub fired this job 19 of 540 times in two weeks, and the
+    # options tab's credit has been 0, so these lanes rarely ran and profit-take never
+    # could. Kept here: macro news, macro_lean, the decision state rows.
+    defense_plan, held_news_plan, pressure_plan = [], [], None
+    profit_take_plan, dte_plan, conc_plan = [], [], []
+
     # Log line distinguishes "tape below threshold" from "in band but
     # already paged this session" — both used to print as "none", which
     # made the dedup suppression indistinguishable from a dropped WARN.
@@ -1808,6 +1817,11 @@ def main() -> int:
     # transitions still get recorded for next-run dedup logic).
     if state_rows:
         upsert_alert_state(client, state_rows, logger)
+
+    # MOVED 9 Nov 2026: new trade calls reach Caspar only in the daily DM, which
+    # re-checks the same decision_queue ideas live ("They should be amalgamated").
+    # The state rows above still record each transition.
+    fires, soft_fires = [], []
 
     # Send Telegrams — hard fires (ACT NOW) first, then soft fires (CLOSE).
     # Macro blackout gates ALL outbound pushes: in-window events still
