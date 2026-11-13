@@ -226,3 +226,16 @@ export async function writeDecision(key: string, data: object): Promise<void> {
     { merge: true },
   );
 }
+
+/** Merge one option leg into the client-writable trades collection. */
+export async function writeTrade(id: string, data: object): Promise<void> {
+  await setDoc(
+    doc(db, "trades", id),
+    {
+      ...data,
+      updatedAt: serverTimestamp(),
+      user: auth.currentUser?.email ?? null,
+    },
+    { merge: true },
+  );
+}

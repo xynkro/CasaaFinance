@@ -16,6 +16,7 @@ import type {
   CuratedPickRow,
 } from "../data";
 import { Card } from "../cards/Card";
+import { OpenOptionsCard } from "../cards/OpenOptionsCard";
 import { OptionsDefenseCard } from "../cards/OptionsDefenseCard";
 import { GexRegimeBanner } from "../cards/GexRegimeBanner";
 import { MacroLeanBanner } from "../cards/MacroLeanBanner";
@@ -142,6 +143,9 @@ export function OptionsPage({
 
   return (
     <div className="flex flex-col px-4 pb-4">
+      <div className="mb-3">
+        <OpenOptionsCard />
+      </div>
       {/* Last-scan freshness — quiet when current, amber when a recent run left
           the candidates frozen (the stale-data case). */}
       {scanMeta && (

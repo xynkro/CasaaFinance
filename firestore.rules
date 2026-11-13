@@ -31,5 +31,13 @@ service cloud.firestore {
                        'sarah.sanusi@gmail.com'
                      ];
     }
+    // Option fills logged in the app; the holdings watcher reads them with the Admin SDK.
+    match /trades/{doc} {
+      allow read, write: if request.auth != null
+                  && request.auth.token.email in [
+                       'xynkro@gmail.com',
+                       'sarah.sanusi@gmail.com'
+                     ];
+    }
   }
 }
