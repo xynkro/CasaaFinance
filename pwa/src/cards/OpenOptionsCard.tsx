@@ -16,7 +16,7 @@ type Leg = {
 type Option = Leg & {
   row: RawRow;
   credit: number | undefined;
-  captured: number | undefined;
+  captured: number | undefined;     // share of the credit kept, 0.55 = 55%
 };
 
 const ET = "America/New_York";
@@ -111,7 +111,14 @@ function parseOption(row: RawRow): Option | undefined {
   if ((account !== "caspar" && account !== "sarah") || !/^[A-Z][A-Z.]*$/.test(ticker) ||
       (right !== "P" && right !== "C") || strike === undefined || strike <= 0 ||
       qty === undefined || !Number.isSafeInteger(qty) || qty === 0 || !expiryDate(expiry)) return undefined;
-  return { account, ticker, right, strike, expiry, qty, row, credit: number(row.credit), captured: number(row.captured_pct) };
+  // The server writes captured_pct as a percentage (55.0), not a share.
+  const capturedPct = number(row.captured_pct);
+  return { account, ticker, right, strike, expiry, qty, row, credit: number(row.credit),
+    captured: capturedPct === undefined ? undefined : capturedPct / 100 };
+}
+
+function percent(share: number): string {
+  return `${Math.round(Math.max(0, Math.min(1, share)) * 100)}%`;
 }
 
 function errorText(error: unknown): string {
@@ -236,6 +243,14 @@ function OptionBlock({ option }: { option: Option }) {
   const keeperLabel = ({ keep: "Keep", cut: "Don't keep", unsure: "Unsure" } as Record<string, string>)[keeper] ?? "Unsure";
   const dte = number(option.row.dte);
   const expiry = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(expiryDate(option.expiry));
+  const short = option.qty < 0;
+  const early = short && text(option.row.early_assign).trim() === "yes";
+  const worthless = number(option.row.odds_worthless);
+  const odds = short ? [
+    worthless !== undefined ? `market ${percent(1 - worthless)}` : "",
+    number(option.row.hist_assign) !== undefined ? `its past year ${percent(number(option.row.hist_assign) ?? 0)}` : "",
+  ].filter(Boolean) : [];
+  const touch = short ? number(option.row.hist_touch) : undefined;
   return (
     <article className="min-w-0 space-y-2.5">
       <div className="space-y-1">
@@ -245,12 +260,18 @@ function OptionBlock({ option }: { option: Option }) {
         </h4>
         <p className={`text-[length:var(--t-xs)] font-medium ${verdict === "stop" || verdict === "below"
           ? "text-[var(--c-negative)]" : verdict === "profit" ? "text-[var(--c-positive)]" : ""}`}>
-          {verdicts[verdict] ?? "Verdict unavailable"}
+          {verdicts[verdict] ?? "Verdict unavailable"}{early && " · could be assigned early"}
         </p>
       </div>
       <p className="whitespace-pre-wrap break-words text-[length:var(--t-sm)] leading-relaxed">{text(option.row.action)}</p>
+      {odds.length > 0 && <div className="space-y-0.5 text-[length:var(--t-xs)] tabular-nums">
+        <p>Odds of assignment: {odds.join(" · ")}</p>
+        {touch !== undefined && <p>A close {option.right === "P" ? "under" : "over"} the strike before expiry: {percent(touch)} in its past year</p>}
+      </div>}
       {option.credit !== undefined && option.captured !== undefined && <div className="space-y-1.5">
-        <p className="text-[length:var(--t-xs)] tabular-nums">Kept so far: {Math.round(option.captured * 100)}% of the credit</p>
+        <p className="text-[length:var(--t-xs)] tabular-nums">{option.captured >= 0
+          ? `Kept so far: ${Math.round(option.captured * 100)}% of the credit`
+          : `Behind by ${Math.round(-option.captured * 100)}% of the credit`}</p>
         <div className="h-1 overflow-hidden rounded-full bg-[var(--surface-bright)]" aria-hidden="true">
           <div className="h-full bg-[var(--accent)]" style={{ width: `${Math.max(0, Math.min(1, option.captured)) * 100}%` }} />
         </div>
@@ -394,6 +415,11 @@ export function OpenOptionsCard() {
               <div className="space-y-6">{group.map((option) => <OptionBlock key={legId(option)} option={option} />)}</div>
             </section>;
           })}
+          {options.some((option) => number(option.row.hist_assign) !== undefined) && <p className="text-[length:var(--t-xs)] text-slate-500">
+            Market: from the option's price. Its past year: the stock's last year of daily moves, with the year's
+            trend taken out, replayed 10,000 times to expiry. A second opinion, not a forecast: earnings land on
+            random days and dips during the day aren't counted.
+          </p>}
         </>}
       <NewOptionForm />
     </Card>
