@@ -522,3 +522,9 @@ def test_build_report_surfaces_selection_edge():
                            user_decisions=decisions, graded_outcomes=graded)
     assert "Selection edge: +1.00" in report
     assert "ADDS value" in report
+
+
+def test_a_graded_row_matches_its_pick_however_the_sheet_formats_the_strike():
+    o = {"scan_date": "2026-11-03T10:15:00", "ticker": "XYZ", "strategy": "CSP", "strike": "75", "expiry": "20260918"}
+    assert sf.graded_key(o) == ("2026-11-03", "XYZ", "CSP", f"{75.0:.2f}", "20260918")
+    assert sf.graded_key({**o, "strike": "75.00"}) == sf.graded_key(o)

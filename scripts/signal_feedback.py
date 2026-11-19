@@ -108,6 +108,14 @@ def _parse_date(date_str: str) -> datetime | None:
         return None
 
 
+def graded_key(o: dict) -> tuple:
+    """A graded row's dedup key, in the candidate key's form. The Sheet hands back "75"
+    for a strike written as 75.00, so match "%.2f" or every pick is graded again each
+    week (26,879 rows for 3,155 picks by Nov 2026)."""
+    return (o.get("scan_date", "")[:10], o.get("ticker", ""), o.get("strategy", ""),
+            f"{_parse_float(o.get('strike', '')):.2f}", o.get("expiry", ""))
+
+
 def _parse_float(s: str, default: float = 0.0) -> float:
     try:
         return float(s)
@@ -346,9 +354,7 @@ def run(*, dry: bool = False, lookback_days: int = 90, force: bool = False):
     existing_outcomes = set()
     if not force:
         for o in historical_outcomes:
-            key = (o.get("scan_date", "")[:10], o.get("ticker", ""),
-                   o.get("strategy", ""), o.get("strike", ""), o.get("expiry", ""))
-            existing_outcomes.add(key)
+            existing_outcomes.add(graded_key(o))
         logger.info(f"Found {len(existing_outcomes)} existing outcomes (skipping)")
 
     # 3. Filter to mature picks
